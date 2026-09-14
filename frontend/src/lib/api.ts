@@ -8,9 +8,13 @@ export type SafetyZone = {
   safety_score: number;
 };
 
+export type RouteMode = "safety_weighted" | "tmap" | "straight_line";
+
 export type RouteResult = {
   safety_score: number;
   zones_passed: SafetyZone[];
+  route_points: { lat: number; lng: number }[];
+  mode: RouteMode;
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

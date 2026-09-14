@@ -1,6 +1,27 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* 안심 거주지 브랜드 토큰 (PDF 디자인 기준) */
+  --brand: #2f6b3a;
+  --brand-dark: #234f2b;
+  --brand-light: #e3f2e5;
+  --surface: #ffffff;
+  --surface-muted: #f7f6f2;
+  --page-bg: #faf9f6;
+  --text: #1a1a1a;
+  --text-muted: #6b6b6b;
+  --text-faint: #9a9a9a;
+  --border: #e6e4df;
+  --danger: #d32f2f;
+  --danger-bg: #fdecea;
+  --safe: #2e7d32;
+  --caution: #f9a825;
+  --warning: #c62828;
+  --radius-lg: 20px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {

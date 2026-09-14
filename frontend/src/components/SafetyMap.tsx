@@ -2,38 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SafetyZone } from "@/lib/api";
+import { loadKakaoSdk, type LatLng } from "@/lib/kakao";
+import { LocateIcon } from "@/components/icons";
 
-declare global {
-  interface Window {
-    kakao: any;
-  }
-}
+const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
+
+type ContextMenuInfo = LatLng & { x: number; y: number };
 
 type Props = {
   zones: SafetyZone[];
-  center?: { lat: number; lng: number };
+  center?: LatLng;
+  myLocation?: LatLng;
+  routePath?: LatLng[];
+  onSelect?: (latlng: LatLng) => void;
+  onContextMenu?: (info: ContextMenuInfo) => void;
+  height?: number | string;
 };
-
-const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
-let sdkLoadPromise: Promise<void> | null = null;
-
-function loadKakaoSdk(): Promise<void> {
-  if (window.kakao?.maps?.Map) return Promise.resolve();
-  if (sdkLoadPromise) return sdkLoadPromise;
-
-  sdkLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
-    script.onload = () => window.kakao.maps.load(() => resolve());
-    script.onerror = (event) => {
-      console.error("[SafetyMap] Kakao SDK script load failed", event);
-      sdkLoadPromise = null;
-      reject(new Error("kakao sdk load failed"));
-    };
-    document.head.appendChild(script);
-  });
-  return sdkLoadPromise;
-}
 
 function scoreColor(score: number): string {
   if (score >= 70) return "#2e7d32"; // 안전
@@ -41,10 +25,30 @@ function scoreColor(score: number): string {
   return "#c62828"; // 주의
 }
 
-export function SafetyMap({ zones, center = { lat: 37.5665, lng: 126.978 } }: Props) {
+export function SafetyMap({
+  zones,
+  center = { lat: 37.5665, lng: 126.978 },
+  myLocation,
+  routePath,
+  onSelect,
+  onContextMenu,
+  height = 400,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const onSelectRef = useRef(onSelect);
+  const onContextMenuRef = useRef(onContextMenu);
+  const lastContextPos = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    onContextMenuRef.current = onContextMenu;
+  }, [onContextMenu]);
 
   useEffect(() => {
     if (!KAKAO_KEY) return;
@@ -64,6 +68,24 @@ export function SafetyMap({ zones, center = { lat: 37.5665, lng: 126.978 } }: Pr
       center: new kakao.maps.LatLng(center.lat, center.lng),
       level: 6,
     });
+    mapRef.current = map;
+
+    if (myLocation) {
+      const dot = document.createElement("div");
+      dot.style.width = "16px";
+      dot.style.height = "16px";
+      dot.style.borderRadius = "50%";
+      dot.style.background = "#4285f4";
+      dot.style.border = "3px solid #fff";
+      dot.style.boxShadow = "0 0 0 3px rgba(66,133,244,0.35), 0 1px 4px rgba(0,0,0,0.3)";
+
+      new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(myLocation.lat, myLocation.lng),
+        content: dot,
+        yAnchor: 0.5,
+        zIndex: 10,
+      }).setMap(map);
+    }
 
     zones.forEach((zone) => {
       const marker = new kakao.maps.Circle({
@@ -83,7 +105,59 @@ export function SafetyMap({ zones, center = { lat: 37.5665, lng: 126.978 } }: Pr
         infowindow.open(map, new kakao.maps.CustomOverlay({ position: marker.getPosition() }))
       );
     });
-  }, [loaded, zones, center]);
+
+    if (routePath && routePath.length > 1) {
+      const path = routePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
+      new kakao.maps.Polyline({
+        path,
+        strokeWeight: 5,
+        strokeColor: "#2f6b3a",
+        strokeOpacity: 0.9,
+        strokeStyle: "solid",
+      }).setMap(map);
+
+      const bounds = new kakao.maps.LatLngBounds();
+      path.forEach((p: any) => bounds.extend(p));
+      map.setBounds(bounds);
+    }
+
+    kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
+      onSelectRef.current?.({
+        lat: mouseEvent.latLng.getLat(),
+        lng: mouseEvent.latLng.getLng(),
+      });
+    });
+
+    // 네이티브 브라우저 우클릭 메뉴를 막고 화면 좌표를 기록해둔다.
+    // capture 단계에서 실행되어 카카오 내부 rightclick 처리보다 먼저 좌표를 확보한다.
+    function handleNativeContextMenu(e: MouseEvent) {
+      e.preventDefault();
+      lastContextPos.current = { x: e.clientX, y: e.clientY };
+    }
+    const container = containerRef.current;
+    container?.addEventListener("contextmenu", handleNativeContextMenu, true);
+
+    kakao.maps.event.addListener(map, "rightclick", (mouseEvent: any) => {
+      const pos = lastContextPos.current;
+      if (!pos) return;
+      onContextMenuRef.current?.({
+        lat: mouseEvent.latLng.getLat(),
+        lng: mouseEvent.latLng.getLng(),
+        x: pos.x,
+        y: pos.y,
+      });
+    });
+
+    return () => {
+      container?.removeEventListener("contextmenu", handleNativeContextMenu, true);
+    };
+  }, [loaded, zones, center, myLocation, routePath]);
+
+  function handleRecenter() {
+    if (!mapRef.current || !myLocation) return;
+    const { kakao } = window;
+    mapRef.current.panTo(new kakao.maps.LatLng(myLocation.lat, myLocation.lng));
+  }
 
   if (!KAKAO_KEY) {
     return (
@@ -99,5 +173,36 @@ export function SafetyMap({ zones, center = { lat: 37.5665, lng: 126.978 } }: Pr
     return <div style={{ color: "crimson" }}>지도를 불러오지 못했습니다. API 키를 확인해주세요.</div>;
   }
 
-  return <div ref={containerRef} style={{ width: "100%", height: 400, borderRadius: 8 }} />;
+  return (
+    <div style={{ position: "relative", width: "100%", height }}>
+      <div ref={containerRef} style={{ width: "100%", height: "100%", borderRadius: 8 }} />
+      {myLocation && (
+        <button
+          type="button"
+          onClick={handleRecenter}
+          aria-label="내 위치로 이동"
+          title="내 위치로 이동"
+          style={{
+            position: "absolute",
+            right: 12,
+            top: 12,
+            zIndex: 20,
+            width: 36,
+            height: 36,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "none",
+            borderRadius: "50%",
+            background: "#fff",
+            color: "#4285f4",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.3)",
+            cursor: "pointer",
+          }}
+        >
+          <LocateIcon size={18} />
+        </button>
+      )}
+    </div>
+  );
 }

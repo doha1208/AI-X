@@ -1,4 +1,8 @@
+from typing import Literal
+
 from pydantic import BaseModel
+
+RouteMode = Literal["safety_weighted", "tmap", "straight_line"]
 
 
 class SafetyZoneOut(BaseModel):
@@ -19,6 +23,20 @@ class RouteRequest(BaseModel):
     end_lng: float
 
 
+class RoutePoint(BaseModel):
+    lat: float
+    lng: float
+
+
+class RouteAlternative(BaseModel):
+    route_points: list[RoutePoint]
+    safety_score: float
+    distance_m: float
+
+
 class RouteResponse(BaseModel):
     safety_score: float
     zones_passed: list[SafetyZoneOut]
+    route_points: list[RoutePoint]
+    mode: RouteMode
+    alternatives: list[RouteAlternative]
