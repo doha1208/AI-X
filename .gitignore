@@ -6,6 +6,7 @@ backend/*.db
 backend/.pytest_cache/
 backend/.env
 backend/cache/
+backend/data/osm/
 
 # Node / Next.js
 frontend/node_modules/

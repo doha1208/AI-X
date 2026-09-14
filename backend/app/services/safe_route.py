@@ -1,6 +1,7 @@
 import logging
 import socket
 import threading
+from pathlib import Path
 
 import networkx as nx
 import osmnx as ox
@@ -9,6 +10,36 @@ from app.models.safety_zone import SafetyZone
 from app.services.geo import haversine_km
 
 logger = logging.getLogger(__name__)
+
+# scripts/extract_seoul_walk_network.py로 미리 추출해둔 서울 권역 보행자
+# 도로망. 있으면 이 파일만으로 그래프를 만들어 Overpass 호출 자체를 건너뛴다
+# (독일 서버 왕복 없이 완전히 로컬/오프라인으로 동작). BBOX는 그 스크립트의
+# BBOX와 반드시 같아야 한다.
+LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-walk.osm"
+LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
+
+_local_graph: nx.MultiDiGraph | None = None
+_local_graph_attempted = False
+
+
+def _load_local_graph() -> nx.MultiDiGraph | None:
+    global _local_graph, _local_graph_attempted
+    if _local_graph_attempted:
+        return _local_graph
+    _local_graph_attempted = True
+    if not LOCAL_WALK_NETWORK_PATH.exists():
+        return None
+    try:
+        _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
+        logger.info(
+            "Loaded local OSM walk network: %d nodes, %d edges",
+            _local_graph.number_of_nodes(),
+            _local_graph.number_of_edges(),
+        )
+    except Exception:
+        logger.warning("Failed to load local OSM walk network", exc_info=True)
+        _local_graph = None
+    return _local_graph
 
 # overpass-api.de는 DNS가 여러 서버로 라운드로빈되는데, 이 중 하나가 이
 # 네트워크에서 접속 불가일 때가 있다. requests/urllib3는(표준 socket과 달리)
@@ -99,6 +130,12 @@ def _bbox_covers(outer: tuple[float, float, float, float], inner: tuple[float, f
 
 
 def _get_graph(bbox: tuple[float, float, float, float]) -> nx.MultiDiGraph | None:
+    if _bbox_covers(LOCAL_WALK_NETWORK_BBOX, bbox):
+        local = _load_local_graph()
+        if local is not None:
+            return local
+        # 로컬 파일이 없으면 아래에서 기존 방식(캐시 → 실시간 Overpass)으로 폴백.
+
     key = tuple(round(v, 3) for v in bbox)
     if key in _graph_cache:
         return _graph_cache[key]
@@ -122,11 +159,16 @@ def _get_graph(bbox: tuple[float, float, float, float]) -> nx.MultiDiGraph | Non
 def warm_cache(zones: list[SafetyZone]) -> None:
     """서버 기동 시 안전구역을 모두 감싸는 지역의 도로망을 미리 받아둔다.
 
-    ponytail: 백그라운드 스레드에서 호출하는 걸 전제로 함(블로킹 네트워크 호출).
+    로컬로 미리 추출해둔 파일(LOCAL_WALK_NETWORK_PATH)이 있으면 그걸 로드하는
+    것으로 끝난다(네트워크 불필요, 수백 ms 수준). 없을 때만 Overpass 실시간
+    조회로 폴백한다.
+
+    ponytail: 백그라운드 스레드에서 호출하는 걸 전제로 함(블로킹 I/O).
     실패해도 조용히 넘어가고, 실제 요청이 들어올 때 다시 시도한다.
     """
     if not zones:
         return
+
     lats = [z.lat for z in zones]
     lngs = [z.lng for z in zones]
     bbox = (
@@ -135,6 +177,11 @@ def warm_cache(zones: list[SafetyZone]) -> None:
         max(lngs) + WARM_MARGIN_DEG,
         max(lats) + WARM_MARGIN_DEG,
     )
+
+    if _bbox_covers(LOCAL_WALK_NETWORK_BBOX, bbox):
+        _load_local_graph()
+        return
+
     _get_graph(bbox)
 
 
