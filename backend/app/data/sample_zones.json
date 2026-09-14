@@ -1,0 +1,8 @@
+[
+  {"dong_code": "1111051500", "dong_name": "종로1가동", "lat": 37.5704, "lng": 126.9830, "cctv_count": 42, "streetlight_count": 80, "crime_count": 3},
+  {"dong_code": "1111053000", "dong_name": "종로2가동", "lat": 37.5714, "lng": 126.9880, "cctv_count": 30, "streetlight_count": 60, "crime_count": 7},
+  {"dong_code": "1111054500", "dong_name": "종로3가동", "lat": 37.5724, "lng": 126.9930, "cctv_count": 15, "streetlight_count": 40, "crime_count": 12},
+  {"dong_code": "1114065000", "dong_name": "신당동", "lat": 37.5654, "lng": 127.0140, "cctv_count": 20, "streetlight_count": 55, "crime_count": 9},
+  {"dong_code": "1120051000", "dong_name": "성수1가동", "lat": 37.5445, "lng": 127.0557, "cctv_count": 35, "streetlight_count": 70, "crime_count": 4},
+  {"dong_code": "1121053000", "dong_name": "화양동", "lat": 37.5460, "lng": 127.0700, "cctv_count": 10, "streetlight_count": 30, "crime_count": 18}
+]
