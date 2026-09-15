@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { nearbyZones, residenceRecommend, routeSafety, type RouteResult, type SafetyZone } from "@/lib/api";
 import { clearToken, getEmailFromToken, getToken } from "@/lib/auth";
@@ -45,6 +45,7 @@ export default function Dashboard() {
   const [recommended, setRecommended] = useState<SafetyZone[]>([]);
   const [nearby, setNearby] = useState<SafetyZone[]>([]);
   const [route, setRoute] = useState<RouteResult | null>(null);
+  const [selectedZone, setSelectedZone] = useState<SafetyZone | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [myLocation, setMyLocation] = useState<LatLng | null>(null);
@@ -139,6 +140,11 @@ export default function Dashboard() {
     }
   }
 
+  function selectZone(zone: SafetyZone) {
+    setSelectedZone(zone);
+    document.getElementById("map-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   function loadRecommended() {
     residenceRecommend(5)
       .then((zones) => {
@@ -215,13 +221,15 @@ export default function Dashboard() {
     router.replace("/login");
   }
 
-  if (!ready) return null;
-
-  const mapZones = Array.from(
-    new Map(
-      [...recommended, ...nearby, ...route?.zones_passed ?? []].map((z) => [z.dong_code, z])
-    ).values()
+  const mapZones = useMemo(
+    () =>
+      Array.from(
+        new Map([...recommended, ...nearby, ...(route?.zones_passed ?? [])].map((z) => [z.dong_code, z])).values()
+      ),
+    [recommended, nearby, route]
   );
+
+  if (!ready) return null;
 
   return (
     <main className={styles.page}>
@@ -295,7 +303,11 @@ export default function Dashboard() {
               ) : (
                 <ul className={styles.rankList}>
                   {recommended.map((z, i) => (
-                    <li key={z.dong_code} className={styles.rankItem}>
+                    <li
+                      key={z.dong_code}
+                      className={`${styles.rankItem} ${selectedZone?.dong_code === z.dong_code ? styles.rankItemSelected : ""}`}
+                      onClick={() => selectZone(z)}
+                    >
                       <span className={styles.rankNumber}>{i + 1}</span>
                       <span className={styles.rankInfo}>
                         <div className={styles.rankName}>{z.dong_name}</div>
@@ -341,7 +353,11 @@ export default function Dashboard() {
               {nearby.length > 0 && (
                 <ul className={styles.miniList}>
                   {nearby.map((z) => (
-                    <li key={z.dong_code} className={styles.miniItem}>
+                    <li
+                      key={z.dong_code}
+                      className={`${styles.miniItem} ${selectedZone?.dong_code === z.dong_code ? styles.miniItemSelected : ""}`}
+                      onClick={() => selectZone(z)}
+                    >
                       <span>{z.dong_name}</span>
                       <span className={styles.scoreBadge} style={{ background: scoreColor(z.safety_score) }}>
                         {z.safety_score.toFixed(0)}
@@ -462,6 +478,7 @@ export default function Dashboard() {
                   center={myLocation ?? undefined}
                   myLocation={myLocation ?? undefined}
                   routePath={route?.route_points}
+                  focusZone={selectedZone}
                   onSelect={handleMapPick}
                   onContextMenu={handleMapContextMenu}
                 />
@@ -496,6 +513,7 @@ export default function Dashboard() {
                       center={myLocation ?? undefined}
                       myLocation={myLocation ?? undefined}
                       routePath={route?.route_points}
+                      focusZone={selectedZone}
                       onSelect={handleMapPick}
                       onContextMenu={handleMapContextMenu}
                       height="100%"

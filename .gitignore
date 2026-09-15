@@ -8,6 +8,11 @@ backend/.env
 backend/cache/
 backend/data/osm/
 
+# 공공데이터 원본 다운로드 (대용량, data.go.kr에서 재다운로드 가능 — 출처는
+# backend/scripts/ingest_public_data.py 상단 주석 참고)
+/CCTV정보.csv
+/경찰청_범죄 발생 지역별 통계_*.csv
+
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/

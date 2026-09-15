@@ -14,6 +14,7 @@ type Props = {
   center?: LatLng;
   myLocation?: LatLng;
   routePath?: LatLng[];
+  focusZone?: SafetyZone | null;
   onSelect?: (latlng: LatLng) => void;
   onContextMenu?: (info: ContextMenuInfo) => void;
   height?: number | string;
@@ -25,22 +26,71 @@ function scoreColor(score: number): string {
   return "#c62828"; // 주의
 }
 
+type DongBoundaryGeoJson = {
+  features: {
+    properties: { adm_cd2: string };
+    geometry: { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
+  }[];
+};
+
+// dong_code -> 폴리곤 파트 목록(파트마다 [외곽선, 구멍1, 구멍2, ...] 좌표 링).
+// 동이 여러 조각(하천으로 나뉜 섬 등)으로 나뉘면 파트가 여러 개일 수 있다.
+type DongBoundaryMap = Map<string, number[][][][]>;
+
+let boundaryCache: Promise<DongBoundaryMap> | null = null;
+
+function loadDongBoundaries(): Promise<DongBoundaryMap> {
+  if (!boundaryCache) {
+    boundaryCache = fetch("/data/seoul-dong-boundaries.geojson")
+      .then((res) => res.json())
+      .then((geojson: DongBoundaryGeoJson) => {
+        const map: DongBoundaryMap = new Map();
+        geojson.features.forEach((feature) => {
+          const code = feature.properties.adm_cd2;
+          const parts: number[][][][] =
+            feature.geometry.type === "Polygon"
+              ? [feature.geometry.coordinates as number[][][]]
+              : (feature.geometry.coordinates as number[][][][]);
+          map.set(code, parts);
+        });
+        return map;
+      })
+      .catch(() => new Map());
+  }
+  return boundaryCache;
+}
+
 export function SafetyMap({
   zones,
   center = { lat: 37.5665, lng: 126.978 },
   myLocation,
   routePath,
+  focusZone,
   onSelect,
   onContextMenu,
   height = 400,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const overlaysRef = useRef<any[]>([]);
+  const hasAutoCenteredRef = useRef(false);
+  const lastFocusDongCodeRef = useRef<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const onSelectRef = useRef(onSelect);
   const onContextMenuRef = useRef(onContextMenu);
   const lastContextPos = useRef<{ x: number; y: number } | null>(null);
+  const [boundaries, setBoundaries] = useState<DongBoundaryMap | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDongBoundaries().then((map) => {
+      if (!cancelled) setBoundaries(map);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     onSelectRef.current = onSelect;
@@ -61,8 +111,10 @@ export function SafetyMap({
     };
   }, []);
 
+  // 지도 인스턴스는 처음 한 번만 생성한다. zones/focusZone 같은 데이터가
+  // 바뀔 때마다 재생성하면 사용자가 드래그/줌 해둔 시점이 매번 리셋된다.
   useEffect(() => {
-    if (!loaded || !containerRef.current) return;
+    if (!loaded || !containerRef.current || mapRef.current) return;
     const { kakao } = window;
     const map = new kakao.maps.Map(containerRef.current, {
       center: new kakao.maps.LatLng(center.lat, center.lng),
@@ -70,56 +122,9 @@ export function SafetyMap({
     });
     mapRef.current = map;
 
-    if (myLocation) {
-      const dot = document.createElement("div");
-      dot.style.width = "16px";
-      dot.style.height = "16px";
-      dot.style.borderRadius = "50%";
-      dot.style.background = "#4285f4";
-      dot.style.border = "3px solid #fff";
-      dot.style.boxShadow = "0 0 0 3px rgba(66,133,244,0.35), 0 1px 4px rgba(0,0,0,0.3)";
-
-      new kakao.maps.CustomOverlay({
-        position: new kakao.maps.LatLng(myLocation.lat, myLocation.lng),
-        content: dot,
-        yAnchor: 0.5,
-        zIndex: 10,
-      }).setMap(map);
-    }
-
-    zones.forEach((zone) => {
-      const marker = new kakao.maps.Circle({
-        center: new kakao.maps.LatLng(zone.lat, zone.lng),
-        radius: 300,
-        strokeWeight: 1,
-        strokeColor: scoreColor(zone.safety_score),
-        fillColor: scoreColor(zone.safety_score),
-        fillOpacity: 0.5,
-      });
-      marker.setMap(map);
-
-      const infowindow = new kakao.maps.InfoWindow({
-        content: `<div style="padding:4px 8px;font-size:12px;">${zone.dong_name} (${zone.safety_score.toFixed(1)})</div>`,
-      });
-      kakao.maps.event.addListener(marker, "mouseover", () =>
-        infowindow.open(map, new kakao.maps.CustomOverlay({ position: marker.getPosition() }))
-      );
-    });
-
-    if (routePath && routePath.length > 1) {
-      const path = routePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
-      new kakao.maps.Polyline({
-        path,
-        strokeWeight: 5,
-        strokeColor: "#2f6b3a",
-        strokeOpacity: 0.9,
-        strokeStyle: "solid",
-      }).setMap(map);
-
-      const bounds = new kakao.maps.LatLngBounds();
-      path.forEach((p: any) => bounds.extend(p));
-      map.setBounds(bounds);
-    }
+    // 브라우저 창 크기가 바뀌면 컨테이너 크기도 바뀌므로 Kakao 지도에 재계산을 알려준다.
+    const relayoutMap = () => map.relayout();
+    window.addEventListener("resize", relayoutMap);
 
     kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
       onSelectRef.current?.({
@@ -135,7 +140,7 @@ export function SafetyMap({
       lastContextPos.current = { x: e.clientX, y: e.clientY };
     }
     const container = containerRef.current;
-    container?.addEventListener("contextmenu", handleNativeContextMenu, true);
+    container.addEventListener("contextmenu", handleNativeContextMenu, true);
 
     kakao.maps.event.addListener(map, "rightclick", (mouseEvent: any) => {
       const pos = lastContextPos.current;
@@ -149,9 +154,131 @@ export function SafetyMap({
     });
 
     return () => {
-      container?.removeEventListener("contextmenu", handleNativeContextMenu, true);
+      container.removeEventListener("contextmenu", handleNativeContextMenu, true);
+      window.removeEventListener("resize", relayoutMap);
     };
-  }, [loaded, zones, center, myLocation, routePath]);
+  }, [loaded]);
+
+  // 내 위치를 처음 얻었을 때 한 번만 그쪽으로 이동한다. 이후 위치가 갱신돼도
+  // 사용자가 지도를 옮겨둔 상태를 덮어쓰지 않는다(재이동은 "내 위치로" 버튼으로).
+  useEffect(() => {
+    if (!mapRef.current || !myLocation || hasAutoCenteredRef.current) return;
+    const { kakao } = window;
+    mapRef.current.panTo(new kakao.maps.LatLng(myLocation.lat, myLocation.lng));
+    hasAutoCenteredRef.current = true;
+  }, [myLocation]);
+
+  // 구역 표시/내 위치 점/경로선은 지도 시점을 건드리지 않고 오버레이만 갱신한다.
+  useEffect(() => {
+    if (!loaded || !mapRef.current) return;
+    const { kakao } = window;
+    const map = mapRef.current;
+
+    overlaysRef.current.forEach((overlay) => overlay.setMap(null));
+    overlaysRef.current = [];
+
+    if (myLocation) {
+      const dot = document.createElement("div");
+      dot.style.width = "16px";
+      dot.style.height = "16px";
+      dot.style.borderRadius = "50%";
+      dot.style.background = "#4285f4";
+      dot.style.border = "3px solid #fff";
+      dot.style.boxShadow = "0 0 0 3px rgba(66,133,244,0.35), 0 1px 4px rgba(0,0,0,0.3)";
+
+      const dotOverlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(myLocation.lat, myLocation.lng),
+        content: dot,
+        yAnchor: 0.5,
+        zIndex: 10,
+      });
+      dotOverlay.setMap(map);
+      overlaysRef.current.push(dotOverlay);
+    }
+
+    zones.forEach((zone) => {
+      const isFocused = focusZone?.dong_code === zone.dong_code;
+      // 카카오맵 기본 행정구역 경계선(옅은 회백색 얇은 선)과 비슷한 느낌을 내되,
+      // 선택된 구역만 진하게 강조한다.
+      const strokeColor = isFocused ? "#1a1a1a" : "#ffffff";
+      const strokeWeight = isFocused ? 3 : 1;
+      const strokeOpacity = isFocused ? 0.9 : 0.7;
+      const fillColor = scoreColor(zone.safety_score);
+      const fillOpacity = isFocused ? 0.55 : 0.32;
+      const zIndex = isFocused ? 5 : 1;
+
+      const infowindow = new kakao.maps.InfoWindow({
+        position: new kakao.maps.LatLng(zone.lat, zone.lng),
+        content: `<div style="padding:4px 8px;font-size:12px;">${zone.dong_name} (${zone.safety_score.toFixed(1)})</div>`,
+        removable: false,
+      });
+
+      const parts = boundaries?.get(zone.dong_code);
+
+      if (parts && parts.length > 0) {
+        // 실제 행정동 경계 폴리곤으로 그린다. 하천 등으로 갈라진 동은 파트가 여러 개일 수 있다.
+        parts.forEach((rings) => {
+          const path = rings.map((ring) => ring.map(([lng, lat]) => new kakao.maps.LatLng(lat, lng)));
+          const polygon = new kakao.maps.Polygon({
+            path,
+            strokeWeight,
+            strokeColor,
+            strokeOpacity,
+            fillColor,
+            fillOpacity,
+            zIndex,
+          });
+          polygon.setMap(map);
+          overlaysRef.current.push(polygon);
+          kakao.maps.event.addListener(polygon, "mouseover", () => infowindow.open(map));
+          kakao.maps.event.addListener(polygon, "mouseout", () => infowindow.close());
+        });
+      } else {
+        // 경계 데이터가 아직 로드되지 않았거나 없는 동은 원으로 대체 표시한다.
+        const circle = new kakao.maps.Circle({
+          center: new kakao.maps.LatLng(zone.lat, zone.lng),
+          radius: isFocused ? 450 : 300,
+          strokeWeight,
+          strokeColor,
+          strokeOpacity,
+          fillColor,
+          fillOpacity,
+          zIndex,
+        });
+        circle.setMap(map);
+        overlaysRef.current.push(circle);
+        kakao.maps.event.addListener(circle, "mouseover", () => infowindow.open(map));
+        kakao.maps.event.addListener(circle, "mouseout", () => infowindow.close());
+      }
+    });
+
+    if (routePath && routePath.length > 1) {
+      const path = routePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
+      const polyline = new kakao.maps.Polyline({
+        path,
+        strokeWeight: 5,
+        strokeColor: "#2f6b3a",
+        strokeOpacity: 0.9,
+        strokeStyle: "solid",
+      });
+      polyline.setMap(map);
+      overlaysRef.current.push(polyline);
+
+      const bounds = new kakao.maps.LatLngBounds();
+      path.forEach((p: any) => bounds.extend(p));
+      map.setBounds(bounds);
+    }
+  }, [loaded, zones, routePath, myLocation, focusZone, boundaries]);
+
+  // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
+  useEffect(() => {
+    if (!mapRef.current || !focusZone) return;
+    if (lastFocusDongCodeRef.current === focusZone.dong_code) return;
+    lastFocusDongCodeRef.current = focusZone.dong_code;
+    const { kakao } = window;
+    mapRef.current.setLevel(4);
+    mapRef.current.panTo(new kakao.maps.LatLng(focusZone.lat, focusZone.lng));
+  }, [focusZone]);
 
   function handleRecenter() {
     if (!mapRef.current || !myLocation) return;

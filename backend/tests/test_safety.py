@@ -1,5 +1,7 @@
 import os
 
+if os.path.exists("test_safety.db"):
+    os.remove("test_safety.db")
 os.environ["DATABASE_URL"] = "sqlite:///./test_safety.db"
 
 from fastapi.testclient import TestClient  # noqa: E402

@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 14
     database_url: str = "sqlite:///./app.db"
     tmap_app_key: str = ""
+    security_light_api_key: str = ""
+    kakao_rest_api_key: str = ""
 
     class Config:
         env_file = ".env"
