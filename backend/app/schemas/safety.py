@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -21,6 +22,7 @@ class RouteRequest(BaseModel):
     start_lng: float
     end_lat: float
     end_lng: float
+    at: datetime | None = None  # 생략 시 서버 현재 KST 시각 기준으로 주/야간 판정
 
 
 class RoutePoint(BaseModel):

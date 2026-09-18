@@ -5,9 +5,11 @@ from pathlib import Path
 
 import networkx as nx
 import osmnx as ox
+from scipy.spatial import cKDTree
 
 from app.models.safety_zone import SafetyZone
 from app.services.geo import haversine_km
+from app.services.safety_score import Period, compute_zone_period_scores
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +22,32 @@ LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
 
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
+_local_graph_lock = threading.Lock()
 
 
 def _load_local_graph() -> nx.MultiDiGraph | None:
+    """서울 보행자 도로망(94MB XML) 파싱에 수십 초가 걸린다. 플래그만으로
+    가드하면 로딩 중 들어온 동시 요청이 아직 None인 _local_graph를 받아
+    Overpass 실시간 폴백으로 새 지연을 겪는다 — 락으로 대기시켜 막는다."""
     global _local_graph, _local_graph_attempted
     if _local_graph_attempted:
         return _local_graph
-    _local_graph_attempted = True
-    if not LOCAL_WALK_NETWORK_PATH.exists():
-        return None
-    try:
-        _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
-        logger.info(
-            "Loaded local OSM walk network: %d nodes, %d edges",
-            _local_graph.number_of_nodes(),
-            _local_graph.number_of_edges(),
-        )
-    except Exception:
-        logger.warning("Failed to load local OSM walk network", exc_info=True)
-        _local_graph = None
+    with _local_graph_lock:
+        if _local_graph_attempted:
+            return _local_graph
+        _local_graph_attempted = True
+        if not LOCAL_WALK_NETWORK_PATH.exists():
+            return None
+        try:
+            _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
+            logger.info(
+                "Loaded local OSM walk network: %d nodes, %d edges",
+                _local_graph.number_of_nodes(),
+                _local_graph.number_of_edges(),
+            )
+        except Exception:
+            logger.warning("Failed to load local OSM walk network", exc_info=True)
+            _local_graph = None
     return _local_graph
 
 # overpass-api.de는 DNS가 여러 서버로 라운드로빈되는데, 이 중 하나가 이
@@ -192,9 +201,14 @@ def _nearest_node(graph: nx.Graph, lat: float, lng: float) -> int:
     )[0]
 
 
-def _nearest_zone_score(lat: float, lng: float, zones: list[SafetyZone]) -> float:
-    nearest = min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng))
-    return nearest.safety_score
+def _build_zone_index(zones: list[SafetyZone]) -> cKDTree:
+    """zones 순서와 1:1로 대응하는 (lat, lng) KD-tree.
+
+    ponytail: 위경도를 평면 유클리드 좌표처럼 취급 — 서울 규모 지역에서는
+    최근접 순위가 실제 하버사인 거리와 사실상 동일해 근사로 충분하다.
+    """
+    points = [(z.lat, z.lng) for z in zones]
+    return cKDTree(points)
 
 
 def _edge_cost(length_m: float, safety_score: float) -> float:
@@ -202,27 +216,62 @@ def _edge_cost(length_m: float, safety_score: float) -> float:
     return length_m * multiplier
 
 
-def _assign_edge_costs(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> None:
-    for u, v, data in graph.edges(data=True):
-        mid_lat = (graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2
-        mid_lng = (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2
-        score = _nearest_zone_score(mid_lat, mid_lng, zones)
-        data["zone_score"] = score
-        data["safety_cost"] = _edge_cost(data.get("length", 0.0), score)
+def _build_scored_graph(
+    graph: nx.MultiDiGraph,
+    zones: list[SafetyZone],
+    score_map: dict[str, float],
+    zone_index: cKDTree,
+) -> nx.DiGraph:
+    """안전점수 배정(KD-tree 최근접 질의)과 평행 간선 단순화(대안 경로 탐색인
+    `shortest_simple_paths`는 MultiDiGraph를 지원하지 않음)를 한 번에 한다.
 
-
-def _to_simple_weighted_graph(graph: nx.MultiDiGraph) -> nx.DiGraph:
-    """대안 경로 탐색(`shortest_simple_paths`)은 MultiDiGraph를 지원하지 않는다.
-    u,v 사이 평행 간선 중 가장 저렴한 것만 남긴 단순 방향 그래프로 변환한다."""
+    원본 MultiDiGraph는 건드리지 않는다 — 이 그래프는 day/night 여러 period가
+    공유하는 프로세스 전역 싱글턴이라, 제자리에서 mutate하면 동시에 들어온
+    다른 period 요청과 서로의 안전점수를 덮어쓸 수 있다."""
     simple = nx.DiGraph()
     simple.add_nodes_from(graph.nodes(data=True))
     for u, v, data in graph.edges(data=True):
+        mid_lat = (graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2
+        mid_lng = (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2
+        _, idx = zone_index.query((mid_lat, mid_lng))
+        score = score_map[zones[idx].dong_code]
+        cost = _edge_cost(data.get("length", 0.0), score)
         if simple.has_edge(u, v):
-            if data["safety_cost"] < simple[u][v]["safety_cost"]:
-                simple[u][v].update(data)
+            if cost < simple[u][v]["safety_cost"]:
+                simple[u][v].update(data, zone_score=score, safety_cost=cost)
         else:
-            simple.add_edge(u, v, **data)
+            simple.add_edge(u, v, **data, zone_score=score, safety_cost=cost)
     return simple
+
+
+# (graph 객체 id, period) -> 이미 안전점수를 배정하고 단순화한 그래프.
+# 안전점수는 zones의 원시 카운트(cctv/streetlight/crime)만으로 정해지고
+# 그 카운트는 서버가 떠 있는 동안 안 바뀌므로, period가 같으면 매 요청마다
+# 간선 수십만 개를 다시 훑을 필요가 없다 — 한 번만 만들고 재사용한다.
+# ponytail: 안전구역 데이터를 재수집(ingest)했다면 서버를 재시작해야 반영됨
+# (기존 _local_graph/_graph_cache도 이미 같은 특성 — 새로운 제약이 아니다).
+_scored_graph_cache: dict[tuple[int, Period], nx.DiGraph] = {}
+_scored_graph_lock = threading.Lock()
+
+
+def _get_scored_graph(
+    graph: nx.MultiDiGraph,
+    zones: list[SafetyZone],
+    score_map: dict[str, float],
+    zone_index: cKDTree,
+    period: Period,
+) -> nx.DiGraph:
+    key = (id(graph), period)
+    cached = _scored_graph_cache.get(key)
+    if cached is not None:
+        return cached
+    with _scored_graph_lock:
+        cached = _scored_graph_cache.get(key)
+        if cached is not None:
+            return cached
+        simple = _build_scored_graph(graph, zones, score_map, zone_index)
+        _scored_graph_cache[key] = simple
+        return simple
 
 
 def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
@@ -244,10 +293,12 @@ def find_safe_routes(
     end_lng: float,
     zones: list[SafetyZone],
     k: int = K_ALTERNATIVES,
+    period: Period = "day",
 ) -> list[dict] | None:
     """도로망 그래프(OSM) + 안전구역 점수로 가중치를 준 경로를 최대 k개까지 찾는다.
 
     안전점수가 가장 높은(비용이 가장 낮은) 순서로 정렬되어 반환된다.
+    period(day/night)에 따라 안전점수 계산 가중치가 달라진다.
 
     ponytail: bbox 단위 인메모리 캐시만 사용 — osmnx 자체 디스크 캐시가 있어
     동일 지역 재요청은 이미 빠르다. 그래프 다운로드 실패/미커버 지역이면
@@ -256,6 +307,8 @@ def find_safe_routes(
     if not zones:
         return None
 
+    score_map = compute_zone_period_scores(zones, period)
+    zone_index = _build_zone_index(zones)
     bbox = _route_bbox(start_lat, start_lng, end_lat, end_lng)
     graph = _get_graph(bbox)
     if graph is None or graph.number_of_nodes() == 0:
@@ -264,8 +317,7 @@ def find_safe_routes(
     try:
         orig = _nearest_node(graph, start_lat, start_lng)
         dest = _nearest_node(graph, end_lat, end_lng)
-        _assign_edge_costs(graph, zones)
-        simple = _to_simple_weighted_graph(graph)
+        simple = _get_scored_graph(graph, zones, score_map, zone_index, period)
         path_iter = nx.shortest_simple_paths(simple, orig, dest, weight="safety_cost")
 
         routes: list[dict] = []
