@@ -15,6 +15,8 @@ from app.schemas.safety import (
 )
 from app.services.geo import haversine_km
 from app.services.safe_route import find_safe_routes
+from app.services.safety_score import compute_zone_period_scores
+from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
 
 router = APIRouter(prefix="/safety", tags=["safety"])
@@ -28,9 +30,11 @@ def _path_distance_m(points: list[Point]) -> float:
     )
 
 
-def _point_sample_score(points: list[Point], zones: list[SafetyZone]) -> float:
+def _point_sample_score(
+    points: list[Point], zones: list[SafetyZone], score_map: dict[str, float]
+) -> float:
     scores = [
-        min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)).safety_score
+        score_map[min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)).dong_code]
         for lat, lng in points
     ]
     return sum(scores) / len(scores) if scores else 0.0
@@ -80,6 +84,8 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
     zones = db.query(SafetyZone).all()
+    period = period_for(payload.at)
+    score_map = compute_zone_period_scores(zones, period)
 
     safe_routes = await asyncio.to_thread(
         find_safe_routes,
@@ -88,6 +94,7 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
         payload.end_lat,
         payload.end_lng,
         zones,
+        period=period,
     )
 
     candidates: list[dict]
@@ -113,13 +120,22 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
         candidates = [
             {
                 "points": sample_points,
-                "score": _point_sample_score(sample_points, zones),
+                "score": _point_sample_score(sample_points, zones, score_map),
                 "distance_m": _path_distance_m(sample_points),
             }
         ]
 
     best = candidates[0]
-    passed = _zones_passed(best["points"], zones)
+    passed = [
+        SafetyZoneOut(
+            dong_code=z.dong_code,
+            dong_name=z.dong_name,
+            lat=z.lat,
+            lng=z.lng,
+            safety_score=score_map[z.dong_code],
+        )
+        for z in _zones_passed(best["points"], zones)
+    ]
     alternatives = [
         RouteAlternative(
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],

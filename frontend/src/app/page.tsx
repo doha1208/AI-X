@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { nearbyZones, residenceRecommend, routeSafety, type RouteResult, type SafetyZone } from "@/lib/api";
 import { clearToken, getEmailFromToken, getToken } from "@/lib/auth";
+import { haversineMeters } from "@/lib/geo";
 import { geocodeAddress, reverseGeocode, type LatLng } from "@/lib/kakao";
 import { SafetyMap } from "@/components/SafetyMap";
 import {
@@ -37,6 +38,10 @@ function parseLatLng(value: string): LatLng | null {
 }
 
 type FieldKey = "nearby" | "start" | "end";
+
+const REROUTE_DISTANCE_M = 50;
+const REROUTE_MIN_INTERVAL_MS = 5000;
+const ARRIVAL_RADIUS_M = 30;
 
 export default function Dashboard() {
   const router = useRouter();
@@ -72,6 +77,73 @@ export default function Dashboard() {
       }
     );
   }
+
+  const [navigating, setNavigating] = useState(false);
+  const destinationRef = useRef<LatLng | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const lastRouteFetchRef = useRef<{ origin: LatLng; at: number } | null>(null);
+  const isRefetchingRef = useRef(false);
+
+  function stopNavigation() {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setNavigating(false);
+  }
+
+  async function handlePositionUpdate(pos: GeolocationPosition) {
+    const here: LatLng = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    setMyLocation(here);
+    const destination = destinationRef.current;
+    if (!destination) return;
+
+    if (haversineMeters(here, destination) <= ARRIVAL_RADIUS_M) {
+      stopNavigation();
+      return;
+    }
+
+    const last = lastRouteFetchRef.current;
+    const movedEnough = !last || haversineMeters(here, last.origin) >= REROUTE_DISTANCE_M;
+    const enoughTimePassed = !last || Date.now() - last.at >= REROUTE_MIN_INTERVAL_MS;
+    if (!movedEnough || !enoughTimePassed || isRefetchingRef.current) return;
+
+    isRefetchingRef.current = true;
+    try {
+      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng);
+      setRoute(result);
+      lastRouteFetchRef.current = { origin: here, at: Date.now() };
+    } catch (err) {
+      console.warn("[live-route] recompute failed:", err instanceof Error ? err.message : err);
+      // 재계산 실패는 배너로 방해하지 않는다 — 기존 경로를 유지하고 다음 위치 갱신에서 재시도.
+    } finally {
+      isRefetchingRef.current = false;
+    }
+  }
+
+  function startNavigation() {
+    if (!route || !navigator.geolocation) return;
+    const end = route.route_points[route.route_points.length - 1];
+    destinationRef.current = { lat: end.lat, lng: end.lng };
+    lastRouteFetchRef.current = myLocation ? { origin: myLocation, at: Date.now() } : null;
+    setNavigating(true);
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handlePositionUpdate,
+      (err) => {
+        console.warn("[geolocation] watch failed:", err.message);
+        setError("실시간 위치를 가져오지 못했어요. 위치 권한을 확인해주세요");
+        stopNavigation();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+    );
+  }
+
+  useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    };
+  }, []);
+
   const [resolved, setResolved] = useState<Record<FieldKey, LatLng | null>>({
     nearby: null,
     start: null,
@@ -207,6 +279,7 @@ export default function Dashboard() {
       return;
     }
     try {
+      stopNavigation();
       const result = await routeSafety(start.lat, start.lng, end.lat, end.lng);
       setNearby([]);
       setRoute(result);
@@ -534,6 +607,22 @@ export default function Dashboard() {
                         ? "실제 도보 최단경로 기준(안전 가중치 미반영)"
                         : "실제 경로를 가져오지 못해 직선 거리로 추정했어요"}
                   </p>
+                  <div className={styles.navToggleRow}>
+                    {navigating ? (
+                      <>
+                        <span className={styles.liveBadge}>
+                          <span className={styles.liveDot} /> 실시간 안내 중
+                        </span>
+                        <button type="button" className={styles.navStopButton} onClick={stopNavigation}>
+                          중지
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" className={styles.navStartButton} onClick={startNavigation}>
+                        실시간 안내 시작
+                      </button>
+                    )}
+                  </div>
                   <div className={styles.resultSummary}>
                     <span>경로 전체 안전지수</span>
                     <strong>{route.safety_score.toFixed(0)}점</strong>

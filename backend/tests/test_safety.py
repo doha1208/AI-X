@@ -67,3 +67,20 @@ def test_route_safety_returns_score():
     body = res.json()
     assert "safety_score" in body
     assert len(body["zones_passed"]) >= 1
+
+
+def test_route_safety_accepts_night_timestamp():
+    res = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.50,
+            "start_lng": 127.00,
+            "end_lat": 37.51,
+            "end_lng": 127.01,
+            "at": "2026-01-01T23:30:00+09:00",
+        },
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert "safety_score" in body
+    assert len(body["zones_passed"]) >= 1
