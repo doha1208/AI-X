@@ -87,24 +87,32 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
     period = period_for(payload.at)
     score_map = compute_zone_period_scores(zones, period)
 
-    safe_routes = await asyncio.to_thread(
-        find_safe_routes,
-        payload.start_lat,
-        payload.start_lng,
-        payload.end_lat,
-        payload.end_lng,
-        zones,
-        period=period,
+    # 안전 가중 탐색과 Tmap 최단경로를 동시에 돌린다 — Tmap은 safety_weighted일 때
+    # 비교선으로, 실패했을 때는 폴백 경로로 쓰이니 순서와 무관하게 항상 필요하다.
+    # 순차로 기다리면(특히 실시간 재경로 폴링 중) Tmap 응답 지연(최대 8초)이
+    # 그대로 사용자 대기 시간에 더해지므로 asyncio.gather로 병렬화한다.
+    safe_routes, tmap_points = await asyncio.gather(
+        asyncio.to_thread(
+            find_safe_routes,
+            payload.start_lat,
+            payload.start_lng,
+            payload.end_lat,
+            payload.end_lng,
+            zones,
+            period=period,
+        ),
+        get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
     )
 
+    shortest_route_points: list[RoutePoint] | None = None
     candidates: list[dict]
     if safe_routes:
         mode: RouteMode = "safety_weighted"
         candidates = safe_routes
+        # 안전 가중 경로가 실제 최단경로와 다르다는 걸 지도에서 비교해 보여주는 참고선.
+        if tmap_points:
+            shortest_route_points = [RoutePoint(lat=lat, lng=lng) for lat, lng in tmap_points]
     else:
-        tmap_points = await get_pedestrian_route(
-            payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng
-        )
         if tmap_points:
             mode = "tmap"
             sample_points = tmap_points
@@ -151,4 +159,5 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
         mode=mode,
         alternatives=alternatives,
+        shortest_route_points=shortest_route_points,
     )

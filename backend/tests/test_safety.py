@@ -84,3 +84,14 @@ def test_route_safety_accepts_night_timestamp():
     body = res.json()
     assert "safety_score" in body
     assert len(body["zones_passed"]) >= 1
+
+
+def test_route_safety_includes_shortest_route_field():
+    res = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    # Tmap 키 미설정/실패 시 None으로 조용히 빠지므로 값 자체보단 필드 존재만 확인.
+    assert "shortest_route_points" in body

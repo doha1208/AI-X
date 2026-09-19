@@ -1,6 +1,9 @@
 import logging
+import math
+import pickle
 import socket
 import threading
+import weakref
 from pathlib import Path
 
 import networkx as nx
@@ -20,9 +23,44 @@ logger = logging.getLogger(__name__)
 LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-walk.osm"
 LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
 
+# OSM XML 파싱은 서울+경기 기준 약 5분이 걸린다. 한 번 파싱한 그래프를 pickle로
+# 저장해두고 다음 시작부터는 그걸 읽는다(XML이 더 최신이면 다시 파싱).
+LOCAL_WALK_GRAPH_CACHE_PATH = LOCAL_WALK_NETWORK_PATH.with_suffix(".graph.pickle")
+
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
 _local_graph_lock = threading.Lock()
+
+
+def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
+    # 저장 도중 죽어도 기존 캐시가 깨지지 않게 임시 파일에 쓴 뒤 교체한다.
+    # 캐시 저장 실패는 치명적이지 않다 — 다음 시작에 XML을 다시 파싱하면 된다.
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    try:
+        with tmp.open("wb") as f:
+            pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp.replace(cache_path)
+    except Exception:
+        logger.warning("Failed to write graph cache %s", cache_path, exc_info=True)
+        tmp.unlink(missing_ok=True)
+
+
+def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiDiGraph:
+    """cache_path가 xml_path보다 새로우면 pickle을 읽고, 아니면(없음/오래됨/손상)
+    parse_xml로 다시 파싱해 캐시를 갱신한다.
+
+    ponytail: 이 프로젝트가 직접 만든 로컬 파일만 읽는다(pickle은 신뢰할 수 없는
+    파일을 열면 위험) — 사용자 업로드 경로에는 절대 쓰지 말 것.
+    """
+    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime:
+        try:
+            with cache_path.open("rb") as f:
+                return pickle.load(f)
+        except Exception:
+            logger.warning("Graph cache unreadable, re-parsing XML: %s", cache_path, exc_info=True)
+    graph = parse_xml(xml_path)
+    _write_graph_cache(graph, cache_path)
+    return graph
 
 
 def _load_local_graph() -> nx.MultiDiGraph | None:
@@ -39,7 +77,11 @@ def _load_local_graph() -> nx.MultiDiGraph | None:
         if not LOCAL_WALK_NETWORK_PATH.exists():
             return None
         try:
-            _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
+            _local_graph = _read_graph_cached(
+                LOCAL_WALK_NETWORK_PATH,
+                LOCAL_WALK_GRAPH_CACHE_PATH,
+                lambda path: ox.graph_from_xml(path, bidirectional=True),
+            )
             logger.info(
                 "Loaded local OSM walk network: %d nodes, %d edges",
                 _local_graph.number_of_nodes(),
@@ -120,6 +162,15 @@ WARM_MARGIN_DEG = 0.02
 # 안전가중치 경로 후보를 최대 몇 개까지 보여줄지.
 K_ALTERNATIVES = 3
 
+# 대안경로(Yen's k-shortest)는 경로가 길어질수록 급격히 느려진다 — 서울+경기 그래프
+# 실측: 4.6km 약 0.9초, 수원→성남 20km 약 65초. 도보 귀갓길 범위(이 값)를 넘는
+# 요청은 대안 없이 최단(안전 가중) 1개만 찾는다.
+MAX_ALTERNATIVES_KM = 6.0
+
+
+def _alternatives_for(straight_km: float, k: int) -> int:
+    return k if straight_km <= MAX_ALTERNATIVES_KM else 1
+
 _graph_cache: dict[tuple[float, float, float, float], nx.MultiDiGraph] = {}
 
 
@@ -188,17 +239,60 @@ def warm_cache(zones: list[SafetyZone]) -> None:
     )
 
     if _bbox_covers(LOCAL_WALK_NETWORK_BBOX, bbox):
-        _load_local_graph()
+        graph = _load_local_graph()
+        if graph is not None:
+            _prebuild_route_indexes(graph, zones)
         return
 
     _get_graph(bbox)
 
 
+def _prebuild_route_indexes(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> None:
+    """첫 사용자 요청이 노드 색인과 낮/밤 점수 그래프(서울+경기 기준 각 약 30초)를
+    기다리지 않도록 서버 기동 시 미리 만들어둔다."""
+    _node_index(graph)
+    zone_index = _build_zone_index(zones)
+    for period in ("day", "night"):
+        score_map = compute_zone_period_scores(zones, period)
+        _get_scored_graph(graph, zones, score_map, zone_index, period)
+
+
+# 위도 37.5도(서울·경기) 부근에서 경도 1도는 위도 1도의 약 0.79배 길이라, 위경도를
+# 그대로 평면 좌표로 쓰면 최근접 판정이 틀어진다 — 경도에 이 값을 곱해 보정한다.
+_LNG_SCALE = math.cos(math.radians(37.5))
+
+# graph -> (KD-tree, KD-tree 인덱스에 대응하는 노드 id 목록).
+# 노드가 수십만~백만 개라 요청마다 파이썬으로 전부 훑으면(서울+경기 75만 노드에서
+# 요청당 약 0.9초) 느리다 — 그래프당 한 번만 색인한다. 약한 참조 키라 임시 그래프가
+# 사라지면 색인도 함께 해제되고, id 재사용으로 엉뚱한 색인이 잡힐 일도 없다.
+_node_index_cache: "weakref.WeakKeyDictionary[nx.Graph, tuple[cKDTree, list[int]]]" = (
+    weakref.WeakKeyDictionary()
+)
+_node_index_lock = threading.Lock()
+
+
+def _node_index(graph: nx.Graph) -> tuple[cKDTree, list[int]]:
+    cached = _node_index_cache.get(graph)
+    if cached is not None:
+        return cached
+    with _node_index_lock:
+        cached = _node_index_cache.get(graph)
+        if cached is not None:
+            return cached
+        node_ids = []
+        points = []
+        for node_id, data in graph.nodes(data=True):
+            node_ids.append(node_id)
+            points.append((data["y"], data["x"] * _LNG_SCALE))
+        index = (cKDTree(points), node_ids)
+        _node_index_cache[graph] = index
+        return index
+
+
 def _nearest_node(graph: nx.Graph, lat: float, lng: float) -> int:
-    return min(
-        graph.nodes(data=True),
-        key=lambda item: haversine_km(lat, lng, item[1]["y"], item[1]["x"]),
-    )[0]
+    tree, node_ids = _node_index(graph)
+    _, idx = tree.query((lat, lng * _LNG_SCALE))
+    return node_ids[idx]
 
 
 def _build_zone_index(zones: list[SafetyZone]) -> cKDTree:
@@ -309,6 +403,7 @@ def find_safe_routes(
 
     score_map = compute_zone_period_scores(zones, period)
     zone_index = _build_zone_index(zones)
+    k = _alternatives_for(haversine_km(start_lat, start_lng, end_lat, end_lng), k)
     bbox = _route_bbox(start_lat, start_lng, end_lat, end_lng)
     graph = _get_graph(bbox)
     if graph is None or graph.number_of_nodes() == 0:
