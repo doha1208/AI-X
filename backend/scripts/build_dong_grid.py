@@ -27,8 +27,8 @@ ENV_PATH = HERE.parent / ".env"
 OUT_PATH = HERE.parent / "app" / "data" / "dong_grid.json"
 
 BBOX = (126.30, 36.85, 127.90, 38.30)  # west, south, east, north — 서울+경기도 전역(근사치)
-# ponytail: extract_seoul_walk_network.py의 BBOX와는 아직 다름(고의적) —
-# PRD Phase 5에서 도로망을 재추출하기 전까진 두 bbox를 맞추지 않는다.
+# extract_seoul_walk_network.py의 BBOX, safe_route.LOCAL_WALK_NETWORK_BBOX와 같아야 한다
+# (tests/test_walk_network_bbox.py가 어긋나면 잡는다).
 STEP = 0.005
 
 REQUEST_DELAY_SEC = 0.15

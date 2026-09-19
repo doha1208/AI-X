@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 # 도로망. 있으면 이 파일만으로 그래프를 만들어 Overpass 호출 자체를 건너뛴다
 # (독일 서버 왕복 없이 완전히 로컬/오프라인으로 동작). BBOX는 그 스크립트의
 # BBOX와 반드시 같아야 한다.
-LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-walk.osm"
-LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
+LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-gyeonggi-walk.osm"
+# scripts/extract_seoul_walk_network.py, scripts/build_dong_grid.py의 BBOX와 같아야 한다
+# (tests/test_walk_network_bbox.py가 어긋나면 잡는다).
+LOCAL_WALK_NETWORK_BBOX = (126.30, 36.85, 127.90, 38.30)
 
 # OSM XML 파싱은 서울+경기 기준 약 5분이 걸린다. 한 번 파싱한 그래프를 pickle로
 # 저장해두고 다음 시작부터는 그걸 읽는다(XML이 더 최신이면 다시 파싱).

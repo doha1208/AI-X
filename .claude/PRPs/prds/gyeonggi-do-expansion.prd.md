@@ -122,9 +122,9 @@ CCTV/범죄/보안등 데이터 확장 + 역지오코딩 범위 확장 + OSM 재
 |---|-------|-------------|--------|----------|---------|----------|
 | 1 | 경기도 기관코드/범위 조사 | 보안등 기관코드 확보, 격자점 개수 계산, bbox 확정 | complete | - | - | `.claude/PRPs/plans/completed/gyeonggi-data-scope-expansion.plan.md` |
 | 2 | CCTV/범죄 데이터 확장 | 필터·컬럼 슬라이스를 경기도까지 확장 | complete | with 1 | - | `.claude/PRPs/plans/completed/gyeonggi-data-scope-expansion.plan.md` |
-| 3 | 역지오코딩 배치 재실행 | 확장된 bbox로 `build_dong_grid.py` 재실행(수 시간) | pending | - | 1 | - |
-| 4 | 보안등 데이터 수집 + DB 재적재 | 경기도 기관코드로 API 호출, `ingest_public_data.py` 전체 재실행 | pending | - | 1, 2, 3 | - |
-| 5 | OSM 도로망 재추출 + 성능 재검증 | 확장 bbox로 재추출, 로딩/응답 속도 실측 | pending | - | 1 | - |
+| 3 | 역지오코딩 배치 재실행 | 확장된 bbox로 `build_dong_grid.py` 재실행(수 시간) | complete | - | 1 | - |
+| 4 | 보안등 데이터 수집 + DB 재적재 | 전국 페이지네이션(기관코드 불필요)으로 수집, `ingest_public_data.py` 전체 재실행 | complete | - | 1, 2, 3 | - |
+| 5 | OSM 도로망 재추출 + 성능 재검증 | 확장 bbox로 재추출, 로딩/응답 속도 실측 | complete | - | 1 | - |
 | 6 | 경기도 동 경계 GeoJSON(선택) | 지도 폴리곤 시각화용 데이터 확보 | pending | with 2-5 | - | - |
 
 ### Phase Details
