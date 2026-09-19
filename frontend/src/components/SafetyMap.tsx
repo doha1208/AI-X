@@ -40,23 +40,32 @@ type DongBoundaryMap = Map<string, number[][][][]>;
 
 let boundaryCache: Promise<DongBoundaryMap> | null = null;
 
+const BOUNDARY_FILES = ["/data/seoul-dong-boundaries.geojson", "/data/gyeonggi-dong-boundaries.geojson"];
+
+// 파일 하나가 실패해도 다른 지역 경계는 살린다 — 실패한 지역만 원(circle) 폴백으로 그려진다.
+async function fetchBoundaryFeatures(url: string): Promise<DongBoundaryGeoJson["features"]> {
+  try {
+    const res = await fetch(url);
+    return ((await res.json()) as DongBoundaryGeoJson).features;
+  } catch {
+    return [];
+  }
+}
+
 function loadDongBoundaries(): Promise<DongBoundaryMap> {
   if (!boundaryCache) {
-    boundaryCache = fetch("/data/seoul-dong-boundaries.geojson")
-      .then((res) => res.json())
-      .then((geojson: DongBoundaryGeoJson) => {
-        const map: DongBoundaryMap = new Map();
-        geojson.features.forEach((feature) => {
-          const code = feature.properties.adm_cd2;
-          const parts: number[][][][] =
-            feature.geometry.type === "Polygon"
-              ? [feature.geometry.coordinates as number[][][]]
-              : (feature.geometry.coordinates as number[][][][]);
-          map.set(code, parts);
-        });
-        return map;
-      })
-      .catch(() => new Map());
+    boundaryCache = Promise.all(BOUNDARY_FILES.map(fetchBoundaryFeatures)).then((files) => {
+      const map: DongBoundaryMap = new Map();
+      files.flat().forEach((feature) => {
+        const code = feature.properties.adm_cd2;
+        const parts: number[][][][] =
+          feature.geometry.type === "Polygon"
+            ? [feature.geometry.coordinates as number[][][]]
+            : (feature.geometry.coordinates as number[][][][]);
+        map.set(code, parts);
+      });
+      return map;
+    });
   }
   return boundaryCache;
 }
