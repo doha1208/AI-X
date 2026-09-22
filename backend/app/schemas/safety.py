@@ -42,3 +42,6 @@ class RouteResponse(BaseModel):
     route_points: list[RoutePoint]
     mode: RouteMode
     alternatives: list[RouteAlternative]
+    # mode가 safety_weighted일 때만 비교용으로 채워짐 — 안전 가중 경로가
+    # 실제 최단경로와 다르다는 걸 지도에서 눈으로 확인할 수 있게 한다.
+    shortest_route_points: list[RoutePoint] | None = None

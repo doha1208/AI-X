@@ -551,6 +551,7 @@ export default function Dashboard() {
                   center={myLocation ?? undefined}
                   myLocation={myLocation ?? undefined}
                   routePath={route?.route_points}
+                  comparePath={route?.shortest_route_points ?? undefined}
                   focusZone={selectedZone}
                   onSelect={handleMapPick}
                   onContextMenu={handleMapContextMenu}
@@ -586,6 +587,7 @@ export default function Dashboard() {
                       center={myLocation ?? undefined}
                       myLocation={myLocation ?? undefined}
                       routePath={route?.route_points}
+                      comparePath={route?.shortest_route_points ?? undefined}
                       focusZone={selectedZone}
                       onSelect={handleMapPick}
                       onContextMenu={handleMapContextMenu}
@@ -607,6 +609,11 @@ export default function Dashboard() {
                         ? "실제 도보 최단경로 기준(안전 가중치 미반영)"
                         : "실제 경로를 가져오지 못해 직선 거리로 추정했어요"}
                   </p>
+                  {route.shortest_route_points && (
+                    <p className={styles.routeModeHint}>
+                      지도의 초록 실선이 안전 경로, 회색 점선이 최단경로예요 — 서로 다른 길이면 안전 가중치가 실제로 반영된 거예요
+                    </p>
+                  )}
                   <div className={styles.navToggleRow}>
                     {navigating ? (
                       <>

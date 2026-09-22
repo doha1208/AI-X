@@ -15,6 +15,7 @@ export type RouteResult = {
   zones_passed: SafetyZone[];
   route_points: { lat: number; lng: number }[];
   mode: RouteMode;
+  shortest_route_points: { lat: number; lng: number }[] | null;
 };
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
