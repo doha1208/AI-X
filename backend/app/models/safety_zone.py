@@ -1,4 +1,4 @@
-from sqlalchemy import Float, Integer, String
+from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -14,5 +14,12 @@ class SafetyZone(Base):
     lng: Mapped[float] = mapped_column(Float, nullable=False)
     cctv_count: Mapped[int] = mapped_column(Integer, default=0)
     streetlight_count: Mapped[int] = mapped_column(Integer, default=0)
+    # False면 이 동이 속한 시·군·구가 보안등 데이터를 사실상 못 올린 곳 — 개수를 0으로 믿지 않고 점수에서 "모름"으로 본다.
+    lights_known: Mapped[bool] = mapped_column(Boolean, default=True)
     crime_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 시·군·구 범죄 건수 ÷ 주민등록 인구 × 1만. 안전 점수는 건수가 아니라 이 값을 쓴다.
+    crime_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    # 동 중심에서 가장 가까운 경찰서/파출소까지의 거리(m). 0은 미수집(전 동 동일 → 중립).
+    police_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
+    store_count: Mapped[int] = mapped_column(Integer, default=0)
     safety_score: Mapped[float] = mapped_column(Float, default=0.0)
