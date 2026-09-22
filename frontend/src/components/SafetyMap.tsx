@@ -14,6 +14,7 @@ type Props = {
   center?: LatLng;
   myLocation?: LatLng;
   routePath?: LatLng[];
+  comparePath?: LatLng[];
   focusZone?: SafetyZone | null;
   onSelect?: (latlng: LatLng) => void;
   onContextMenu?: (info: ContextMenuInfo) => void;
@@ -39,23 +40,32 @@ type DongBoundaryMap = Map<string, number[][][][]>;
 
 let boundaryCache: Promise<DongBoundaryMap> | null = null;
 
+const BOUNDARY_FILES = ["/data/seoul-dong-boundaries.geojson", "/data/gyeonggi-dong-boundaries.geojson"];
+
+// 파일 하나가 실패해도 다른 지역 경계는 살린다 — 실패한 지역만 원(circle) 폴백으로 그려진다.
+async function fetchBoundaryFeatures(url: string): Promise<DongBoundaryGeoJson["features"]> {
+  try {
+    const res = await fetch(url);
+    return ((await res.json()) as DongBoundaryGeoJson).features;
+  } catch {
+    return [];
+  }
+}
+
 function loadDongBoundaries(): Promise<DongBoundaryMap> {
   if (!boundaryCache) {
-    boundaryCache = fetch("/data/seoul-dong-boundaries.geojson")
-      .then((res) => res.json())
-      .then((geojson: DongBoundaryGeoJson) => {
-        const map: DongBoundaryMap = new Map();
-        geojson.features.forEach((feature) => {
-          const code = feature.properties.adm_cd2;
-          const parts: number[][][][] =
-            feature.geometry.type === "Polygon"
-              ? [feature.geometry.coordinates as number[][][]]
-              : (feature.geometry.coordinates as number[][][][]);
-          map.set(code, parts);
-        });
-        return map;
-      })
-      .catch(() => new Map());
+    boundaryCache = Promise.all(BOUNDARY_FILES.map(fetchBoundaryFeatures)).then((files) => {
+      const map: DongBoundaryMap = new Map();
+      files.flat().forEach((feature) => {
+        const code = feature.properties.adm_cd2;
+        const parts: number[][][][] =
+          feature.geometry.type === "Polygon"
+            ? [feature.geometry.coordinates as number[][][]]
+            : (feature.geometry.coordinates as number[][][][]);
+        map.set(code, parts);
+      });
+      return map;
+    });
   }
   return boundaryCache;
 }
@@ -65,6 +75,7 @@ export function SafetyMap({
   center = { lat: 37.5665, lng: 126.978 },
   myLocation,
   routePath,
+  comparePath,
   focusZone,
   onSelect,
   onContextMenu,
@@ -252,6 +263,20 @@ export function SafetyMap({
       }
     });
 
+    if (comparePath && comparePath.length > 1) {
+      // 안전 가중 경로가 실제 최단경로와 다르다는 걸 비교해 보여주는 참고선.
+      const path = comparePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
+      const polyline = new kakao.maps.Polyline({
+        path,
+        strokeWeight: 4,
+        strokeColor: "#888888",
+        strokeOpacity: 0.8,
+        strokeStyle: "shortdash",
+      });
+      polyline.setMap(map);
+      overlaysRef.current.push(polyline);
+    }
+
     if (routePath && routePath.length > 1) {
       const path = routePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
       const polyline = new kakao.maps.Polyline({
@@ -266,9 +291,10 @@ export function SafetyMap({
 
       const bounds = new kakao.maps.LatLngBounds();
       path.forEach((p: any) => bounds.extend(p));
+      if (comparePath) comparePath.forEach((p) => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
       map.setBounds(bounds);
     }
-  }, [loaded, zones, routePath, myLocation, focusZone, boundaries]);
+  }, [loaded, zones, routePath, comparePath, myLocation, focusZone, boundaries]);
 
   // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
   useEffect(() => {
