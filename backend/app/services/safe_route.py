@@ -1,32 +1,80 @@
 import logging
+import math
+import pickle
 import socket
 import threading
+from functools import lru_cache
 from pathlib import Path
 
 import networkx as nx
+import numpy as np
 import osmnx as ox
 from scipy.spatial import cKDTree
 
 from app.models.safety_zone import SafetyZone
+from app.services.facility_density import FacilityIndex, edge_local_scores, load_facility_index
 from app.services.geo import haversine_km
+from app.services.road_score import road_safety_score
 from app.services.safety_score import Period, compute_zone_period_scores
 
 logger = logging.getLogger(__name__)
 
-# scripts/extract_seoul_walk_network.py로 미리 추출해둔 서울 권역 보행자
+# osmnx 기본 useful_tags_way에는 가로등(lit)/인도(sidewalk)가 없어 그래프에서 버려진다.
+# 도로 특성 점수(road_score)에 필요하므로 그래프를 읽기 전에 추가해둔다.
+ox.settings.useful_tags_way = list(dict.fromkeys([*ox.settings.useful_tags_way, "lit", "sidewalk"]))
+
+# scripts/extract_seoul_walk_network.py로 미리 추출해둔 서울+경기 권역 보행자
 # 도로망. 있으면 이 파일만으로 그래프를 만들어 Overpass 호출 자체를 건너뛴다
 # (독일 서버 왕복 없이 완전히 로컬/오프라인으로 동작). BBOX는 그 스크립트의
 # BBOX와 반드시 같아야 한다.
-LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-walk.osm"
-LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
+LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-gyeonggi-walk.osm"
+LOCAL_WALK_NETWORK_BBOX = (126.30, 36.85, 127.90, 38.30)
+
+# OSM XML 파싱은 서울+경기 기준 약 5분이 걸린다. 한 번 파싱한 그래프를 pickle로
+# 저장해두고 다음 시작부터는 그걸 읽는다(XML이 더 최신이면 다시 파싱).
+# ponytail: 캐시 유효성은 XML 수정 시각만 본다 — 보존할 간선 태그(위 useful_tags_way)를
+# 바꿨다면 이 .pickle을 지워서 다시 파싱시켜야 한다. 서울+경기 파싱은 약 5분, 피크
+# 커밋 메모리 약 19GB(페이지 파일이 없으면 커밋 한도에 걸려 MemoryError가 날 수 있음).
+LOCAL_WALK_GRAPH_CACHE_PATH = LOCAL_WALK_NETWORK_PATH.with_suffix(".graph.pickle")
 
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
 _local_graph_lock = threading.Lock()
 
 
+def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
+    # 저장 도중 죽어도 기존 캐시가 깨지지 않게 임시 파일에 쓴 뒤 교체한다.
+    # 캐시 저장 실패는 치명적이지 않다 — 다음 시작에 XML을 다시 파싱하면 된다.
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    try:
+        with tmp.open("wb") as f:
+            pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp.replace(cache_path)
+    except Exception:
+        logger.warning("Failed to write graph cache %s", cache_path, exc_info=True)
+        tmp.unlink(missing_ok=True)
+
+
+def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiDiGraph:
+    """cache_path가 xml_path보다 새로우면 pickle을 읽고, 아니면(없음/오래됨/손상)
+    parse_xml로 다시 파싱해 캐시를 갱신한다.
+
+    ponytail: 이 프로젝트가 직접 만든 로컬 파일만 읽는다(pickle은 신뢰할 수 없는
+    파일을 열면 위험) — 사용자 업로드 경로에는 절대 쓰지 말 것.
+    """
+    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime:
+        try:
+            with cache_path.open("rb") as f:
+                return pickle.load(f)
+        except Exception:
+            logger.warning("Graph cache unreadable, re-parsing XML: %s", cache_path, exc_info=True)
+    graph = parse_xml(xml_path)
+    _write_graph_cache(graph, cache_path)
+    return graph
+
+
 def _load_local_graph() -> nx.MultiDiGraph | None:
-    """서울 보행자 도로망(94MB XML) 파싱에 수십 초가 걸린다. 플래그만으로
+    """서울+경기 보행자 도로망(약 400MB XML) 파싱에 수 분이 걸린다. 플래그만으로
     가드하면 로딩 중 들어온 동시 요청이 아직 None인 _local_graph를 받아
     Overpass 실시간 폴백으로 새 지연을 겪는다 — 락으로 대기시켜 막는다."""
     global _local_graph, _local_graph_attempted
@@ -39,7 +87,11 @@ def _load_local_graph() -> nx.MultiDiGraph | None:
         if not LOCAL_WALK_NETWORK_PATH.exists():
             return None
         try:
-            _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
+            _local_graph = _read_graph_cached(
+                LOCAL_WALK_NETWORK_PATH,
+                LOCAL_WALK_GRAPH_CACHE_PATH,
+                lambda path: ox.graph_from_xml(path, bidirectional=True),
+            )
             logger.info(
                 "Loaded local OSM walk network: %d nodes, %d edges",
                 _local_graph.number_of_nodes(),
@@ -120,6 +172,15 @@ WARM_MARGIN_DEG = 0.02
 # 안전가중치 경로 후보를 최대 몇 개까지 보여줄지.
 K_ALTERNATIVES = 3
 
+# 대안경로(Yen's k-shortest)는 경로가 길어질수록 급격히 느려진다 — 서울+경기 그래프
+# 실측: 4.6km 약 0.9초, 수원→성남 20km 약 65초. 도보 귀갓길 범위(이 값)를 넘는
+# 요청은 대안 없이 최단(안전 가중) 1개만 찾는다.
+MAX_ALTERNATIVES_KM = 6.0
+
+
+def _alternatives_for(straight_km: float, k: int) -> int:
+    return k if straight_km <= MAX_ALTERNATIVES_KM else 1
+
 _graph_cache: dict[tuple[float, float, float, float], nx.MultiDiGraph] = {}
 
 
@@ -188,17 +249,59 @@ def warm_cache(zones: list[SafetyZone]) -> None:
     )
 
     if _bbox_covers(LOCAL_WALK_NETWORK_BBOX, bbox):
-        _load_local_graph()
+        graph = _load_local_graph()
+        if graph is not None:
+            _prebuild_route_indexes(graph, zones)
         return
 
     _get_graph(bbox)
 
 
+def _prebuild_route_indexes(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> None:
+    """첫 사용자 요청이 노드 색인과 낮/밤 점수 그래프(서울+경기 기준 각 약 30초)를
+    기다리지 않도록 서버 기동 시 미리 만들어둔다."""
+    _node_index(graph)
+    zone_index = _build_zone_index(zones)
+    for period in ("day", "night"):
+        score_map = compute_zone_period_scores(zones, period)
+        _get_scored_graph(graph, zones, score_map, zone_index, period)
+
+
+# 위도 37.5도(서울·경기) 부근에서 경도 1도는 위도 1도의 약 0.79배 길이라, 위경도를
+# 그대로 평면 좌표로 쓰면 최근접 판정이 틀어진다 — 경도에 이 값을 곱해 보정한다.
+_LNG_SCALE = math.cos(math.radians(37.5))
+
+# graph 객체 id -> (graph, KD-tree, KD-tree 인덱스에 대응하는 노드 id 목록).
+# 노드가 수십만~백만 개라 요청마다 파이썬으로 전부 훑으면(서울+경기 75만 노드에서
+# 요청당 약 0.9초) 느리다 — 그래프당 한 번만 색인한다. graph를 함께 들고 있는 건
+# 임시 그래프가 사라진 뒤 같은 id가 재사용돼 엉뚱한 색인이 잡히는 걸 막기 위해서다.
+_node_index_cache: dict[int, tuple[nx.Graph, cKDTree, list[int]]] = {}
+_node_index_lock = threading.Lock()
+
+
+def _node_index(graph: nx.Graph) -> tuple[cKDTree, list[int]]:
+    key = id(graph)
+    cached = _node_index_cache.get(key)
+    if cached is not None and cached[0] is graph:
+        return cached[1], cached[2]
+    with _node_index_lock:
+        cached = _node_index_cache.get(key)
+        if cached is not None and cached[0] is graph:
+            return cached[1], cached[2]
+        node_ids = []
+        points = []
+        for node_id, data in graph.nodes(data=True):
+            node_ids.append(node_id)
+            points.append((data["y"], data["x"] * _LNG_SCALE))
+        tree = cKDTree(points)
+        _node_index_cache[key] = (graph, tree, node_ids)
+        return tree, node_ids
+
+
 def _nearest_node(graph: nx.Graph, lat: float, lng: float) -> int:
-    return min(
-        graph.nodes(data=True),
-        key=lambda item: haversine_km(lat, lng, item[1]["y"], item[1]["x"]),
-    )[0]
+    tree, node_ids = _node_index(graph)
+    _, idx = tree.query((lat, lng * _LNG_SCALE))
+    return node_ids[idx]
 
 
 def _build_zone_index(zones: list[SafetyZone]) -> cKDTree:
@@ -216,31 +319,80 @@ def _edge_cost(length_m: float, safety_score: float) -> float:
     return length_m * multiplier
 
 
+# 간선 점수 = 동 단위 점수(CCTV·보안등·범죄·경찰서·상점) + 도로 특성 점수(큰길/골목,
+# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 CCTV·보안등 밀도(facility_density)의 가중 평균.
+# 도로 특성과 주변 밀도는 같은 동 안에서도 구간마다 달라서 귀갓길 선택을 실제로 가른다.
+# ponytail: MVP 값 — 비중은 체감으로 조정 필요.
+ZONE_SCORE_WEIGHT = 0.4
+ROAD_SCORE_WEIGHT = 0.3
+LOCAL_SCORE_WEIGHT = 0.3
+
+
+@lru_cache(maxsize=1)
+def _facility_index() -> FacilityIndex | None:
+    """구간별 밀도용 좌표(없으면 None → 동 점수로 대체). 서버가 떠 있는 동안 한 번만 읽는다."""
+    return load_facility_index()
+
+
+def _dead_end_nodes(graph: nx.MultiDiGraph) -> set[int]:
+    """이웃이 하나 이하인(방향 무시) 노드 — 막다른 길의 끝."""
+    return {n for n in graph.nodes if len(set(graph.successors(n)) | set(graph.predecessors(n))) <= 1}
+
+
+def _edge_score(zone_score: float, road_score: float, local_score: float) -> float:
+    return (
+        ZONE_SCORE_WEIGHT * zone_score
+        + ROAD_SCORE_WEIGHT * road_score
+        + LOCAL_SCORE_WEIGHT * local_score
+    )
+
+
 def _build_scored_graph(
     graph: nx.MultiDiGraph,
     zones: list[SafetyZone],
     score_map: dict[str, float],
     zone_index: cKDTree,
+    period: Period,
+    facilities: FacilityIndex | None = None,
 ) -> nx.DiGraph:
     """안전점수 배정(KD-tree 최근접 질의)과 평행 간선 단순화(대안 경로 탐색인
     `shortest_simple_paths`는 MultiDiGraph를 지원하지 않음)를 한 번에 한다.
+
+    간선 점수는 동 점수에 도로 특성 점수(road_score)와 구간 주변 시설 밀도를 섞어
+    구간별로 다르게 준다. facilities가 없으면 밀도 자리에 동 점수를 그대로 쓴다.
 
     원본 MultiDiGraph는 건드리지 않는다 — 이 그래프는 day/night 여러 period가
     공유하는 프로세스 전역 싱글턴이라, 제자리에서 mutate하면 동시에 들어온
     다른 period 요청과 서로의 안전점수를 덮어쓸 수 있다."""
     simple = nx.DiGraph()
     simple.add_nodes_from(graph.nodes(data=True))
-    for u, v, data in graph.edges(data=True):
-        mid_lat = (graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2
-        mid_lng = (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2
-        _, idx = zone_index.query((mid_lat, mid_lng))
-        score = score_map[zones[idx].dong_code]
+    edges = list(graph.edges(data=True))
+    if not edges:
+        return simple
+
+    # 간선 200만 개를 하나씩 질의하면 느려서 중간점을 모아 한 번에 묻는다.
+    midpoints = np.array(
+        [
+            ((graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2, (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2)
+            for u, v, _ in edges
+        ]
+    )
+    _, zone_idx = zone_index.query(midpoints)
+    lights_known = np.array([z.lights_known is not False for z in zones])[zone_idx]
+    local_scores = edge_local_scores(facilities, midpoints, period, lights_known) if facilities else None
+    dead_ends = _dead_end_nodes(graph)
+
+    for i, (u, v, data) in enumerate(edges):
+        zone_score = score_map[zones[zone_idx[i]].dong_code]
+        road_score = road_safety_score(data, period, dead_end=u in dead_ends or v in dead_ends)
+        local_score = local_scores[i] if local_scores is not None else zone_score
+        score = _edge_score(zone_score, road_score, local_score)
         cost = _edge_cost(data.get("length", 0.0), score)
         if simple.has_edge(u, v):
             if cost < simple[u][v]["safety_cost"]:
-                simple[u][v].update(data, zone_score=score, safety_cost=cost)
+                simple[u][v].update(data, edge_score=score, safety_cost=cost)
         else:
-            simple.add_edge(u, v, **data, zone_score=score, safety_cost=cost)
+            simple.add_edge(u, v, **data, edge_score=score, safety_cost=cost)
     return simple
 
 
@@ -269,7 +421,7 @@ def _get_scored_graph(
         cached = _scored_graph_cache.get(key)
         if cached is not None:
             return cached
-        simple = _build_scored_graph(graph, zones, score_map, zone_index)
+        simple = _build_scored_graph(graph, zones, score_map, zone_index, period, _facility_index())
         _scored_graph_cache[key] = simple
         return simple
 
@@ -281,7 +433,7 @@ def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
     for u, v in zip(path[:-1], path[1:]):
         edge = graph[u][v]
         total_length += edge["length"]
-        weighted_score += edge["length"] * edge["zone_score"]
+        weighted_score += edge["length"] * edge["edge_score"]
     avg_score = weighted_score / total_length if total_length else 0.0
     return {"points": points, "score": avg_score, "distance_m": total_length}
 
@@ -309,6 +461,7 @@ def find_safe_routes(
 
     score_map = compute_zone_period_scores(zones, period)
     zone_index = _build_zone_index(zones)
+    k = _alternatives_for(haversine_km(start_lat, start_lng, end_lat, end_lng), k)
     bbox = _route_bbox(start_lat, start_lng, end_lat, end_lng)
     graph = _get_graph(bbox)
     if graph is None or graph.number_of_nodes() == 0:
