@@ -3,6 +3,7 @@ backend/.venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/*.db
+backend/*.db.bak*
 backend/.pytest_cache/
 backend/.env
 backend/cache/
@@ -12,11 +13,15 @@ backend/data/osm/
 # backend/scripts/ingest_public_data.py 상단 주석 참고)
 /CCTV정보.csv
 /경찰청_범죄 발생 지역별 통계_*.csv
+/*주민등록인구및세대현황*.csv
 
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/
 frontend/.env.local
+
+# 개인 PC의 절대경로가 박혀 있는 컴파일 산출물 — run_app.cs에서 각자 컴파일해서 쓴다.
+/실행.exe
 
 # OS
 .DS_Store
