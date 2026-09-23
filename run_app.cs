@@ -4,22 +4,12 @@ using System.IO;
 
 class Launcher
 {
-    // ponytail: 이 컴퓨터의 실제 경로를 그대로 박음 — 다른 PC로 옮기면 이 줄만 고치면 됨.
-    const string PythonExe = @"C:\Users\재혁\AppData\Local\Programs\Python\Python311\python.exe";
-
     static void Main()
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
         string backendDir = Path.Combine(root, "backend");
         string frontendDir = Path.Combine(root, "frontend");
 
-        if (!File.Exists(PythonExe))
-        {
-            Console.WriteLine("Python not found: " + PythonExe);
-            Console.WriteLine("Edit PythonExe in run_app.cs and recompile, or reinstall Python at that path.");
-            Pause();
-            return;
-        }
         if (!Directory.Exists(backendDir) || !Directory.Exists(frontendDir))
         {
             Console.WriteLine("backend/ or frontend/ folder not found next to this exe.");
@@ -28,8 +18,18 @@ class Launcher
             return;
         }
 
+        string python = FindPython(backendDir);
+        if (python == null)
+        {
+            Console.WriteLine("Could not find a Python interpreter.");
+            Console.WriteLine("Set one up first: cd backend && python -m venv .venv && .venv\\Scripts\\pip install -r requirements.txt");
+            Console.WriteLine("Or make sure 'py' or 'python' is on PATH.");
+            Pause();
+            return;
+        }
+
         StartInCmdWindow("Backend (uvicorn :8000)",
-            "\"" + PythonExe + "\" -m uvicorn app.main:app --host 127.0.0.1 --port 8000", backendDir);
+            "\"" + python + "\" -m uvicorn app.main:app --host 127.0.0.1 --port 8000", backendDir);
 
         StartInCmdWindow("Frontend (next dev :3000)", "npm run dev", frontendDir);
 
@@ -40,6 +40,40 @@ class Launcher
 
         Console.WriteLine("This window can be closed. To stop the servers, close the Backend/Frontend windows.");
         Pause();
+    }
+
+    // 특정 PC의 절대경로를 박지 않는다 — 1) 프로젝트 전용 venv, 2) Windows Python
+    // 런처(py), 3) PATH의 python 순으로 이 컴퓨터에 실제로 있는 것만 쓴다.
+    static string FindPython(string backendDir)
+    {
+        string venvPython = Path.Combine(backendDir, ".venv", "Scripts", "python.exe");
+        if (File.Exists(venvPython)) return venvPython;
+        if (CommandExists("py", "--version")) return "py";
+        if (CommandExists("python", "--version")) return "python";
+        return null;
+    }
+
+    static bool CommandExists(string exe, string args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(exe, args)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using (var p = Process.Start(psi))
+            {
+                p.WaitForExit(3000);
+                return p.HasExited && p.ExitCode == 0;
+            }
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     static void StartInCmdWindow(string title, string command, string workDir)
