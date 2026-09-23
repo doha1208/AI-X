@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.safety_zone import SafetyZone
+from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.schemas.safety import (
     RouteAlternative,
     RouteMode,
@@ -13,6 +13,7 @@ from app.schemas.safety import (
     RouteResponse,
     SafetyZoneOut,
 )
+from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
 from app.services.safe_route import find_safe_routes
 from app.services.safety_score import compute_zone_period_scores
@@ -58,14 +59,29 @@ def nearby_zones(
     radius_km: float = Query(2.0, gt=0),
     db: Session = Depends(get_db),
 ):
-    zones = db.query(SafetyZone).all()
+    zones = scoped_zones_query(db).all()
     return [z for z in zones if haversine_km(lat, lng, z.lat, z.lng) <= radius_km]
+
+
+@router.get("/bells", response_model=list[RoutePoint])
+def nearby_bells_endpoint(
+    lat: float,
+    lng: float,
+    radius_km: float = Query(1.0, gt=0),
+    limit: int = Query(DEFAULT_BELL_LIMIT, gt=0, le=1000),
+):
+    """지도 표시용 — 반경 안의 안전비상벨 좌표(안전 지수 계산과는 별개 조회).
+
+    limit을 넉넉하게 올려 받은 뒤 프론트에서 실제 경로 선 근처만 다시 거르는
+    용도(귀갓길)로도 쓴다 — le=1000은 그 상한.
+    """
+    return nearby_bells(lat, lng, radius_km, limit=limit)
 
 
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])
 def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depends(get_db)):
     return (
-        db.query(SafetyZone)
+        scoped_zones_query(db)
         .order_by(SafetyZone.safety_score.desc())
         .limit(limit)
         .all()
@@ -83,7 +99,7 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
        보행자 최단경로를 받아 그 위에 안전점수만 표시(대안 없음).
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
-    zones = db.query(SafetyZone).all()
+    zones = scoped_zones_query(db).all()
     period = period_for(payload.at)
     score_map = compute_zone_period_scores(zones, period)
 

@@ -3,6 +3,9 @@ import os
 if os.path.exists("test_safety.db"):
     os.remove("test_safety.db")
 os.environ["DATABASE_URL"] = "sqlite:///./test_safety.db"
+# 로컬 .env의 발표용 REGION_SCOPE_PREFIX(예: 41=경기도)가 TEST1/TEST2 같은
+# 테스트 전용 dong_code까지 걸러버리지 않도록 테스트에서는 항상 전체 범위로 둔다.
+os.environ["REGION_SCOPE_PREFIX"] = ""
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -84,6 +87,18 @@ def test_route_safety_accepts_night_timestamp():
     body = res.json()
     assert "safety_score" in body
     assert len(body["zones_passed"]) >= 1
+
+
+def test_nearby_bells_limit_query_param_is_honored():
+    from app.services import bells as bells_module
+
+    bells_module._cached_points = [(37.5001 + 0.0001 * i, 127.0) for i in range(10)]
+    try:
+        res = client.get("/safety/bells", params={"lat": 37.5, "lng": 127.0, "radius_km": 5, "limit": 3})
+        assert res.status_code == 200
+        assert len(res.json()) == 3
+    finally:
+        bells_module._cached_points = None
 
 
 def test_route_safety_includes_shortest_route_field():

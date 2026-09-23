@@ -5,9 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.safety import router as safety_router
+from app.core.config import settings
 from app.db.session import Base, SessionLocal, engine
 from app.models import safety_zone, user  # noqa: F401 (register models before create_all)
-from app.models.safety_zone import SafetyZone
+from app.models.safety_zone import scoped_zones_query
 from app.services.safe_route import warm_cache
 
 Base.metadata.create_all(bind=engine)
@@ -26,16 +27,21 @@ def warm_safe_route_cache() -> None:
     def _run() -> None:
         db = SessionLocal()
         try:
-            warm_cache(db.query(SafetyZone).all())
+            warm_cache(scoped_zones_query(db).all())
         finally:
             db.close()
 
     threading.Thread(target=_run, daemon=True).start()
 
+# CORS_ALLOW_ORIGINS(.env)로 배포/터널 환경마다 허용 origin을 바꾼다.
+# 인증은 쿠키가 아니라 Authorization 헤더(Bearer 토큰)라 자격 증명이 필요 없다 —
+# "*"와 allow_credentials=True를 같이 쓰면 브라우저가 거부하므로, 와일드카드일 때는
+# allow_credentials를 꺼서 스펙을 지킨다.
+cors_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials="*" not in cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

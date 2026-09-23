@@ -1,6 +1,7 @@
 from sqlalchemy import Boolean, Float, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, Session, mapped_column
 
+from app.core.config import settings
 from app.db.session import Base
 
 
@@ -22,4 +23,18 @@ class SafetyZone(Base):
     # 동 중심에서 가장 가까운 경찰서/파출소까지의 거리(m). 0은 미수집(전 동 동일 → 중립).
     police_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
     store_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 동 중심에서 가장 가까운 안전비상벨까지의 거리(m).
+    bell_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
     safety_score: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+def scoped_zones_query(db: Session):
+    """settings.region_scope_prefix가 설정돼 있으면 그 dong_code 접두사만 걸러서 반환한다.
+
+    데이터를 지우지 않고 조회만 좁히는 방식 — 발표 시연처럼 특정 지역만 보여줄 때
+    .env의 REGION_SCOPE_PREFIX만 바꾸면 되고, 값을 비우면 원래대로 전체가 나온다.
+    """
+    query = db.query(SafetyZone)
+    if settings.region_scope_prefix:
+        query = query.filter(SafetyZone.dong_code.startswith(settings.region_scope_prefix))
+    return query
