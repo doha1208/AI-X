@@ -1,8 +1,8 @@
-"""도로 구간(edge) 주변의 CCTV·보안등 개수로 구간별 안전 점수(0~100)를 계산한다.
+"""도로 구간(edge) 주변의 CCTV·보안등·교통사고 다발지역 개수로 구간별 안전 점수(0~100)를 계산한다.
 
 동 단위 점수는 같은 동 안의 모든 길이 같은 값이고, OSM 가로등(lit) 태그는 서울+경기 도로의
-1%도 안 돼서, 좌표가 있는 공공데이터(scripts/ingest_public_data.py --dump-points)를 구간
-단위로 직접 센다.
+1%도 안 돼서, 좌표가 있는 공공데이터(scripts/ingest_public_data.py --dump-points,
+--dump-accidents)를 구간 단위로 직접 센다.
 
 ponytail: 반경·포화 개수·주야 비중은 체감 기반 MVP 값 — 실제 귀갓길 피드백으로 조정 필요.
 """
@@ -23,26 +23,36 @@ FACILITY_POINTS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / 
 
 CCTV_RADIUS_M = 60.0
 LIGHT_RADIUS_M = 40.0
-# 반경 안에 이 개수 이상이면 만점 — 더 많다고 계속 안전해지지는 않는다.
+# 사고다발지역은 지점(교차로 등) 표시라 CCTV/보안등보다 넉넉한 반경으로 근처 도로 전체에 영향을 준다.
+ACCIDENT_RADIUS_M = 80.0
+# 반경 안에 이 개수 이상이면 만점(또는 만점 감점)이다 — 더 많다고 계속 커지지는 않는다.
 CCTV_SATURATION = 1
 LIGHT_SATURATION = 2
+ACCIDENT_SATURATION = 1
 
-# (cctv 비중, 보안등 비중) — 낮엔 방범 CCTV, 밤엔 즉시 시야를 확보해주는 보안등.
-_WEIGHTS: dict[Period, tuple[float, float]] = {"day": (0.7, 0.3), "night": (0.4, 0.6)}
+# (cctv 비중, 보안등 비중, 사고다발지역 감점 비중) — 낮엔 방범 CCTV, 밤엔 즉시 시야를
+# 확보해주는 보안등. 사고다발지역은 주야 무관하게 같은 비중으로 감점한다.
+_WEIGHTS: dict[Period, tuple[float, float, float]] = {
+    "day": (0.6, 0.25, 0.15),
+    "night": (0.35, 0.5, 0.15),
+}
 
 
 @dataclass(frozen=True)
 class FacilityIndex:
     cctv_tree: cKDTree | None
     light_tree: cKDTree | None
+    accident_tree: cKDTree | None = None
 
 
 def _tree(points: list[Point]) -> cKDTree | None:
     return cKDTree(to_meters(points)) if len(points) else None
 
 
-def build_facility_index(cctv: list[Point], lights: list[Point]) -> FacilityIndex:
-    return FacilityIndex(cctv_tree=_tree(cctv), light_tree=_tree(lights))
+def build_facility_index(
+    cctv: list[Point], lights: list[Point], accidents: list[Point] | None = None
+) -> FacilityIndex:
+    return FacilityIndex(cctv_tree=_tree(cctv), light_tree=_tree(lights), accident_tree=_tree(accidents or []))
 
 
 def load_facility_index(path: Path = FACILITY_POINTS_PATH) -> FacilityIndex | None:
@@ -53,7 +63,9 @@ def load_facility_index(path: Path = FACILITY_POINTS_PATH) -> FacilityIndex | No
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         # lights_geocoded: 좌표 없이 주소만 올린 지자체의 보안등을 주소→좌표 변환으로 복구한 것.
-        return build_facility_index(data["cctv"], data["lights"] + data.get("lights_geocoded", []))
+        return build_facility_index(
+            data["cctv"], data["lights"] + data.get("lights_geocoded", []), data.get("accidents", [])
+        )
     except (OSError, ValueError, KeyError):
         logger.warning("Facility points unreadable, per-road density disabled: %s", path, exc_info=True)
         return None
@@ -80,5 +92,7 @@ def edge_local_scores(index: FacilityIndex, midpoints, period: Period, lights_kn
     light = _saturating_score(index.light_tree, meters, LIGHT_RADIUS_M, LIGHT_SATURATION)
     if lights_known is not None:
         light = np.where(lights_known, light, UNKNOWN_LIGHT_SCORE)
-    w_cctv, w_light = _WEIGHTS[period]
-    return (cctv * w_cctv + light * w_light).tolist()
+    accident = _saturating_score(index.accident_tree, meters, ACCIDENT_RADIUS_M, ACCIDENT_SATURATION)
+    w_cctv, w_light, w_accident = _WEIGHTS[period]
+    score = cctv * w_cctv + light * w_light - accident * w_accident
+    return np.clip(score, 0.0, 100.0).tolist()

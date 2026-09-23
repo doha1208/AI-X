@@ -14,6 +14,8 @@ backend/data/osm/
 /CCTV정보.csv
 /경찰청_범죄 발생 지역별 통계_*.csv
 /*주민등록인구및세대현황*.csv
+/안전비상벨위치정보.csv
+/전국교통사고다발지역표준데이터.csv
 
 # Node / Next.js
 frontend/node_modules/

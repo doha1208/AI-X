@@ -5,6 +5,8 @@
 - 보안등: data.go.kr 전국보안등정보표준데이터 OpenAPI (SECURITY_LIGHT_API_KEY)
 - 범죄: data.go.kr 경찰청_범죄 발생 지역별 통계 (구 단위 5대 범죄 합계, 프로젝트 루트 CSV)
 - 경찰서·상점: OSM에서 extract_safety_pois.py로 미리 뽑은 data/osm/safety_pois.json
+- 안전비상벨: data.go.kr 전국안전비상벨위치표준데이터 (프로젝트 루트 안전비상벨위치정보.csv)
+- 교통사고 다발지역: data.go.kr 전국교통사고다발지역표준데이터 (프로젝트 루트 전국교통사고다발지역표준데이터.csv)
 - 인구: jumin.mois.go.kr 주민등록 인구 및 세대현황(월간, 범죄 통계와 같은 연도의 서울·경기
   시군구; 프로젝트 루트 *주민등록인구및세대현황*.csv) — 범죄 건수를 1만 명당 범죄율로 보정
 - 좌표→행정동 변환: build_dong_grid.py로 미리 만든 격자 캐시(app/data/dong_grid.json)
@@ -19,6 +21,8 @@ ponytail: 범죄 통계는 구 단위가 공개 최소 단위라 같은 구의 �
     backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --refresh
     # 도로 구간별 밀도용 CCTV·보안등 좌표만 저장(API ~1,900회, 수 분~수십 분):
     backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-points
+    # 위 CCTV·보안등 좌표는 그대로 두고 교통사고 다발지역 좌표만 추가:
+    backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-accidents
 """
 import csv
 import json
@@ -35,7 +39,7 @@ from sqlalchemy import inspect, text
 from app.db.session import Base, SessionLocal, engine
 from app.models.safety_zone import SafetyZone
 from app.services.crime_rate import crime_rate_per_10k, parse_population_csv, region_key_for
-from app.services.poi_factors import nearest_police_distances_m
+from app.services.poi_factors import nearest_bell_distances_m, nearest_police_distances_m
 from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights
 
 HERE = Path(__file__).resolve().parent
@@ -43,6 +47,8 @@ BACKEND_DIR = HERE.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 
 CCTV_CSV = PROJECT_ROOT / "CCTV정보.csv"
+BELL_CSV = PROJECT_ROOT / "안전비상벨위치정보.csv"
+ACCIDENT_CSV = PROJECT_ROOT / "전국교통사고다발지역표준데이터.csv"
 CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
 GRID_PATH = BACKEND_DIR / "app" / "data" / "dong_grid.json"
 ENV_PATH = BACKEND_DIR / ".env"
@@ -50,6 +56,8 @@ ENV_PATH = BACKEND_DIR / ".env"
 POIS_PATH = BACKEND_DIR / "data" / "osm" / "safety_pois.json"
 # --dump-points가 만드는 CCTV·보안등 좌표(도로 구간별 밀도 계산용).
 FACILITY_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "facility_points.json"
+# 안전비상벨 좌표(서울+경기 범위) — 안전지수 계산과 지도 표시(app/services/bells.py) 둘 다 이 파일을 쓴다.
+BELL_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "bell_points.json"
 # 좌표 없이 주소만 있는 보안등 행(주소별 개수) — geocode_light_addresses.py가 좌표로 바꾼다.
 LIGHT_ADDRESSES_PATH = BACKEND_DIR / "data" / "osm" / "light_addresses.json"
 
@@ -132,6 +140,60 @@ def iter_cctv_points():
             except (KeyError, ValueError):
                 continue
             yield lat, lng
+
+
+def iter_bell_points():
+    """서울+경기 안전비상벨의 (lat, lng). CCTV와 같은 표준데이터 컬럼(WGS84위도/경도)을 쓴다."""
+    with BELL_CSV.open(encoding="cp949", errors="replace", newline="") as f:
+        for row in csv.DictReader(f):
+            addr = row.get("소재지도로명주소") or row.get("소재지지번주소") or ""
+            if not addr.startswith(("서울", "경기")):
+                continue
+            try:
+                lat = float(row["WGS84위도"])
+                lng = float(row["WGS84경도"])
+            except (KeyError, ValueError):
+                continue
+            yield lat, lng
+
+
+def iter_accident_points():
+    """서울+경기 교통사고 다발지역의 (lat, lng) — 사고건수만큼 반복해 밀도 계산 시 자연히 가중된다."""
+    with ACCIDENT_CSV.open(encoding="cp949", errors="replace", newline="") as f:
+        for row in csv.DictReader(f):
+            addr = row.get("사고다발지역시도시군구", "")
+            if not addr.startswith(("서울", "경기")):
+                continue
+            try:
+                lat = float(row["위도"])
+                lng = float(row["경도"])
+                count = max(1, int(row.get("사고건수", 1)))
+            except (KeyError, ValueError):
+                continue
+            for _ in range(count):
+                yield lat, lng
+
+
+def dump_accident_points() -> None:
+    """기존 facility_points.json(CCTV·보안등, 특히 오래 걸린 lights_geocoded)을 건드리지 않고
+    교통사고 다발지역 좌표만 추가/갱신한다."""
+    payload = load_facility_points()
+    west, south, east, north = payload["bbox"]
+
+    def inside(lat: float, lng: float) -> bool:
+        return west <= lng <= east and south <= lat <= north
+
+    accidents = [[round(lat, 6), round(lng, 6)] for lat, lng in iter_accident_points() if inside(lat, lng)]
+    payload["accidents"] = accidents
+    _atomic_write_json(FACILITY_POINTS_PATH, payload)
+    print(f"Saved {len(accidents)} accident-weighted points to {FACILITY_POINTS_PATH}")
+
+
+def dump_bell_points() -> list[tuple[float, float]]:
+    """비상벨 CSV를 한 번만 읽어 (동 점수 계산용 리스트를 돌려주고) 지도 표시용 JSON도 저장한다."""
+    points = list(iter_bell_points())
+    _atomic_write_json(BELL_POINTS_PATH, [[round(lat, 6), round(lng, 6)] for lat, lng in points])
+    return points
 
 
 def load_facility_points() -> dict:
@@ -266,16 +328,22 @@ def count_points_by_dong(points: list, step: float, cells: dict, bbox) -> dict:
 
 
 def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None:
-    """dong_code/lat/lng를 가진 레코드에 경찰서까지 거리(police_dist_m)와 상점 수(store_count)를 채운다."""
+    """dong_code/lat/lng를 가진 레코드에 경찰서까지 거리(police_dist_m), 비상벨까지 거리(bell_dist_m),
+    상점 수(store_count)를 채운다."""
     pois = load_pois()
-    dists = nearest_police_distances_m(
-        [(r["lat"], r["lng"]) for r in records], [(lat, lng) for lat, lng in pois["police"]]
-    )
+    centroids = [(r["lat"], r["lng"]) for r in records]
+    police_dists = nearest_police_distances_m(centroids, [(lat, lng) for lat, lng in pois["police"]])
+    bell_points = dump_bell_points()
+    bell_dists = nearest_bell_distances_m(centroids, bell_points)
     stores_by_dong = count_points_by_dong(pois["stores"], step, cells, bbox)
-    for record, dist in zip(records, dists):
-        record["police_dist_m"] = dist
+    for record, police_dist, bell_dist in zip(records, police_dists, bell_dists):
+        record["police_dist_m"] = police_dist
+        record["bell_dist_m"] = bell_dist
         record["store_count"] = stores_by_dong.get(record["dong_code"], 0)
-    print(f"  {len(pois['police'])} police, {len(pois['stores'])} stores -> {sum(stores_by_dong.values())} stores assigned")
+    print(
+        f"  {len(pois['police'])} police, {len(bell_points)} bells, {len(pois['stores'])} stores "
+        f"-> {sum(stores_by_dong.values())} stores assigned"
+    )
 
 
 def load_population() -> dict[str, float]:
@@ -320,6 +388,7 @@ def ensure_new_columns() -> None:
         ("store_count", "INTEGER DEFAULT 0"),
         ("crime_rate", "FLOAT DEFAULT 0"),
         ("lights_known", "BOOLEAN DEFAULT TRUE"),
+        ("bell_dist_m", "FLOAT DEFAULT 0"),
     )
     with engine.begin() as conn:
         for name, ddl in new_columns:
@@ -365,6 +434,7 @@ def refresh_derived_factors() -> None:
             zone.streetlight_count = rec["streetlight_count"]
             zone.lights_known = rec["lights_known"]
             zone.police_dist_m = rec["police_dist_m"]
+            zone.bell_dist_m = rec["bell_dist_m"]
             zone.store_count = rec["store_count"]
             zone.crime_count = rec["crime_count"]
             zone.crime_rate = rec["crime_rate"]
@@ -440,5 +510,7 @@ if __name__ == "__main__":
         refresh_derived_factors()
     elif "--dump-points" in sys.argv:
         dump_facility_points()
+    elif "--dump-accidents" in sys.argv:
+        dump_accident_points()
     else:
         ingest()
