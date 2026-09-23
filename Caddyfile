@@ -1,0 +1,16 @@
+# DuckDNS는 Public Suffix List에 등록돼 있어 서브도메인마다 Let's Encrypt 발급 한도가
+# 따로 계산된다(kro.kr처럼 전체 사용자가 한도를 공유하지 않음).
+{
+	email admin@ansimnavi.duckdns.org
+}
+
+# 고정 도메인(ansimnavi.duckdns.org) 하나로 프론트/백엔드를 묶는다 — 브라우저 입장에선 같은
+# origin이라 CORS 걱정이 없고, 카카오 콘솔에도 이 도메인 하나만 등록하면 된다.
+ansimnavi.duckdns.org {
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}
