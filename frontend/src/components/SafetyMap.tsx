@@ -11,6 +11,7 @@ type ContextMenuInfo = LatLng & { x: number; y: number };
 
 type Props = {
   zones: SafetyZone[];
+  bells?: LatLng[];
   center?: LatLng;
   myLocation?: LatLng;
   routePath?: LatLng[];
@@ -72,6 +73,7 @@ function loadDongBoundaries(): Promise<DongBoundaryMap> {
 
 export function SafetyMap({
   zones,
+  bells = [],
   center = { lat: 37.5665, lng: 126.978 },
   myLocation,
   routePath,
@@ -263,6 +265,28 @@ export function SafetyMap({
       }
     });
 
+    bells.forEach((bell) => {
+      // 도심은 비상벨이 촘촘해서(백엔드가 가까운 순 최대 60개로 제한해도) 큰 마커면
+      // 경로선을 가린다 — 작은 점으로만 위치를 표시하고, 이름은 hover 시 title로.
+      const marker = document.createElement("div");
+      marker.title = "안전비상벨";
+      marker.style.width = "8px";
+      marker.style.height = "8px";
+      marker.style.borderRadius = "50%";
+      marker.style.background = "#e65100";
+      marker.style.border = "1px solid #fff";
+      marker.style.boxShadow = "0 0 0 1px rgba(230,81,0,0.4)";
+
+      const overlay = new kakao.maps.CustomOverlay({
+        position: new kakao.maps.LatLng(bell.lat, bell.lng),
+        content: marker,
+        yAnchor: 0.5,
+        zIndex: 3,
+      });
+      overlay.setMap(map);
+      overlaysRef.current.push(overlay);
+    });
+
     if (comparePath && comparePath.length > 1) {
       // 안전 가중 경로가 실제 최단경로와 다르다는 걸 비교해 보여주는 참고선.
       const path = comparePath.map((p) => new kakao.maps.LatLng(p.lat, p.lng));
@@ -294,7 +318,7 @@ export function SafetyMap({
       if (comparePath) comparePath.forEach((p) => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
       map.setBounds(bounds);
     }
-  }, [loaded, zones, routePath, comparePath, myLocation, focusZone, boundaries]);
+  }, [loaded, zones, bells, routePath, comparePath, myLocation, focusZone, boundaries]);
 
   // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
   useEffect(() => {

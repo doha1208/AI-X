@@ -7,26 +7,28 @@ Period = Literal["day", "night"]
 # 비중을 높임. 실제 체감 안전도와 맞춰보며 조정 필요.
 _PERIOD_WEIGHTS: dict[Period, dict[str, float]] = {
     "day": {
-        "cctv_count": 0.30,
+        "cctv_count": 0.25,
         "streetlight_count": 0.10,
-        "crime_rate": 0.30,
-        "police_dist_m": 0.15,
-        "store_count": 0.15,
-    },
-    "night": {
-        "cctv_count": 0.20,
-        "streetlight_count": 0.25,
         "crime_rate": 0.30,
         "police_dist_m": 0.10,
         "store_count": 0.15,
+        "bell_dist_m": 0.10,
+    },
+    "night": {
+        "cctv_count": 0.15,
+        "streetlight_count": 0.25,
+        "crime_rate": 0.25,
+        "police_dist_m": 0.10,
+        "store_count": 0.10,
+        "bell_dist_m": 0.15,
     },
 }
 
 # 값을 모르는(None) 요소에 주는 점수 — 예: 보안등 데이터를 못 받은 지자체의 동.
 UNKNOWN_SCORE = 50.0
 
-# 값이 작을수록 안전한 요소(1만 명당 범죄율, 가장 가까운 경찰서까지의 거리).
-_LOWER_IS_SAFER = {"crime_rate", "police_dist_m"}
+# 값이 작을수록 안전한 요소(1만 명당 범죄율, 가장 가까운 경찰서·비상벨까지의 거리).
+_LOWER_IS_SAFER = {"crime_rate", "police_dist_m", "bell_dist_m"}
 
 
 # 시·군·구의 동당 평균 보안등 수가 이보다 적으면 그 지역은 데이터를 사실상 못 올린 곳으로 본다.
@@ -115,6 +117,7 @@ def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str,
             "crime_rate": z.crime_rate or 0,
             "police_dist_m": z.police_dist_m or 0,
             "store_count": z.store_count or 0,
+            "bell_dist_m": z.bell_dist_m or 0,
         }
         for z in zones
     ]

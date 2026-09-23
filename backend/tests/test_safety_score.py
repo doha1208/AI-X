@@ -105,6 +105,15 @@ def test_flagged_dongs_get_neutral_light_score_when_scoring():
     assert scores["1111010200"] < scores["1117010100"] < scores["1111010100"]
 
 
+def test_closer_bell_raises_score():
+    records = [
+        {"dong_code": "NEAR", "cctv_count": 10, "streetlight_count": 10, "crime_rate": 50, "bell_dist_m": 50},
+        {"dong_code": "FAR", "cctv_count": 10, "streetlight_count": 10, "crime_rate": 50, "bell_dist_m": 900},
+    ]
+    scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(records)}
+    assert scores["NEAR"] > scores["FAR"]
+
+
 def test_more_shops_raise_score():
     records = [
         {"dong_code": "BUSY", "cctv_count": 10, "streetlight_count": 10, "crime_count": 5, "store_count": 300},

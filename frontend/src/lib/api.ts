@@ -55,6 +55,13 @@ export function nearbyZones(lat: number, lng: number, radiusKm = 2) {
   );
 }
 
+export function nearbyBells(lat: number, lng: number, radiusKm = 1, limit?: number) {
+  const limitParam = limit ? `&limit=${limit}` : "";
+  return request<{ lat: number; lng: number }[]>(
+    `/safety/bells?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${limitParam}`
+  );
+}
+
 export function routeSafety(
   startLat: number,
   startLng: number,
