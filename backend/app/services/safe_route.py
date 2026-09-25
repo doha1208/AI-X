@@ -1,4 +1,6 @@
 import logging
+import hashlib
+import json
 import math
 import pickle
 import socket
@@ -20,6 +22,7 @@ from app.services.geo import haversine_km
 from app.services.road_score import road_safety_score
 from app.services.route_artifact import RouteArtifact, load_current_artifact
 from app.services.safety_score import Period, compute_zone_period_scores
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
 
 logger = logging.getLogger(__name__)
 
@@ -565,7 +568,7 @@ route_artifact_runtime = RouteArtifactRuntime()
 
 
 def build_route_artifact(
-    zones: list[SafetyZone], *, version: str, region: str
+    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
 ) -> RouteArtifact:
     """배치 실행에서만 호출하는 낮·밤 안전 가중 경로 그래프 생성기.
 
@@ -582,8 +585,10 @@ def build_route_artifact(
     zone_index = _build_zone_index(zones)
     facilities = _facility_index()
     graph_by_period: dict[Period, nx.DiGraph] = {}
+    score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
-        score_map = compute_zone_period_scores(zones, period)
+        score_map = compute_zone_period_scores(zones, period, profile=profile)
+        score_by_period[period] = score_map
         graph_by_period[period] = _build_scored_graph(
             graph, zones, score_map, zone_index, period, facilities
         )
@@ -598,7 +603,23 @@ def build_route_artifact(
         graph_by_period=graph_by_period,
         node_ids=node_ids,
         node_points=node_points,
+        profile_version=profile.version,
+        data_version=_zone_data_version(zones),
+        score_by_period=score_by_period,
     )
+
+
+def _zone_data_version(zones: list[SafetyZone]) -> str:
+    fields = (
+        "dong_code", "lat", "lng", "cctv_count", "streetlight_count", "lights_known",
+        "crime_rate", "police_dist_m", "store_count", "bell_dist_m",
+    )
+    records = [
+        {field: getattr(zone, field) for field in fields}
+        for zone in sorted(zones, key=lambda zone: zone.dong_code)
+    ]
+    encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def find_safe_routes(

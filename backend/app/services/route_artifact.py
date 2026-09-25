@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import networkx as nx
@@ -15,7 +15,7 @@ from app.services.safety_score import Period
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ARTIFACT_FILENAME = "route-artifact.pickle"
 CURRENT_MANIFEST_FILENAME = "current.json"
 
@@ -29,6 +29,11 @@ class RouteArtifact:
     graph_by_period: dict[Period, nx.DiGraph]
     node_ids: list[int]
     node_points: np.ndarray
+    profile_version: str = "default-v1"
+    data_version: str = "test-data"
+    score_by_period: dict[Period, dict[str, float]] = field(
+        default_factory=lambda: {"day": {}, "night": {}}
+    )
 
 
 def _validate_version(version: str) -> None:
@@ -60,7 +65,11 @@ def _validate_artifact(artifact: RouteArtifact, manifest: dict) -> bool:
         return False
     if artifact.version != manifest["version"] or artifact.region != manifest["region"]:
         return False
+    if artifact.profile_version != manifest["profile_version"] or artifact.data_version != manifest["data_version"]:
+        return False
     if set(artifact.graph_by_period) != {"day", "night"}:
+        return False
+    if set(artifact.score_by_period) != {"day", "night"}:
         return False
     if len(artifact.node_ids) != len(artifact.node_points):
         return False
@@ -95,6 +104,8 @@ def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
                 "region": artifact.region,
                 "artifact_file": str(relative_path).replace("\\", "/"),
                 "sha256": checksum,
+                "profile_version": artifact.profile_version,
+                "data_version": artifact.data_version,
             },
         )
         temporary_dir.replace(version_dir)
@@ -108,6 +119,8 @@ def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
                 "region": artifact.region,
                 "artifact_file": str(relative_path).replace("\\", "/"),
                 "sha256": checksum,
+                "profile_version": artifact.profile_version,
+                "data_version": artifact.data_version,
             },
         )
         manifest_tmp.replace(directory / CURRENT_MANIFEST_FILENAME)
@@ -124,7 +137,15 @@ def load_current_artifact(directory: Path) -> RouteArtifact | None:
     manifest_path = directory / CURRENT_MANIFEST_FILENAME
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        required = {"schema_version", "version", "region", "artifact_file", "sha256"}
+        required = {
+            "schema_version",
+            "version",
+            "region",
+            "artifact_file",
+            "sha256",
+            "profile_version",
+            "data_version",
+        }
         if not isinstance(manifest, dict) or set(manifest) != required:
             raise ValueError("Route artifact manifest fields are invalid")
         if manifest["schema_version"] != SCHEMA_VERSION:

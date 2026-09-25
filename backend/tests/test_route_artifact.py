@@ -17,6 +17,9 @@ def _artifact(version: str = "v1") -> RouteArtifact:
         graph_by_period={"day": graph, "night": graph.copy()},
         node_ids=[1, 2],
         node_points=np.array([(37.5, 127.0), (37.501, 127.001)]),
+        profile_version="default-v1",
+        data_version="data-v1",
+        score_by_period={"day": {"TEST1": 70.0}, "night": {"TEST1": 65.0}},
     )
 
 
@@ -30,6 +33,17 @@ def test_published_artifact_becomes_the_current_loadable_version(tmp_path):
     assert loaded.region == "seoul-gyeonggi"
     assert loaded.node_ids == [1, 2]
     assert loaded.graph_by_period["day"][1][2]["safety_cost"] == 210.0
+
+
+def test_published_artifact_keeps_its_profile_data_and_score_versions(tmp_path):
+    publish_artifact(_artifact(), tmp_path)
+
+    loaded = load_current_artifact(tmp_path)
+
+    assert loaded is not None
+    assert loaded.profile_version == "default-v1"
+    assert loaded.data_version == "data-v1"
+    assert loaded.score_by_period == {"day": {"TEST1": 70.0}, "night": {"TEST1": 65.0}}
 
 
 def test_checksum_mismatch_rejects_current_artifact(tmp_path):

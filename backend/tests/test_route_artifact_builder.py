@@ -2,6 +2,7 @@ import networkx as nx
 
 from app.models.safety_zone import SafetyZone
 from app.services import safe_route as sr
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE
 
 
 def _tiny_walk_graph() -> nx.MultiDiGraph:
@@ -41,3 +42,6 @@ def test_build_route_artifact_precomputes_day_and_night_graphs(monkeypatch):
     assert artifact.node_points.tolist() == [[37.5, 100.75587421698687], [37.501, 100.75666757032717]]
     assert artifact.graph_by_period["day"][1][2]["safety_cost"] > 0
     assert artifact.graph_by_period["night"][1][2]["safety_cost"] > 0
+    assert artifact.profile_version == DEFAULT_SCORING_PROFILE.version
+    assert set(artifact.score_by_period) == {"day", "night"}
+    assert artifact.score_by_period["day"]["TEST1"] == 50.0
