@@ -1,31 +1,9 @@
-from typing import Literal
-
-Period = Literal["day", "night"]
-
-# 요소별 가중치 — period마다 합 1.0.
-# ponytail: MVP 값 — night는 CCTV(사후 확인용)보다 보안등(즉시 시야 확보)
-# 비중을 높임. 실제 체감 안전도와 맞춰보며 조정 필요.
-_PERIOD_WEIGHTS: dict[Period, dict[str, float]] = {
-    "day": {
-        "cctv_count": 0.25,
-        "streetlight_count": 0.10,
-        "crime_rate": 0.30,
-        "police_dist_m": 0.10,
-        "store_count": 0.15,
-        "bell_dist_m": 0.10,
-    },
-    "night": {
-        "cctv_count": 0.15,
-        "streetlight_count": 0.25,
-        "crime_rate": 0.25,
-        "police_dist_m": 0.10,
-        "store_count": 0.10,
-        "bell_dist_m": 0.15,
-    },
-}
-
-# 값을 모르는(None) 요소에 주는 점수 — 예: 보안등 데이터를 못 받은 지자체의 동.
-UNKNOWN_SCORE = 50.0
+from app.services.scoring_profile import (
+    DEFAULT_SCORING_PROFILE,
+    Period,
+    ScoringProfile,
+    validate_profile,
+)
 
 # 값이 작을수록 안전한 요소(1만 명당 범죄율, 가장 가까운 경찰서·비상벨까지의 거리).
 _LOWER_IS_SAFER = {"crime_rate", "police_dist_m", "bell_dist_m"}
@@ -67,7 +45,9 @@ def _normalize(value: float, lo: float, hi: float) -> float:
     return max(0.0, min(100.0, (value - lo) / (hi - lo) * 100))
 
 
-def compute_safety_scores(records: list[dict], period: Period = "day") -> list[dict]:
+def compute_safety_scores(
+    records: list[dict], period: Period = "day", profile: ScoringProfile | None = None
+) -> list[dict]:
     """요소별 수치(cctv_count/streetlight_count/crime_rate/police_dist_m/store_count)를
     가진 레코드 목록을 받아 0~100 안전 지수(safety_score)를 채워 반환한다. 높을수록 안전.
 
@@ -80,7 +60,9 @@ def compute_safety_scores(records: list[dict], period: Period = "day") -> list[d
     if not records:
         return records
 
-    weights = _PERIOD_WEIGHTS[period]
+    profile = profile or DEFAULT_SCORING_PROFILE
+    validate_profile(profile)
+    weights = profile.weights[period]
     bounds = {}
     for factor in weights:
         known = [v for v in (_factor_value(r, factor) for r in records) if v is not None]
@@ -91,7 +73,7 @@ def compute_safety_scores(records: list[dict], period: Period = "day") -> list[d
         for factor, weight in weights.items():
             value = _factor_value(record, factor)
             if value is None:
-                score = UNKNOWN_SCORE  # 데이터를 못 받은 요소는 좋지도 나쁘지도 않게 본다
+                score = profile.unknown_score  # 데이터를 못 받은 요소는 좋지도 나쁘지도 않게 본다
             else:
                 score = _normalize(value, *bounds[factor])
                 score = 100 - score if factor in _LOWER_IS_SAFER else score
@@ -100,7 +82,9 @@ def compute_safety_scores(records: list[dict], period: Period = "day") -> list[d
     return records
 
 
-def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str, float]:
+def compute_zone_period_scores(
+    zones: list, period: Period = "day", profile: ScoringProfile | None = None
+) -> dict[str, float]:
     """SafetyZone ORM 목록을 dong_code -> period-가중 안전점수로 변환한다.
 
     저장된 zone.safety_score 컬럼(day 기준, 거주지 추천용)은 건드리지 않는
@@ -121,5 +105,5 @@ def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str,
         }
         for z in zones
     ]
-    scored = compute_safety_scores(records, period=period)
+    scored = compute_safety_scores(records, period=period, profile=profile)
     return {r["dong_code"]: r["safety_score"] for r in scored}

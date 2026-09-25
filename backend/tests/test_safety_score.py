@@ -1,4 +1,5 @@
 from app.models.safety_zone import SafetyZone
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
 from app.services.safety_score import (
     compute_safety_scores,
     compute_zone_period_scores,
@@ -195,3 +196,26 @@ def test_default_period_matches_existing_day_weights():
     default = compute_safety_scores([dict(r) for r in records])
     explicit_day = compute_safety_scores([dict(r) for r in records], period="day")
     assert default[0]["safety_score"] == explicit_day[0]["safety_score"]
+
+
+def test_explicit_profile_changes_the_score_weights():
+    weights = {
+        **DEFAULT_SCORING_PROFILE.weights,
+        "day": {
+            **DEFAULT_SCORING_PROFILE.weights["day"],
+            "cctv_count": 0.10,
+            "streetlight_count": 0.25,
+        },
+    }
+    profile = ScoringProfile(version="streetlight-priority", weights=weights, unknown_score=50.0)
+    rows = [
+        {"dong_code": "CCTV", "cctv_count": 100, "streetlight_count": 0},
+        {"dong_code": "LIGHT", "cctv_count": 0, "streetlight_count": 100},
+    ]
+
+    scores = {
+        row["dong_code"]: row["safety_score"]
+        for row in compute_safety_scores(rows, profile=profile)
+    }
+
+    assert scores["LIGHT"] > scores["CCTV"]
