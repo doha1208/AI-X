@@ -1,10 +1,12 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.safety_zone import SafetyZone, scoped_zones_query
+from app.core.config import settings
+from app.core.security import decode_token
 from app.schemas.safety import (
     RouteAlternative,
     RouteMode,
@@ -19,10 +21,57 @@ from app.services.safe_route import find_safe_routes
 from app.services.safety_score import compute_zone_period_scores
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
+from app.services.route_request_limit import RouteRequestGate
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
 Point = tuple[float, float]
+
+route_request_gate = RouteRequestGate(
+    max_concurrent=settings.route_max_concurrent,
+    ip_requests_per_minute=settings.route_ip_requests_per_minute,
+    ip_burst=settings.route_ip_burst,
+    user_requests_per_minute=settings.route_user_requests_per_minute,
+    user_burst=settings.route_user_burst,
+    max_tracked_buckets=settings.route_request_max_tracked_buckets,
+)
+
+
+def _client_ip(request: Request) -> str:
+    direct_ip = request.client.host if request.client else "unknown"
+    trusted_proxies = {ip.strip() for ip in settings.trusted_proxy_ips.split(",") if ip.strip()}
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if direct_ip in trusted_proxies and forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return direct_ip
+
+
+def _authenticated_user_id(request: Request) -> str | None:
+    authorization = request.headers.get("authorization", "")
+    if not authorization.startswith("Bearer "):
+        return None
+    payload = decode_token(authorization.removeprefix("Bearer "))
+    if payload and payload.get("type") == "access" and isinstance(payload.get("sub"), str):
+        return payload["sub"]
+    return None
+
+
+async def limit_route_requests(request: Request):
+    admission = route_request_gate.acquire(
+        client_ip=_client_ip(request),
+        user_id=_authenticated_user_id(request),
+    )
+    if not admission.granted:
+        retry_after = admission.retry_after_seconds or 1
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="경로 요청이 잠시 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    try:
+        yield
+    finally:
+        admission.release()
 
 
 def _path_distance_m(points: list[Point]) -> float:
@@ -89,7 +138,11 @@ def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depend
 
 
 @router.post("/route", response_model=RouteResponse)
-async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
+async def route_safety(
+    payload: RouteRequest,
+    db: Session = Depends(get_db),
+    _request_limit: None = Depends(limit_route_requests),
+):
     """출발지→도착지 경로를 3단계 우선순위로 계산한다.
 
     1) safety_weighted: OSM 도로망 그래프 위에서 안전점수를 비용으로 반영해
@@ -103,22 +156,29 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
     period = period_for(payload.at)
     score_map = compute_zone_period_scores(zones, period)
 
-    # 안전 가중 탐색과 Tmap 최단경로를 동시에 돌린다 — Tmap은 safety_weighted일 때
-    # 비교선으로, 실패했을 때는 폴백 경로로 쓰이니 순서와 무관하게 항상 필요하다.
-    # 순차로 기다리면(특히 실시간 재경로 폴링 중) Tmap 응답 지연(최대 8초)이
-    # 그대로 사용자 대기 시간에 더해지므로 asyncio.gather로 병렬화한다.
-    safe_routes, tmap_points = await asyncio.gather(
-        asyncio.to_thread(
-            find_safe_routes,
-            payload.start_lat,
-            payload.start_lng,
-            payload.end_lat,
-            payload.end_lng,
-            zones,
-            period=period,
-        ),
-        get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
+    safe_route_task = asyncio.to_thread(
+        find_safe_routes,
+        payload.start_lat,
+        payload.start_lng,
+        payload.end_lat,
+        payload.end_lng,
+        zones,
+        period=period,
     )
+    if payload.include_comparison:
+        # 직접 검색은 비교선을 유지하므로 두 경로를 병렬로 가져온다.
+        safe_routes, tmap_points = await asyncio.gather(
+            safe_route_task,
+            get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
+        )
+    else:
+        # 실시간 재경로는 안전 경로만 요청한다. 자체 경로가 없을 때만 Tmap 폴백을 쓴다.
+        safe_routes = await safe_route_task
+        tmap_points = None
+        if not safe_routes:
+            tmap_points = await get_pedestrian_route(
+                payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng
+            )
 
     shortest_route_points: list[RoutePoint] | None = None
     candidates: list[dict]

@@ -1,4 +1,5 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// 배포 기본값은 동일 출처 프록시다. 로컬에서는 .env.local로 localhost:8000을 지정한다.
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
 export type SafetyZone = {
   dong_code: string;
@@ -66,7 +67,8 @@ export function routeSafety(
   startLat: number,
   startLng: number,
   endLat: number,
-  endLng: number
+  endLng: number,
+  options: { includeComparison?: boolean } = {}
 ) {
   return request<RouteResult>("/safety/route", {
     method: "POST",
@@ -75,6 +77,7 @@ export function routeSafety(
       start_lng: startLng,
       end_lat: endLat,
       end_lng: endLng,
+      include_comparison: options.includeComparison ?? true,
     }),
   });
 }

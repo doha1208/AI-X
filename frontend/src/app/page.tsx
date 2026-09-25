@@ -134,7 +134,9 @@ export default function Dashboard() {
 
     isRefetchingRef.current = true;
     try {
-      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng);
+      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng, {
+        includeComparison: false,
+      });
       setRoute(result);
       lastRouteFetchRef.current = { origin: here, at: Date.now() };
     } catch (err) {
