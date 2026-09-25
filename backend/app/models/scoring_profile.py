@@ -20,3 +20,12 @@ class ScoringProfileRecord(Base):
         DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
     )
     created_by: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ScoreBuildRecord(Base):
+    __tablename__ = "score_builds"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    profile_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

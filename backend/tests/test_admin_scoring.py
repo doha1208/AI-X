@@ -107,3 +107,18 @@ def test_invalid_profile_is_rejected_without_creating_a_draft(monkeypatch):
 
     assert created.status_code == 422
     assert listed.json() == []
+
+
+def test_admin_can_queue_a_draft_for_application(monkeypatch):
+    monkeypatch.setattr(settings, "admin_emails", "admin@example.com")
+    token = _access_token("admin@example.com")
+    draft = client.post("/admin/scoring-profiles", headers={"Authorization": f"Bearer {token}"}, json=VALID_PROFILE)
+
+    queued = client.post(
+        f"/admin/scoring-profiles/{draft.json()['id']}/apply",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert queued.status_code == 202
+    assert queued.json()["status"] == "queued"
+    assert queued.json()["profile_id"] == draft.json()["id"]

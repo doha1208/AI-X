@@ -2,8 +2,8 @@ import json
 
 from sqlalchemy.orm import Session
 
-from app.models.scoring_profile import ScoringProfileRecord
-from app.schemas.scoring_profile import ScoringProfileDraftIn, ScoringProfileOut
+from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
+from app.schemas.scoring_profile import ScoringProfileDraftIn, ScoringProfileOut, ScoreBuildOut
 
 
 def _to_output(record: ScoringProfileRecord) -> ScoringProfileOut:
@@ -51,3 +51,13 @@ def get_active_profile(db: Session) -> ScoringProfileOut | None:
         .first()
     )
     return _to_output(record) if record is not None else None
+
+
+def queue_profile_build(db: Session, profile_id: int) -> ScoreBuildOut | None:
+    if db.get(ScoringProfileRecord, profile_id) is None:
+        return None
+    build = ScoreBuildRecord(profile_id=profile_id, status="queued")
+    db.add(build)
+    db.commit()
+    db.refresh(build)
+    return ScoreBuildOut(id=build.id, profile_id=build.profile_id, status=build.status)

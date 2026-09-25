@@ -34,3 +34,9 @@ class ScoringProfileOut(BaseModel):
     status: str
     created_at: datetime
     created_by: str
+
+
+class ScoreBuildOut(BaseModel):
+    id: int
+    profile_id: int
+    status: str

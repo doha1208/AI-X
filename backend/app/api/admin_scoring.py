@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.scoring_profile import ScoringProfileDraftIn, ScoringProfileOut
-from app.services.scoring_profile_store import create_draft, get_active_profile, list_profiles
+from app.schemas.scoring_profile import ScoreBuildOut, ScoringProfileDraftIn, ScoringProfileOut
+from app.services.scoring_profile_store import create_draft, get_active_profile, list_profiles, queue_profile_build
 
 
 router = APIRouter(prefix="/admin/scoring-profiles", tags=["admin-scoring"])
@@ -37,3 +37,11 @@ def create_scoring_profile_draft(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 사용 중인 프로필 버전입니다")
+
+
+@router.post("/{profile_id}/apply", response_model=ScoreBuildOut, status_code=status.HTTP_202_ACCEPTED)
+def apply_scoring_profile(profile_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> ScoreBuildOut:
+    build = queue_profile_build(db, profile_id)
+    if build is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="점수 프로필을 찾을 수 없습니다")
+    return build
