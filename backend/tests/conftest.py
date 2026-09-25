@@ -18,7 +18,7 @@ os.environ["REGION_SCOPE_PREFIX"] = ""
 def isolated_database():
     # 이 import들은 환경 변수를 고정한 뒤에 일어나며, 모델 등록도 보장한다.
     from app.db.session import Base, engine
-    from app.models import safety_zone, user  # noqa: F401
+    from app.models import safety_zone, scoring_profile, user  # noqa: F401
 
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

@@ -34,7 +34,7 @@
 | `frontend/src/components/` | 재사용 가능한 UI. 현재 핵심은 카카오 지도 `SafetyMap.tsx`와 SVG 아이콘 |
 | `frontend/src/lib/` | API 호출, JWT 저장, 거리 계산, 카카오 SDK·지오코딩 |
 | `frontend/public/data/` | 브라우저가 직접 읽는 서울·경기 행정동 경계 GeoJSON |
-| `backend/app/api/` | HTTP API. `auth.py`는 인증, `safety.py`는 안전구역·비상벨·경로 |
+| `backend/app/api/` | HTTP API. `auth.py`는 인증, `safety.py`는 안전구역·비상벨·경로, `admin_scoring.py`는 허용 이메일 관리자의 점수 프로필 초안 |
 | `backend/app/services/` | 안전 점수, 안전 경로, 도로 특성, 시설 밀도, 시간대, Tmap 등 핵심 로직 |
 | `backend/app/models/` | SQLAlchemy DB 모델. 사용자와 안전구역 |
 | `backend/app/schemas/` | API 요청·응답 Pydantic 모델 |
@@ -126,6 +126,7 @@
 12. 로컬 OSM 도로망·그래프 캐시·KD-tree 색인으로 경로 탐색 성능 개선
 13. 데모용 경기 지역 범위 제한 환경 변수와 DuckDNS/Caddy 공개 프록시 설정
 14. 백엔드·프런트를 함께 실행하는 로컬 런처 소스
+15. 허용 이메일 관리자만 저장할 수 있는 안전점수 프로필 초안 API
 
 ## 개선 로드맵
 

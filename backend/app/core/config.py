@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     tmap_app_key: str = ""
     security_light_api_key: str = ""
     kakao_rest_api_key: str = ""
+    # 쉼표로 구분된 관리자 이메일. 빈 값이면 관리자 API는 모든 사용자에게 거부된다.
+    admin_emails: str = ""
     # 콤마로 구분된 허용 origin 목록. 개발 중 터널(cloudflared 등)로 외부 공유할 때
     # 여기에 프론트 공개 주소를 추가한다. "*"를 쓰면 모든 origin을 허용한다(테스트용).
     cors_allow_origins: str = "http://localhost:3000"

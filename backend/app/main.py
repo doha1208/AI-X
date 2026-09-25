@@ -4,10 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.admin_scoring import router as admin_scoring_router
 from app.api.safety import router as safety_router
 from app.core.config import settings, validate_runtime_settings
 from app.db.session import Base, engine
-from app.models import safety_zone, user  # noqa: F401 (register models before create_all)
+from app.models import safety_zone, scoring_profile, user  # noqa: F401 (register models before create_all)
 from app.services.safe_route import route_artifact_runtime
 
 Base.metadata.create_all(bind=engine)
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(admin_scoring_router)
 app.include_router(safety_router)
 
 
