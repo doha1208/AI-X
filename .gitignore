@@ -31,3 +31,7 @@ Thumbs.db
 
 # Claude Code runtime state (not project content)
 .claude/scheduled_tasks.lock
+
+# Local Codex development instructions (DEVELOPMENT.md is intentionally tracked)
+/AGENTS.md
+/.agents/
