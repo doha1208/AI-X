@@ -58,7 +58,7 @@ def _factor_value(record: dict, factor: str):
     """요소 값. 보안등 데이터를 못 받은 지역(lights_known=False)의 보안등은 None(모름)이다."""
     if factor == "streetlight_count" and record.get("lights_known") is False:
         return None
-    return record.get(factor, 0)
+    return record.get(factor)
 
 
 def _normalize(value: float, lo: float, hi: float) -> float:
@@ -74,7 +74,7 @@ def compute_safety_scores(records: list[dict], period: Period = "day") -> list[d
     같은 동 집합(예: 서울 전체) 안에서의 상대 비교용 min-max 정규화.
     CCTV/보안등/상점은 많을수록, 범죄율(1만 명당)·경찰서 거리는 작을수록 점수가 높다.
     period(day/night)에 따라 요소별 가중치 배분이 달라진다.
-    crime_rate/police_dist_m/store_count처럼 키가 없는 요소는 0으로 보고(전 레코드 동일 → 중립 50점).
+    키가 없는 요소와 값이 None인 요소는 "모름"으로 보고 중립 점수를 준다.
     값이 None인 요소는 "모름"이라 정규화 범위에서 빼고 UNKNOWN_SCORE(50점)를 준다.
     """
     if not records:
@@ -114,10 +114,10 @@ def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str,
             "cctv_count": z.cctv_count,
             "streetlight_count": z.streetlight_count,
             "lights_known": z.lights_known is not False,
-            "crime_rate": z.crime_rate or 0,
-            "police_dist_m": z.police_dist_m or 0,
-            "store_count": z.store_count or 0,
-            "bell_dist_m": z.bell_dist_m or 0,
+            "crime_rate": z.crime_rate,
+            "police_dist_m": z.police_dist_m,
+            "store_count": z.store_count,
+            "bell_dist_m": z.bell_dist_m,
         }
         for z in zones
     ]

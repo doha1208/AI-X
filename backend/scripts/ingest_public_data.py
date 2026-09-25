@@ -384,11 +384,11 @@ def ensure_new_columns() -> None:
     """이미 있는 safety_zones 테이블에 새 컬럼이 없으면 추가한다(create_all은 기존 테이블을 바꾸지 않음)."""
     existing = {col["name"] for col in inspect(engine).get_columns("safety_zones")}
     new_columns = (
-        ("police_dist_m", "FLOAT DEFAULT 0"),
+        ("police_dist_m", "FLOAT"),
         ("store_count", "INTEGER DEFAULT 0"),
-        ("crime_rate", "FLOAT DEFAULT 0"),
+        ("crime_rate", "FLOAT"),
         ("lights_known", "BOOLEAN DEFAULT TRUE"),
-        ("bell_dist_m", "FLOAT DEFAULT 0"),
+        ("bell_dist_m", "FLOAT"),
     )
     with engine.begin() as conn:
         for name, ddl in new_columns:

@@ -1,4 +1,9 @@
-from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights
+from app.models.safety_zone import SafetyZone
+from app.services.safety_score import (
+    compute_safety_scores,
+    compute_zone_period_scores,
+    flag_unknown_streetlights,
+)
 
 
 def test_night_weights_favor_streetlight_over_cctv():
@@ -77,6 +82,62 @@ def test_unknown_values_do_not_stretch_the_normalisation_range():
     by_code = {r["dong_code"]: r["safety_score"] for r in with_unknown}
     assert by_code["A"] == without[0]["safety_score"]
     assert by_code["B"] == without[1]["safety_score"]
+
+
+def test_zone_scores_treat_missing_lower_is_safer_inputs_as_neutral():
+    zones = [
+        SafetyZone(
+            dong_code="KNOWN",
+            dong_name="Known",
+            lat=37.5,
+            lng=127.0,
+            crime_rate=50,
+            police_dist_m=300,
+            bell_dist_m=100,
+        ),
+        SafetyZone(
+            dong_code="UNKNOWN",
+            dong_name="Unknown",
+            lat=37.51,
+            lng=127.01,
+            crime_rate=None,
+            police_dist_m=None,
+            bell_dist_m=None,
+        ),
+        SafetyZone(
+            dong_code="RISKY",
+            dong_name="Risky",
+            lat=37.52,
+            lng=127.02,
+            crime_rate=200,
+            police_dist_m=3000,
+            bell_dist_m=1200,
+        ),
+    ]
+
+    scores = compute_zone_period_scores(zones)
+
+    assert scores["RISKY"] < scores["UNKNOWN"] < scores["KNOWN"]
+
+
+def test_safety_zone_persists_missing_lower_is_safer_inputs_as_null():
+    table = SafetyZone.__table__
+
+    assert table.c.crime_rate.nullable is True
+    assert table.c.police_dist_m.nullable is True
+    assert table.c.bell_dist_m.nullable is True
+
+
+def test_absent_factor_is_neutral_instead_of_known_zero():
+    rows = [
+        {"dong_code": "KNOWN", "crime_rate": 50},
+        {"dong_code": "MISSING"},
+        {"dong_code": "RISKY", "crime_rate": 200},
+    ]
+
+    scores = {row["dong_code"]: row["safety_score"] for row in compute_safety_scores(rows)}
+
+    assert scores["RISKY"] < scores["MISSING"] < scores["KNOWN"]
 
 
 def test_city_with_almost_no_lights_is_flagged_as_unknown_not_dark():

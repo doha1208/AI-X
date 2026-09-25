@@ -18,13 +18,13 @@ class SafetyZone(Base):
     # False면 이 동이 속한 시·군·구가 보안등 데이터를 사실상 못 올린 곳 — 개수를 0으로 믿지 않고 점수에서 "모름"으로 본다.
     lights_known: Mapped[bool] = mapped_column(Boolean, default=True)
     crime_count: Mapped[int] = mapped_column(Integer, default=0)
-    # 시·군·구 범죄 건수 ÷ 주민등록 인구 × 1만. 안전 점수는 건수가 아니라 이 값을 쓴다.
-    crime_rate: Mapped[float] = mapped_column(Float, default=0.0)
-    # 동 중심에서 가장 가까운 경찰서/파출소까지의 거리(m). 0은 미수집(전 동 동일 → 중립).
-    police_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
+    # 시·군·구 범죄 건수 ÷ 주민등록 인구 × 1만. None은 해당 지역의 범죄율을 알 수 없다는 뜻이다.
+    crime_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 동 중심에서 가장 가까운 경찰서/파출소까지의 거리(m). None은 시설 데이터를 알 수 없다는 뜻이다.
+    police_dist_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     store_count: Mapped[int] = mapped_column(Integer, default=0)
-    # 동 중심에서 가장 가까운 안전비상벨까지의 거리(m).
-    bell_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
+    # 동 중심에서 가장 가까운 안전비상벨까지의 거리(m). None은 비상벨 데이터를 알 수 없다는 뜻이다.
+    bell_dist_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     safety_score: Mapped[float] = mapped_column(Float, default=0.0)
 
 
