@@ -1,8 +1,15 @@
 import httpx
+import time
 
 from app.core.config import settings
 
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1"
+
+_route_cache: dict[tuple[float, float, float, float], tuple[float, list[tuple[float, float]]]] = {}
+
+
+def _cache_key(start_lat: float, start_lng: float, end_lat: float, end_lng: float) -> tuple[float, float, float, float]:
+    return tuple(round(value, 6) for value in (start_lat, start_lng, end_lat, end_lng))
 
 
 async def get_pedestrian_route(
@@ -14,6 +21,12 @@ async def get_pedestrian_route(
     """
     if not settings.tmap_app_key:
         return None
+
+    key = _cache_key(start_lat, start_lng, end_lat, end_lng)
+    now = time.monotonic()
+    cached = _route_cache.get(key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
 
     payload = {
         "startX": start_lng,
@@ -44,4 +57,7 @@ async def get_pedestrian_route(
         for lng, lat in geometry.get("coordinates", []):
             points.append((lat, lng))
 
-    return points or None
+    if not points:
+        return None
+    _route_cache[key] = (now + settings.tmap_route_cache_seconds, points)
+    return points
