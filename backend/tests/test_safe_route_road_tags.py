@@ -71,3 +71,38 @@ def test_without_facility_points_the_scoring_still_works():
 def test_night_route_prefers_the_lit_street():
     assert _best_path(_two_route_graph(top_lit="no", bottom_lit="yes"), "night") == [1, 3, 4]
     assert _best_path(_two_route_graph(top_lit="yes", bottom_lit="no"), "night") == [1, 2, 4]
+
+
+def test_bbox_edge_nodes_are_not_treated_as_dead_ends():
+    # 노드 2는 이웃이 하나뿐이라 진짜 막다른 길처럼 보이지만, bbox 서쪽 경계에 바로 붙어
+    # 있다 — 그래프가 거기서 잘린 것뿐이지 실제 막다른 길이 아니다.
+    g = nx.MultiDiGraph()
+    g.add_node(1, y=37.500, x=127.0010)
+    g.add_node(2, y=37.500, x=127.0001)  # bbox 서쪽 경계(127.000)에서 0.0001도 안쪽
+    g.add_edge(1, 2, length=100.0, highway="residential")
+    g.add_edge(2, 1, length=100.0, highway="residential")
+    g.graph["fetch_bbox"] = (127.000, 37.490, 127.010, 37.510)
+
+    assert sr._dead_end_nodes(g) == set()
+
+
+def test_dead_ends_away_from_the_bbox_edge_are_still_detected():
+    g = nx.MultiDiGraph()
+    g.add_node(1, y=37.500, x=127.005)
+    g.add_node(2, y=37.500, x=127.006)  # bbox 한가운데 — 경계와 무관
+    g.add_edge(1, 2, length=100.0, highway="residential")
+    g.add_edge(2, 1, length=100.0, highway="residential")
+    g.graph["fetch_bbox"] = (127.000, 37.490, 127.010, 37.510)
+
+    assert sr._dead_end_nodes(g) == {1, 2}
+
+
+def test_dead_ends_are_detected_when_graph_has_no_fetch_bbox():
+    # 로컬 전체망처럼 bbox로 잘리지 않은 그래프는 속성이 아예 없다 — 이때는 항상 그대로 판정.
+    g = nx.MultiDiGraph()
+    g.add_node(1, y=37.500, x=127.000)
+    g.add_node(2, y=37.500, x=127.001)
+    g.add_edge(1, 2, length=100.0, highway="residential")
+    g.add_edge(2, 1, length=100.0, highway="residential")
+
+    assert sr._dead_end_nodes(g) == {1, 2}

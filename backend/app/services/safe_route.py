@@ -222,6 +222,10 @@ def _get_graph(bbox: tuple[float, float, float, float]) -> nx.MultiDiGraph | Non
     except Exception:
         logger.warning("OSM graph fetch failed for bbox=%s", bbox, exc_info=True)
         return None
+    # bbox 경계에서 잘린 노드는 실제로 길이 끝난 게 아니라 그래프가 거기서 잘린 것뿐이다 —
+    # _dead_end_nodes가 그 경계를 알아야 오탐(가짜 막다른 길)을 피할 수 있다. 로컬 전체망
+    # (_load_local_graph)은 이렇게 잘릴 일이 없어 이 속성을 아예 안 붙인다.
+    graph.graph["fetch_bbox"] = bbox
     _graph_cache[key] = graph
     return graph
 
@@ -334,9 +338,40 @@ def _facility_index() -> FacilityIndex | None:
     return load_facility_index()
 
 
+# bbox 경계로부터 이 거리(도 단위, 약 150m) 안의 노드는 막다른 길 판정에서 뺀다 — 그래프가
+# 거기서 잘려서 이웃이 적어 보이는 것일 수 있어서다. _route_bbox의 최소 여백(0.01도)보다
+# 훨씬 작게 잡아 실제 경로 구간을 막다른 길 판정에서 과하게 빼지 않는다.
+_BBOX_EDGE_MARGIN_DEG = 0.0015
+
+
+def _near_bbox_edge(x: float, y: float, bbox: tuple[float, float, float, float]) -> bool:
+    west, south, east, north = bbox
+    return (
+        x - west < _BBOX_EDGE_MARGIN_DEG
+        or east - x < _BBOX_EDGE_MARGIN_DEG
+        or y - south < _BBOX_EDGE_MARGIN_DEG
+        or north - y < _BBOX_EDGE_MARGIN_DEG
+    )
+
+
 def _dead_end_nodes(graph: nx.MultiDiGraph) -> set[int]:
-    """이웃이 하나 이하인(방향 무시) 노드 — 막다른 길의 끝."""
-    return {n for n in graph.nodes if len(set(graph.successors(n)) | set(graph.predecessors(n))) <= 1}
+    """이웃이 하나 이하인(방향 무시) 노드 — 막다른 길의 끝.
+
+    graph가 bbox로 잘려 받아온 그래프(graph.graph["fetch_bbox"], _get_graph 참고)라면,
+    그 bbox 경계에 붙어있는 노드는 실제 막다른 길이 아니라 그래프가 거기서 잘려 이웃이
+    적어 보이는 것일 수 있어 제외한다. 로컬 전체망은 이 속성이 없어 전부 그대로 판정한다.
+    """
+    bbox = graph.graph.get("fetch_bbox")
+    dead_ends = set()
+    for n in graph.nodes:
+        if len(set(graph.successors(n)) | set(graph.predecessors(n))) > 1:
+            continue
+        if bbox is not None:
+            data = graph.nodes[n]
+            if _near_bbox_edge(data["x"], data["y"], bbox):
+                continue
+        dead_ends.add(n)
+    return dead_ends
 
 
 def _edge_score(zone_score: float, road_score: float, local_score: float) -> float:
