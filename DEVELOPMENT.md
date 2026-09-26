@@ -50,7 +50,7 @@
 
 ### 인증
 
-`frontend/src/app/login/page.tsx`와 `signup/page.tsx`가 `frontend/src/lib/api.ts`를 통해 `/auth/signup`, `/auth/login`을 호출한다. 백엔드 `backend/app/api/auth.py`는 bcrypt 해시와 JWT access/refresh 토큰을 사용한다. 프런트는 현재 access token을 `localStorage`에 저장한다. 이는 MVP 방식이므로 XSS 방어가 필요한 운영 환경에서는 httpOnly 쿠키와 CSRF 방어로 교체해야 한다.
+`frontend/src/app/login/page.tsx`와 `signup/page.tsx`가 `frontend/src/lib/api.ts`를 통해 `/auth/signup`, `/auth/login`을 호출한다. 백엔드는 bcrypt 해시, HttpOnly access JWT 쿠키, DB에 해시만 저장하는 refresh 세션을 사용한다. refresh는 갱신마다 이전 세션을 폐기하고 새 식별자로 회전하며, 로그아웃도 현재 refresh 세션을 폐기한다. 상태 변경 요청은 읽기 가능한 CSRF 쿠키와 `X-CSRF-Token` 헤더를 일치시켜야 한다. 운영 쿠키는 host-only·Secure·SameSite=Lax이고, CORS는 credential 쿠키를 위해 정확한 origin만 허용한다.
 
 ### 거주지·주변 안전구역
 
@@ -176,12 +176,12 @@
 
 **목표:** 현재 구현된 인증·대안 경로·실시간 안내 기능을 화면과 서버 정책까지 일관되게 완성한다.
 
-| 작업 | 변경 대상 | 완료 기준 |
+| 상태 | 작업 | 변경 대상 | 완료 기준 |
 | --- | --- | --- |
-| 세션 보안 전환 | `frontend/src/lib/auth.ts`, 인증 API·의존성, CORS 설정 | access/refresh 토큰을 `localStorage` 대신 HttpOnly·Secure·SameSite 쿠키로 관리하고, 상태 변경 요청에는 CSRF 방어를 적용한다. |
-| refresh 토큰 수명주기 | `auth.py`, `security.py`, 프런트 인증 흐름 | 만료 access token은 안전하게 갱신되고, 로그아웃·탈취 대응을 위한 refresh token 폐기 또는 회전 정책이 있다. |
-| 대안 경로 UI | `frontend/src/lib/api.ts`, `page.tsx`, `SafetyMap.tsx` | API가 반환하는 대안 경로를 사용자가 비교·선택할 수 있고, 선택한 경로의 점수·거리·지도 선이 일치한다. |
-| 재경로 부가 정보 갱신 | `page.tsx`, 비상벨 API 연동 | 실시간 재경로 후 경로 주변 비상벨과 비교 경로가 새 경로 기준으로 갱신되며, 이전 비동기 요청 결과가 새 화면을 덮어쓰지 않는다. |
+| ✅ | 세션 보안 전환 | `frontend/src/lib/auth.ts`, 인증 API·의존성, CORS 설정 | access/refresh 토큰을 `localStorage` 대신 HttpOnly·Secure·SameSite 쿠키로 관리하고, 상태 변경 요청에는 CSRF 방어를 적용한다. |
+| ✅ | refresh 토큰 수명주기 | `auth.py`, `security.py`, 프런트 인증 흐름 | 만료 access token은 안전하게 갱신되고, 로그아웃·탈취 대응을 위한 refresh token 폐기 또는 회전 정책이 있다. |
+| ✅ | 대안 경로 UI | `frontend/src/lib/api.ts`, `page.tsx`, `SafetyMap.tsx` | API가 반환하는 대안 경로를 사용자가 비교·선택할 수 있고, 선택한 경로의 점수·거리·지도 선이 일치한다. |
+| ✅ | 재경로 부가 정보 갱신 | `page.tsx`, 비상벨 API 연동 | 실시간 재경로 후 경로 주변 비상벨과 비교 경로가 새 경로 기준으로 갱신되며, 이전 비동기 요청 결과가 새 화면을 덮어쓰지 않는다. |
 
 **선행 조건:** 로그인 필수 범위와 쿠키 기반 인증을 적용할 배포 도메인 정책을 확정한다.
 
