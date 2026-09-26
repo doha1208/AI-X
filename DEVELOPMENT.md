@@ -34,7 +34,7 @@
 | `frontend/src/components/` | 재사용 가능한 UI. 현재 핵심은 카카오 지도 `SafetyMap.tsx`와 SVG 아이콘 |
 | `frontend/src/lib/` | API 호출, JWT 저장, 거리 계산, 카카오 SDK·지오코딩 |
 | `frontend/public/data/` | 브라우저가 직접 읽는 서울·경기 행정동 경계 GeoJSON |
-| `backend/app/api/` | HTTP API. `auth.py`는 인증, `safety.py`는 안전구역·비상벨·경로, `admin_scoring.py`는 허용 이메일 관리자의 점수 프로필 초안 |
+| `backend/app/api/` | HTTP API. `auth.py`는 인증, `safety.py`는 안전구역·비상벨·경로, `admin_scoring.py`는 허용 이메일 관리자의 점수 프로필·빌드 상태 |
 | `backend/app/services/` | 안전 점수, 안전 경로, 도로 특성, 시설 밀도, 시간대, Tmap 등 핵심 로직 |
 | `backend/app/models/` | SQLAlchemy DB 모델. 사용자와 안전구역 |
 | `backend/app/schemas/` | API 요청·응답 Pydantic 모델 |
@@ -91,6 +91,8 @@
 
 공공데이터 적재가 끝나면 `backend/scripts/build_route_artifacts.py`를 실행해 낮·밤 안전 가중 그래프와 행정동 점수 맵을 버전 산출물로 게시한다. 산출물은 계산에 쓴 점수 프로필 버전과 안전 데이터 fingerprint를 함께 보관한다. API는 시작 시와 제한된 주기의 매니페스트 확인 때 최신의 검증된 산출물을 로드하며, HTTP 요청 중에는 OSM 다운로드나 간선 전체 점수화를 하지 않는다. 산출물이 없거나 손상되면 Tmap·직선 경로 폴백은 계속 제공한다.
 
+관리자는 `/admin/scoring-profiles`에서 초안을 저장하고 적용 작업을 대기열에 넣는다. `artifact_builder_worker.py`는 `queued → building → succeeded/failed`를 처리하며, 게시와 활성 프로필 전환은 성공한 빌드에서만 일어난다. 실패·손상 산출물에서는 이전 `current` 산출물과 활성 프로필을 유지한다. `docker-compose.yml`의 API와 빌더는 DB·산출물 볼륨을 공유하고, 빌더는 30분마다 데이터 fingerprint와 활성 프로필을 확인해 변경된 경우에만 재생성 작업을 추가한다.
+
 ### 실시간 이동
 
 대시보드는 `navigator.geolocation.watchPosition`으로 위치를 구독한다. 목적지에서 30m 이내면 안내를 끝내고, 마지막 경로 요청 위치에서 50m 이상 이동했으며 5초가 지났을 때만 재경로를 요청한다. 실패해도 기존 경로를 유지하고 다음 위치 갱신 때 다시 시도한다.
@@ -127,6 +129,7 @@
 13. 데모용 경기 지역 범위 제한 환경 변수와 DuckDNS/Caddy 공개 프록시 설정
 14. 백엔드·프런트를 함께 실행하는 로컬 런처 소스
 15. 허용 이메일 관리자만 저장할 수 있는 안전점수 프로필 초안 API
+16. 활성 산출물 기반 거주지·경로 점수, 대기열 기반 프로필 적용과 컨테이너 빌더 운영, 관리자 점수 프로필 화면
 
 ## 개선 로드맵
 
