@@ -52,6 +52,10 @@ def _zones_passed(points: list[Point], zones: list[SafetyZone]) -> list[SafetyZo
     return passed
 
 
+def _zone_out(z: SafetyZone, score_map: dict[str, float]) -> SafetyZoneOut:
+    return SafetyZoneOut(dong_code=z.dong_code, dong_name=z.dong_name, lat=z.lat, lng=z.lng, safety_score=score_map[z.dong_code])
+
+
 @router.get("/zones", response_model=list[SafetyZoneOut])
 def nearby_zones(
     lat: float,
@@ -59,8 +63,16 @@ def nearby_zones(
     radius_km: float = Query(2.0, gt=0),
     db: Session = Depends(get_db),
 ):
+    """반경 안의 동을 찾아 반환한다.
+
+    점수는 조회된(scoped) 동 전체를 기준으로 그때그때 다시 정규화한다 — DB에 저장된
+    safety_score 컬럼은 ingest 시점의 전체(서울+경기) 범위로 정규화돼 있어, REGION_SCOPE_PREFIX로
+    경기도만 보여줄 때 그 컬럼을 그대로 쓰면 경기도 안에서의 상대 순위와 어긋날 수 있다.
+    """
     zones = scoped_zones_query(db).all()
-    return [z for z in zones if haversine_km(lat, lng, z.lat, z.lng) <= radius_km]
+    score_map = compute_zone_period_scores(zones, "day")
+    nearby = [z for z in zones if haversine_km(lat, lng, z.lat, z.lng) <= radius_km]
+    return [_zone_out(z, score_map) for z in nearby]
 
 
 @router.get("/bells", response_model=list[RoutePoint])
@@ -80,12 +92,15 @@ def nearby_bells_endpoint(
 
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])
 def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depends(get_db)):
-    return (
-        scoped_zones_query(db)
-        .order_by(SafetyZone.safety_score.desc())
-        .limit(limit)
-        .all()
-    )
+    """안전 점수 상위 동을 추천한다.
+
+    DB의 safety_score 컬럼(ingest 시점의 전체 서울+경기 정규화 값)이 아니라, 조회된(scoped)
+    동 전체를 기준으로 그때그때 다시 정규화해서 정렬한다 — nearby_zones와 같은 이유.
+    """
+    zones = scoped_zones_query(db).all()
+    score_map = compute_zone_period_scores(zones, "day")
+    top = sorted(zones, key=lambda z: score_map[z.dong_code], reverse=True)[:limit]
+    return [_zone_out(z, score_map) for z in top]
 
 
 @router.post("/route", response_model=RouteResponse)
@@ -150,16 +165,7 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
         ]
 
     best = candidates[0]
-    passed = [
-        SafetyZoneOut(
-            dong_code=z.dong_code,
-            dong_name=z.dong_name,
-            lat=z.lat,
-            lng=z.lng,
-            safety_score=score_map[z.dong_code],
-        )
-        for z in _zones_passed(best["points"], zones)
-    ]
+    passed = [_zone_out(z, score_map) for z in _zones_passed(best["points"], zones)]
     alternatives = [
         RouteAlternative(
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
