@@ -17,7 +17,12 @@ from scipy.spatial import cKDTree
 
 from app.core.config import settings
 from app.models.safety_zone import SafetyZone
-from app.services.facility_density import FacilityIndex, edge_local_scores, load_facility_index
+from app.services.facility_density import (
+    FACILITY_POINTS_PATH,
+    FacilityIndex,
+    edge_local_scores,
+    load_facility_index,
+)
 from app.services.geo import haversine_km
 from app.services.road_score import road_safety_score
 from app.services.route_artifact import RouteArtifact, load_current_artifact
@@ -593,7 +598,10 @@ def build_route_artifact(
         raise RuntimeError("Local walking graph is required to build a route artifact")
 
     zone_index = _build_zone_index(zones)
-    facilities = _facility_index()
+    # 산출물은 공공시설 좌표의 스냅샷이다. 장기 실행되는 빌더가 이전 KD-tree를
+    # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
+    # 빌드마다 파일에서 다시 읽는다.
+    facilities = load_facility_index()
     graph_by_period: dict[Period, nx.DiGraph] = {}
     score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
@@ -614,7 +622,7 @@ def build_route_artifact(
         node_ids=node_ids,
         node_points=node_points,
         profile_version=profile.version,
-        data_version=_zone_data_version(zones),
+        data_version=route_input_data_version(zones),
         score_by_period=score_by_period,
     )
 
@@ -629,6 +637,34 @@ def _zone_data_version(zones: list[SafetyZone]) -> str:
         for zone in sorted(zones, key=lambda zone: zone.dong_code)
     ]
     encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    """경로 산출물에 쓰는 신뢰된 입력 파일의 내용 지문.
+
+    파일이 없거나 읽을 수 없는 상태도 별도 값으로 남겨, 시설 좌표가 사라진 경우에도
+    이전 시설 점수 산출물이 최신으로 오인되지 않게 한다.
+    """
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return "missing"
+    return digest.hexdigest()
+
+
+def route_input_data_version(
+    zones: list[SafetyZone], *, facility_points_path: Path = FACILITY_POINTS_PATH
+) -> str:
+    """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
+    payload = {
+        "zones": _zone_data_version(zones),
+        "facility_points": _file_sha256(facility_points_path),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 

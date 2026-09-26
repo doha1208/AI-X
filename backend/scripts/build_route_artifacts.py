@@ -19,7 +19,7 @@ from app.db.session import SessionLocal
 from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
 from app.services.route_artifact import load_current_artifact, publish_artifact
-from app.services.safe_route import _zone_data_version, build_route_artifact
+from app.services.safe_route import build_route_artifact, route_input_data_version
 from app.services.scoring_profile import ScoringProfile
 from app.services.scoring_profile_store import claim_next_queued_build
 import json
@@ -111,7 +111,7 @@ def queue_rebuild_if_active_artifact_is_stale(db: Session, directory: Path) -> b
     if (
         artifact is not None
         and artifact.profile_version == active.version
-        and artifact.data_version == _zone_data_version(zones)
+        and artifact.data_version == route_input_data_version(zones)
     ):
         return False
     pending = (

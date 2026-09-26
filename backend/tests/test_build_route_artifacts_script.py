@@ -16,7 +16,7 @@ from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
 from app.services.route_artifact import RouteArtifact, load_current_artifact, publish_artifact
 from app.services.scoring_profile import DEFAULT_SCORING_PROFILE
 from app.services import scoring_profile_store
-from app.services.safe_route import _zone_data_version
+from app.services.safe_route import route_input_data_version
 from scripts import build_route_artifacts as script
 
 
@@ -203,7 +203,7 @@ def test_reconcile_published_artifact_completes_interrupted_build(tmp_path):
     db.close()
     artifact = _artifact("published-v2")
     object.__setattr__(artifact, "profile_version", candidate.version)
-    object.__setattr__(artifact, "data_version", _zone_data_version([zone]))
+    object.__setattr__(artifact, "data_version", route_input_data_version([zone]))
     publish_artifact(artifact, tmp_path)
 
     db = session_local()
@@ -227,7 +227,7 @@ def test_unchanged_active_artifact_does_not_queue_periodic_rebuild(tmp_path):
     db.commit()
     artifact = _artifact("active-artifact")
     object.__setattr__(artifact, "profile_version", active.version)
-    object.__setattr__(artifact, "data_version", _zone_data_version([zone]))
+    object.__setattr__(artifact, "data_version", route_input_data_version([zone]))
     publish_artifact(artifact, tmp_path)
 
     assert script.queue_rebuild_if_active_artifact_is_stale(db, tmp_path) is False
