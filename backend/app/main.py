@@ -26,14 +26,12 @@ def load_route_artifact() -> None:
     route_artifact_runtime.load(Path(settings.route_artifact_dir))
 
 # CORS_ALLOW_ORIGINS(.env)로 배포/터널 환경마다 허용 origin을 바꾼다.
-# 인증은 쿠키가 아니라 Authorization 헤더(Bearer 토큰)라 자격 증명이 필요 없다 —
-# "*"와 allow_credentials=True를 같이 쓰면 브라우저가 거부하므로, 와일드카드일 때는
-# allow_credentials를 꺼서 스펙을 지킨다.
+# 인증 쿠키를 보내므로 허용 origin은 반드시 구체적인 목록이어야 한다.
 cors_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
-    allow_credentials="*" not in cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   applyScoringProfile,
@@ -11,7 +11,7 @@ import {
   type ScoreWeights,
   type ScoringProfile,
 } from "@/lib/api";
-import { getToken } from "@/lib/auth";
+import { getSessionUser } from "@/lib/auth";
 
 const FACTORS = [
   ["cctv_count", "CCTV"],
@@ -27,21 +27,12 @@ const DEFAULT_WEIGHTS: ScoreWeights = {
   night: { cctv_count: 0.15, streetlight_count: 0.25, crime_rate: 0.25, police_dist_m: 0.1, store_count: 0.1, bell_dist_m: 0.15 },
 };
 
-function subscribeToBrowserState() {
-  return () => {};
-}
-
-function getServerToken() {
-  return null;
-}
-
 function cloneWeights(weights: ScoreWeights): ScoreWeights {
   return { day: { ...weights.day }, night: { ...weights.night } };
 }
 
 export default function ScoringAdminPage() {
   const router = useRouter();
-  const token = useSyncExternalStore(subscribeToBrowserState, getToken, getServerToken);
   const [profiles, setProfiles] = useState<ScoringProfile[]>([]);
   const [builds, setBuilds] = useState<ScoreBuild[]>([]);
   const [weights, setWeights] = useState<ScoreWeights>(() => cloneWeights(DEFAULT_WEIGHTS));
@@ -58,9 +49,9 @@ export default function ScoringAdminPage() {
   );
   const pending = builds.some((build) => build.status === "queued" || build.status === "building");
 
-  const refresh = useCallback(async (activeToken: string) => {
+  const refresh = useCallback(async () => {
     try {
-      const [nextProfiles, nextBuilds] = await Promise.all([listScoringProfiles(activeToken), listScoreBuilds(activeToken)]);
+      const [nextProfiles, nextBuilds] = await Promise.all([listScoringProfiles(), listScoreBuilds()]);
       setProfiles(nextProfiles);
       setBuilds(nextBuilds);
       setForbidden(false);
@@ -73,17 +64,13 @@ export default function ScoringAdminPage() {
   }, []);
 
   useEffect(() => {
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-    const activeToken = token;
     let cancelled = false;
     async function load() {
       try {
+        await getSessionUser();
         const [nextProfiles, nextBuilds] = await Promise.all([
-          listScoringProfiles(activeToken),
-          listScoreBuilds(activeToken),
+          listScoringProfiles(),
+          listScoreBuilds(),
         ]);
         if (cancelled) return;
         setProfiles(nextProfiles);
@@ -93,6 +80,10 @@ export default function ScoringAdminPage() {
       } catch (error) {
         if (cancelled) return;
         const text = error instanceof Error ? error.message : "관리자 정보를 불러오지 못했습니다.";
+        if (text.includes("401")) {
+          router.replace("/login");
+          return;
+        }
         setForbidden(text.includes("관리자 권한") || text.includes("Request failed: 403"));
         setMessage(text);
       }
@@ -101,20 +92,19 @@ export default function ScoringAdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [router, token]);
+  }, [router]);
 
   useEffect(() => {
-    if (!token || !pending) return;
-    const intervalId = window.setInterval(() => void refresh(token), 3000);
+    if (!pending) return;
+    const intervalId = window.setInterval(() => void refresh(), 3000);
     return () => window.clearInterval(intervalId);
-  }, [token, pending, refresh]);
+  }, [pending, refresh]);
 
   function updateWeight(period: "day" | "night", factor: string, value: number) {
     setWeights((current) => ({ ...current, [period]: { ...current[period], [factor]: value } }));
   }
 
   async function saveDraft() {
-    if (!token) return;
     if (!version.trim() || !name.trim()) {
       setMessage("버전과 이름을 입력하세요.");
       return;
@@ -124,7 +114,7 @@ export default function ScoringAdminPage() {
       return;
     }
     try {
-      const profile = await createScoringProfileDraft(token, {
+      const profile = await createScoringProfileDraft({
         version: version.trim(), name: name.trim(), description: description.trim() || null, weights, unknown_score: unknownScore,
       });
       setProfiles((current) => [profile, ...current]);
@@ -135,9 +125,8 @@ export default function ScoringAdminPage() {
   }
 
   async function apply(profile: ScoringProfile) {
-    if (!token) return;
     try {
-      const build = await applyScoringProfile(token, profile.id);
+      const build = await applyScoringProfile(profile.id);
       setBuilds((current) => [build, ...current]);
       setMessage(`${profile.version} 적용 작업을 대기열에 넣었습니다.`);
     } catch (error) {

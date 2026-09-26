@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login } from "@/lib/api";
-import { saveToken } from "@/lib/auth";
 import {
   EyeIcon,
   EyeOffIcon,
@@ -30,8 +29,7 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const { access_token } = await login(email, password);
-      saveToken(access_token);
+      await login(email, password, rememberMe);
       router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다");

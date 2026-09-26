@@ -51,6 +51,7 @@ class RouteAlternative(BaseModel):
     route_points: list[RoutePoint]
     safety_score: float
     distance_m: float
+    zones_passed: list[SafetyZoneOut]
 
 
 class RouteResponse(BaseModel):

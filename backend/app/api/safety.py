@@ -48,10 +48,8 @@ def _client_ip(request: Request) -> str:
 
 
 def _authenticated_user_id(request: Request) -> str | None:
-    authorization = request.headers.get("authorization", "")
-    if not authorization.startswith("Bearer "):
-        return None
-    payload = decode_token(authorization.removeprefix("Bearer "))
+    token = request.cookies.get("access_token")
+    payload = decode_token(token) if token else None
     if payload and payload.get("type") == "access" and isinstance(payload.get("sub"), str):
         return payload["sub"]
     return None
@@ -256,6 +254,16 @@ async def route_safety(
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
             safety_score=c["score"],
             distance_m=c["distance_m"],
+            zones_passed=[
+                SafetyZoneOut(
+                    dong_code=z.dong_code,
+                    dong_name=z.dong_name,
+                    lat=z.lat,
+                    lng=z.lng,
+                    safety_score=score_map[z.dong_code],
+                )
+                for z in _zones_passed(c["points"], zones)
+            ],
         )
         for c in candidates
     ]

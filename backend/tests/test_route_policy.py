@@ -53,6 +53,11 @@ def test_development_allows_default_jwt_secret_for_local_startup():
     validate_runtime_settings(Settings(app_env="development"))
 
 
+def test_credentialed_cors_rejects_a_wildcard_origin_in_every_environment():
+    with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
+        validate_runtime_settings(Settings(app_env="development", cors_allow_origins="*"))
+
+
 def test_route_request_gate_rejects_requests_above_the_ip_limit():
     gate = RouteRequestGate(
         max_concurrent=2,
@@ -149,7 +154,7 @@ def test_trusted_proxy_uses_the_first_forwarded_client_ip(monkeypatch):
 def test_access_token_subject_is_used_for_the_user_limit():
     request = _request(
         "203.0.113.10",
-        {"authorization": f"Bearer {create_access_token('member@example.com')}"},
+        {"cookie": f"access_token={create_access_token('member@example.com')}"},
     )
 
     assert _authenticated_user_id(request) == "member@example.com"

@@ -170,6 +170,30 @@ def test_route_safety_includes_shortest_route_field():
     assert "shortest_route_points" in body
 
 
+def test_route_alternatives_include_the_zones_passed_by_each_route(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0},
+            {"points": [(37.5, 127.0), (37.52, 127.02)], "score": 65.0, "distance_m": 1900.0},
+        ],
+    )
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", lambda *args, **kwargs: None)
+
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01, "include_comparison": False},
+    )
+
+    assert response.status_code == 200
+    alternatives = response.json()["alternatives"]
+    assert len(alternatives) == 2
+    assert all(alternative["zones_passed"] for alternative in alternatives)
+
+
 def test_route_without_comparison_skips_tmap_when_safe_route_exists(monkeypatch):
     from app.api import safety as safety_api
 

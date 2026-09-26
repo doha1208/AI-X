@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_admin, require_csrf
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.scoring_profile import ScoreBuildOut, ScoringProfileDraftIn, ScoringProfileOut
@@ -57,6 +57,7 @@ def create_scoring_profile_draft(
     payload: ScoringProfileDraftIn,
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    _: None = Depends(require_csrf),
 ) -> ScoringProfileOut:
     try:
         return create_draft(db, payload, created_by=current_user.email)
@@ -66,7 +67,12 @@ def create_scoring_profile_draft(
 
 
 @router.post("/{profile_id}/apply", response_model=ScoreBuildOut, status_code=status.HTTP_202_ACCEPTED)
-def apply_scoring_profile(profile_id: int, _: User = Depends(require_admin), db: Session = Depends(get_db)) -> ScoreBuildOut:
+def apply_scoring_profile(
+    profile_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    _csrf: None = Depends(require_csrf),
+) -> ScoreBuildOut:
     build = queue_profile_build(db, profile_id)
     if build is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="점수 프로필을 찾을 수 없습니다")

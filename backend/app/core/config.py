@@ -51,7 +51,13 @@ settings = Settings()
 def validate_runtime_settings(config: Settings) -> None:
     """운영 계열 환경이 약한 JWT 키로 시작하지 않도록 막는다."""
 
+    if "*" in {origin.strip() for origin in config.cors_allow_origins.split(",")}:
+        raise RuntimeError("CORS_ALLOW_ORIGINS cannot contain '*' when credential cookies are enabled")
     if config.app_env.lower() in {"development", "test"}:
         return
     if config.secret_key == DEFAULT_SECRET_KEY or len(config.secret_key) < 32:
         raise RuntimeError("SECRET_KEY must be a random value of at least 32 characters outside development")
+
+
+def auth_cookie_secure(config: Settings = settings) -> bool:
+    return config.app_env.lower() not in {"development", "test"}
