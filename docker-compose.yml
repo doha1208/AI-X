@@ -1,0 +1,28 @@
+services:
+  api:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      ROUTE_ARTIFACT_DIR: /artifacts
+    volumes:
+      - app_data:/data
+      - route_artifacts:/artifacts
+
+  artifact-builder:
+    build: ./backend
+    restart: unless-stopped
+    command: ["python", "-m", "scripts.artifact_builder_worker"]
+    environment:
+      DATABASE_URL: sqlite:////data/app.db
+      ROUTE_ARTIFACT_DIR: /artifacts
+    volumes:
+      - app_data:/data
+      - route_artifacts:/artifacts
+      - ./backend/data/osm:/app/data/osm:ro
+
+volumes:
+  app_data:
+  route_artifacts:

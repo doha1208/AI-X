@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -39,4 +40,10 @@ class ScoringProfileOut(BaseModel):
 class ScoreBuildOut(BaseModel):
     id: int
     profile_id: int
-    status: str
+    profile_version: str
+    status: Literal["queued", "building", "succeeded", "failed"]
+    artifact_version: str | None
+    error_code: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None

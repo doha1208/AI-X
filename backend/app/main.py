@@ -8,10 +8,12 @@ from app.api.admin_scoring import router as admin_scoring_router
 from app.api.safety import router as safety_router
 from app.core.config import settings, validate_runtime_settings
 from app.db.session import Base, engine
+from app.db.schema import ensure_database_schema
 from app.models import safety_zone, scoring_profile, user  # noqa: F401 (register models before create_all)
 from app.services.safe_route import route_artifact_runtime
 
 Base.metadata.create_all(bind=engine)
+ensure_database_schema(engine)
 
 app = FastAPI(title="안심 거주지 · 귀갓길 추천 플랫폼")
 

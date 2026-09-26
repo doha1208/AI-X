@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     # 산출물 버전별 경로 결과 LRU 캐시와 매니페스트 재확인 주기.
     route_result_cache_size: int = 2048
     route_artifact_reload_seconds: int = 60
+    builder_poll_seconds: int = 10
+    builder_data_refresh_seconds: int = 1800
     tmap_route_cache_seconds: int = 300
     # 공개 경로 API 보호 정책. 한 프로세스 안에서 적용한다.
     route_max_concurrent: int = 2

@@ -122,3 +122,51 @@ def test_admin_can_queue_a_draft_for_application(monkeypatch):
     assert queued.status_code == 202
     assert queued.json()["status"] == "queued"
     assert queued.json()["profile_id"] == draft.json()["id"]
+
+
+def test_admin_apply_returns_complete_queued_build_lifecycle(monkeypatch):
+    """An admin must be able to poll a new job without guessing missing state."""
+    monkeypatch.setattr(settings, "admin_emails", "admin@example.com")
+    token = _access_token("admin@example.com")
+    draft = client.post(
+        "/admin/scoring-profiles",
+        headers={"Authorization": f"Bearer {token}"},
+        json=VALID_PROFILE,
+    ).json()
+
+    queued = client.post(
+        f"/admin/scoring-profiles/{draft['id']}/apply",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert queued.status_code == 202
+    body = queued.json()
+    assert body["profile_id"] == draft["id"]
+    assert body["profile_version"] == "pilot-v1"
+    assert body["status"] == "queued"
+    assert body["artifact_version"] is None
+    assert body["error_code"] is None
+    assert body["created_at"]
+    assert body["started_at"] is None
+    assert body["finished_at"] is None
+
+
+def test_non_admin_cannot_read_scoring_build_status(monkeypatch):
+    monkeypatch.setattr(settings, "admin_emails", "admin@example.com")
+    token = _access_token("member@example.com")
+
+    response = client.get(
+        "/admin/scoring-profiles/builds",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_can_read_build_list_and_404_for_missing_build(monkeypatch):
+    monkeypatch.setattr(settings, "admin_emails", "admin@example.com")
+    token = _access_token("admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    assert client.get("/admin/scoring-profiles/builds", headers=headers).json() == []
+    assert client.get("/admin/scoring-profiles/builds/999", headers=headers).status_code == 404

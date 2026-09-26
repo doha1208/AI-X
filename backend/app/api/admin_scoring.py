@@ -6,7 +6,14 @@ from app.api.deps import require_admin
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.scoring_profile import ScoreBuildOut, ScoringProfileDraftIn, ScoringProfileOut
-from app.services.scoring_profile_store import create_draft, get_active_profile, list_profiles, queue_profile_build
+from app.services.scoring_profile_store import (
+    create_draft,
+    get_active_profile,
+    get_build,
+    list_builds,
+    list_profiles,
+    queue_profile_build,
+)
 
 
 router = APIRouter(prefix="/admin/scoring-profiles", tags=["admin-scoring"])
@@ -24,6 +31,25 @@ def read_active_profile(
     _: User = Depends(require_admin), db: Session = Depends(get_db)
 ) -> ScoringProfileOut | None:
     return get_active_profile(db)
+
+
+@router.get("/builds", response_model=list[ScoreBuildOut])
+def read_builds(
+    _: User = Depends(require_admin), db: Session = Depends(get_db)
+) -> list[ScoreBuildOut]:
+    return list_builds(db)
+
+
+@router.get("/builds/{build_id}", response_model=ScoreBuildOut)
+def read_build(
+    build_id: int,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> ScoreBuildOut:
+    build = get_build(db, build_id)
+    if build is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="빌드 작업을 찾을 수 없습니다")
+    return build
 
 
 @router.post("", response_model=ScoringProfileOut, status_code=status.HTTP_201_CREATED)

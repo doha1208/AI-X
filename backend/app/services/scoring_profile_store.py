@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,20 @@ def _to_output(record: ScoringProfileRecord) -> ScoringProfileOut:
         status=record.status,
         created_at=record.created_at,
         created_by=record.created_by,
+    )
+
+
+def _build_to_output(build: ScoreBuildRecord, profile: ScoringProfileRecord) -> ScoreBuildOut:
+    return ScoreBuildOut(
+        id=build.id,
+        profile_id=build.profile_id,
+        profile_version=profile.version,
+        status=build.status,
+        artifact_version=build.artifact_version,
+        error_code=build.error_code,
+        created_at=build.created_at,
+        started_at=build.started_at,
+        finished_at=build.finished_at,
     )
 
 
@@ -53,11 +68,59 @@ def get_active_profile(db: Session) -> ScoringProfileOut | None:
     return _to_output(record) if record is not None else None
 
 
+def list_builds(db: Session, limit: int = 20) -> list[ScoreBuildOut]:
+    rows = (
+        db.query(ScoreBuildRecord, ScoringProfileRecord)
+        .join(ScoringProfileRecord, ScoringProfileRecord.id == ScoreBuildRecord.profile_id)
+        .order_by(ScoreBuildRecord.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_build_to_output(build, profile) for build, profile in rows]
+
+
+def get_build(db: Session, build_id: int) -> ScoreBuildOut | None:
+    row = (
+        db.query(ScoreBuildRecord, ScoringProfileRecord)
+        .join(ScoringProfileRecord, ScoringProfileRecord.id == ScoreBuildRecord.profile_id)
+        .filter(ScoreBuildRecord.id == build_id)
+        .first()
+    )
+    return _build_to_output(*row) if row is not None else None
+
+
+def claim_next_queued_build(
+    db: Session,
+) -> tuple[ScoreBuildRecord, ScoringProfileRecord | None] | None:
+    build = (
+        db.query(ScoreBuildRecord)
+        .filter(ScoreBuildRecord.status == "queued")
+        .order_by(ScoreBuildRecord.id)
+        .first()
+    )
+    if build is None:
+        return None
+
+    build.status = "building"
+    build.started_at = datetime.now(UTC)
+    profile = db.get(ScoringProfileRecord, build.profile_id)
+    if profile is None:
+        build.status = "failed"
+        build.error_code = "profile_missing"
+        build.finished_at = datetime.now(UTC)
+        db.commit()
+        return build, None
+
+    db.commit()
+    return build, profile
+
+
 def queue_profile_build(db: Session, profile_id: int) -> ScoreBuildOut | None:
-    if db.get(ScoringProfileRecord, profile_id) is None:
+    profile = db.get(ScoringProfileRecord, profile_id)
+    if profile is None:
         return None
     build = ScoreBuildRecord(profile_id=profile_id, status="queued")
     db.add(build)
     db.commit()
     db.refresh(build)
-    return ScoreBuildOut(id=build.id, profile_id=build.profile_id, status=build.status)
+    return _build_to_output(build, profile)
