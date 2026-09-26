@@ -1,4 +1,5 @@
 import asyncio
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -17,7 +18,7 @@ from app.schemas.safety import (
 )
 from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
-from app.services.safe_route import find_safe_routes
+from app.services.safe_route import find_safe_routes, route_artifact_runtime
 from app.services.safety_score import compute_zone_period_scores
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
@@ -101,6 +102,22 @@ def _zones_passed(points: list[Point], zones: list[SafetyZone]) -> list[SafetyZo
     return passed
 
 
+def _artifact_score_map_for_zones(
+    zones: list[SafetyZone], period: str
+) -> dict[str, float] | None:
+    scores = route_artifact_runtime.score_map(period)
+    if scores is None:
+        return None
+    if any(
+        zone.dong_code not in scores
+        or not isinstance(scores[zone.dong_code], (int, float))
+        or not math.isfinite(scores[zone.dong_code])
+        for zone in zones
+    ):
+        return None
+    return scores
+
+
 @router.get("/zones", response_model=list[SafetyZoneOut])
 def nearby_zones(
     lat: float,
@@ -129,6 +146,10 @@ def nearby_bells_endpoint(
 
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])
 def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depends(get_db)):
+    zones = scoped_zones_query(db).all()
+    scores = _artifact_score_map_for_zones(zones, "day")
+    if scores is not None:
+        return [SafetyZoneOut(dong_code=z.dong_code, dong_name=z.dong_name, lat=z.lat, lng=z.lng, safety_score=scores[z.dong_code]) for z in sorted(zones, key=lambda z: scores[z.dong_code], reverse=True)[:limit]]
     return (
         scoped_zones_query(db)
         .order_by(SafetyZone.safety_score.desc())
@@ -154,7 +175,9 @@ async def route_safety(
     """
     zones = scoped_zones_query(db).all()
     period = period_for(payload.at)
-    score_map = compute_zone_period_scores(zones, period)
+    score_map = _artifact_score_map_for_zones(zones, period)
+    if score_map is None:
+        score_map = compute_zone_period_scores(zones, period)
 
     safe_route_task = asyncio.to_thread(
         find_safe_routes,

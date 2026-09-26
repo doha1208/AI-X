@@ -480,6 +480,13 @@ class RouteArtifactRuntime:
                 "version": self._artifact.version if self._artifact is not None else None,
             }
 
+    def score_map(self, period: Period) -> dict[str, float] | None:
+        with self._lock:
+            if self._artifact is None:
+                return None
+            scores = self._artifact.score_by_period.get(period)
+            return dict(scores) if scores is not None else None
+
     def load(self, directory: Path) -> bool:
         artifact = load_current_artifact(directory)
         if artifact is None:

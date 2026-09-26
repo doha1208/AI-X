@@ -54,6 +54,23 @@ def test_residence_recommend_orders_by_score():
     assert scores == sorted(scores, reverse=True)
 
 
+def test_residence_recommend_uses_active_artifact_day_scores(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api.route_artifact_runtime,
+        "score_map",
+        lambda period: {"TEST1": 12.0, "TEST2": 98.0},
+    )
+
+    body = client.get("/safety/residence-recommend", params={"limit": 2}).json()
+
+    assert [(zone["dong_code"], zone["safety_score"]) for zone in body] == [
+        ("TEST2", 98.0),
+        ("TEST1", 12.0),
+    ]
+
+
 def test_route_safety_returns_score():
     res = client.post(
         "/safety/route",
@@ -80,6 +97,36 @@ def test_route_safety_accepts_night_timestamp():
     body = res.json()
     assert "safety_score" in body
     assert len(body["zones_passed"]) >= 1
+
+
+def test_route_fallback_ignores_incomplete_artifact_score_map(monkeypatch):
+    from app.api import safety as safety_api
+
+    async def tmap_points(*_):
+        return [(37.50, 127.00), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "find_safe_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", tmap_points)
+    monkeypatch.setattr(safety_api.route_artifact_runtime, "score_map", lambda period: {"TEST1": 99.0})
+    monkeypatch.setattr(
+        safety_api,
+        "compute_zone_period_scores",
+        lambda zones, period: {"TEST1": 31.0, "TEST2": 69.0},
+    )
+
+    response = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.50,
+            "start_lng": 127.00,
+            "end_lat": 37.51,
+            "end_lng": 127.01,
+            "at": "2026-01-01T23:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [zone["safety_score"] for zone in response.json()["zones_passed"]] == [31.0, 69.0]
 
 
 def test_nearby_bells_limit_query_param_is_honored():
