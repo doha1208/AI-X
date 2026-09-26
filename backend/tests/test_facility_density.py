@@ -93,29 +93,3 @@ def test_index_loads_from_points_file(tmp_path):
 
     assert index is not None
     assert _score(index, "night") > 0
-
-
-def test_nearby_accidents_lower_the_score():
-    calm = build_facility_index(cctv=[NEAR] * 5, lights=[], accidents=[])
-    hotspot = build_facility_index(cctv=[NEAR] * 5, lights=[], accidents=[NEAR] * 5)
-    assert _score(hotspot, "day") < _score(calm, "day")
-
-
-def test_accidents_are_included_when_loading(tmp_path):
-    path = tmp_path / "facility_points.json"
-    path.write_text(
-        json.dumps(
-            {
-                "bbox": [126.3, 36.85, 127.9, 38.3],
-                "cctv": [list(NEAR)] * 5,
-                "lights": [],
-                "accidents": [list(NEAR)] * 5,
-            }
-        )
-    )
-
-    with_accidents = load_facility_index(path)
-    without_accidents = build_facility_index(cctv=[NEAR] * 5, lights=[])
-
-    assert with_accidents is not None
-    assert _score(with_accidents, "day") < _score(without_accidents, "day")

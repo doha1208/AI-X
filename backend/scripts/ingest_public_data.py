@@ -21,8 +21,6 @@ ponytail: 범죄 통계는 구 단위가 공개 최소 단위라 같은 구의 �
     backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --refresh
     # 도로 구간별 밀도용 CCTV·보안등 좌표만 저장(API ~1,900회, 수 분~수십 분):
     backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-points
-    # 위 CCTV·보안등 좌표는 그대로 두고 교통사고 다발지역 좌표만 추가:
-    backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-accidents
 """
 import csv
 import json
@@ -168,13 +166,11 @@ def iter_bell_points():
             yield lat, lng
 
 
-def iter_accident_points(weighted: bool = True):
-    """서울+경기 교통사고 다발지역의 (lat, lng).
+def iter_accident_points():
+    """서울+경기 교통사고 다발지역의 (lat, lng), 지점당 한 번씩.
 
-    weighted=True(기본)면 사고건수만큼 반복해 밀도 계산 시 자연히 가중된다(facility_density용).
-    weighted=False면 지점당 한 번만 — 동 중심에서 가장 가까운 지점까지 거리를 잴 때는
-    반복이 필요 없다(가장 가까운 점은 어차피 하나뿐이라 중복이 결과에 영향을 주지 않고
-    cKDTree만 불필요하게 커진다).
+    동 중심에서 가장 가까운 지점까지 거리(accident_dist_m)를 잴 때만 쓴다 — 가장 가까운
+    점은 어차피 하나뿐이라 사고건수만큼 반복할 필요가 없다.
     """
     with ACCIDENT_CSV.open(encoding="cp949", errors="replace", newline="") as f:
         for row in csv.DictReader(f):
@@ -184,26 +180,9 @@ def iter_accident_points(weighted: bool = True):
             try:
                 lat = float(row["위도"])
                 lng = float(row["경도"])
-                count = max(1, int(row.get("사고건수", 1)))
             except (KeyError, ValueError):
                 continue
-            for _ in range(count if weighted else 1):
-                yield lat, lng
-
-
-def dump_accident_points() -> None:
-    """기존 facility_points.json(CCTV·보안등, 특히 오래 걸린 lights_geocoded)을 건드리지 않고
-    교통사고 다발지역 좌표만 추가/갱신한다."""
-    payload = load_facility_points()
-    west, south, east, north = payload["bbox"]
-
-    def inside(lat: float, lng: float) -> bool:
-        return west <= lng <= east and south <= lat <= north
-
-    accidents = [[round(lat, 6), round(lng, 6)] for lat, lng in iter_accident_points() if inside(lat, lng)]
-    payload["accidents"] = accidents
-    _atomic_write_json(FACILITY_POINTS_PATH, payload)
-    print(f"Saved {len(accidents)} accident-weighted points to {FACILITY_POINTS_PATH}")
+            yield lat, lng
 
 
 def dump_bell_points() -> list[tuple[float, float]]:
@@ -352,7 +331,7 @@ def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None
     police_dists = nearest_police_distances_m(centroids, [(lat, lng) for lat, lng in pois["police"]])
     bell_points = dump_bell_points()
     bell_dists = nearest_bell_distances_m(centroids, bell_points)
-    accident_points = list(iter_accident_points(weighted=False)) if ACCIDENT_CSV.exists() else []
+    accident_points = list(iter_accident_points()) if ACCIDENT_CSV.exists() else []
     accident_dists = nearest_accident_distances_m(centroids, accident_points)
     stores_by_dong = count_points_by_dong(pois["stores"], step, cells, bbox)
     for record, police_dist, bell_dist, accident_dist in zip(records, police_dists, bell_dists, accident_dists):
@@ -545,7 +524,5 @@ if __name__ == "__main__":
         refresh_derived_factors()
     elif "--dump-points" in sys.argv:
         dump_facility_points()
-    elif "--dump-accidents" in sys.argv:
-        dump_accident_points()
     else:
         ingest()
