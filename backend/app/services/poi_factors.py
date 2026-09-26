@@ -8,6 +8,8 @@ POLICE_DIST_CAP_M = 3000.0
 # 비상벨은 경찰서보다 훨씬 촘촘해서(동 중앙값 약 67m) 캡을 더 짧게 잡는다 — 안 그러면
 # 대부분의 동이 캡에 못 미쳐 정규화 폭이 넓어지지 않는다.
 BELL_DIST_CAP_M = 1000.0
+# 사고다발지역은 비상벨보다 드물지만 경찰서보다는 촘촘하다 — 그 중간값으로 잡는다.
+ACCIDENT_DIST_CAP_M = 1500.0
 
 _M_PER_DEG_LAT = 111_320.0
 # 서울·경기(위도 약 37.5도)에서 경도 1도의 길이 보정.
@@ -38,3 +40,8 @@ def nearest_police_distances_m(centroids: list[Point], police_points: list[Point
 def nearest_bell_distances_m(centroids: list[Point], bell_points: list[Point]) -> list[float]:
     """각 (lat, lng) 지점에서 가장 가까운 안전비상벨까지의 거리(m). CAP으로 상한."""
     return _nearest_distances_m(centroids, bell_points, BELL_DIST_CAP_M)
+
+
+def nearest_accident_distances_m(centroids: list[Point], accident_points: list[Point]) -> list[float]:
+    """각 (lat, lng) 지점에서 가장 가까운 교통사고 다발지역까지의 거리(m). CAP으로 상한."""
+    return _nearest_distances_m(centroids, accident_points, ACCIDENT_DIST_CAP_M)

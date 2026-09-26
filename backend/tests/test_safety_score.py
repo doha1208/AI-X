@@ -114,6 +114,15 @@ def test_closer_bell_raises_score():
     assert scores["NEAR"] > scores["FAR"]
 
 
+def test_further_from_accident_hotspot_raises_score():
+    records = [
+        {"dong_code": "NEAR", "cctv_count": 10, "streetlight_count": 10, "crime_rate": 50, "accident_dist_m": 50},
+        {"dong_code": "FAR", "cctv_count": 10, "streetlight_count": 10, "crime_rate": 50, "accident_dist_m": 1400},
+    ]
+    scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(records)}
+    assert scores["FAR"] > scores["NEAR"]
+
+
 def test_more_shops_raise_score():
     records = [
         {"dong_code": "BUSY", "cctv_count": 10, "streetlight_count": 10, "crime_count": 5, "store_count": 300},
@@ -134,3 +143,18 @@ def test_default_period_matches_existing_day_weights():
     default = compute_safety_scores([dict(r) for r in records])
     explicit_day = compute_safety_scores([dict(r) for r in records], period="day")
     assert default[0]["safety_score"] == explicit_day[0]["safety_score"]
+
+
+def test_a_single_outlier_does_not_crush_everyone_else_near_zero():
+    # 캡이 없는 요소(cctv_count)에 극단값 하나가 섞여도, 나머지 동들끼리는 여전히
+    # 값 차이만큼 점수가 벌어져야 한다 — min-max 폭 전체가 그 값에 맞춰지면 안 된다.
+    normal_records = [
+        {"dong_code": f"N{i}", "cctv_count": i * 5, "streetlight_count": 10, "crime_rate": 50}
+        for i in range(20)  # 0, 5, 10, ..., 95
+    ]
+    outlier = {"dong_code": "OUTLIER", "cctv_count": 5000, "streetlight_count": 10, "crime_rate": 50}
+
+    scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(normal_records + [outlier])}
+
+    # 정상 범위 안의 가장 큰 값(N19=95)이 극단값 하나 때문에 0 근처로 뭉개지지 않아야 한다.
+    assert scores["N19"] > scores["N0"] + 10

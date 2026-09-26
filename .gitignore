@@ -16,6 +16,8 @@ backend/data/osm/
 /*주민등록인구및세대현황*.csv
 /안전비상벨위치정보.csv
 /전국교통사고다발지역표준데이터.csv
+/유동인구_행정동단위집계.csv
+/유입생활이동인구.csv
 
 # Node / Next.js
 frontend/node_modules/

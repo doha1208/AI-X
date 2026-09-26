@@ -38,8 +38,17 @@ from sqlalchemy import inspect, text
 
 from app.db.session import Base, SessionLocal, engine
 from app.models.safety_zone import SafetyZone
-from app.services.crime_rate import crime_rate_per_10k, parse_population_csv, region_key_for
-from app.services.poi_factors import nearest_bell_distances_m, nearest_police_distances_m
+from app.services.crime_rate import (
+    crime_rate_per_10k,
+    parse_floating_population_csv,
+    parse_population_csv,
+    region_key_for,
+)
+from app.services.poi_factors import (
+    nearest_accident_distances_m,
+    nearest_bell_distances_m,
+    nearest_police_distances_m,
+)
 from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights
 
 HERE = Path(__file__).resolve().parent
@@ -50,6 +59,8 @@ CCTV_CSV = PROJECT_ROOT / "CCTV정보.csv"
 BELL_CSV = PROJECT_ROOT / "안전비상벨위치정보.csv"
 ACCIDENT_CSV = PROJECT_ROOT / "전국교통사고다발지역표준데이터.csv"
 CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
+# 경기데이터드림 행정동 단위 시간대별 유동인구(구 단위로 합쳐 등록인구 대신/대체로 쓴다).
+FLOATING_POP_CSV = PROJECT_ROOT / "유동인구_행정동단위집계.csv"
 GRID_PATH = BACKEND_DIR / "app" / "data" / "dong_grid.json"
 ENV_PATH = BACKEND_DIR / ".env"
 # extract_safety_pois.py가 OSM PBF에서 뽑아둔 경찰서·상점 좌표.
@@ -157,8 +168,14 @@ def iter_bell_points():
             yield lat, lng
 
 
-def iter_accident_points():
-    """서울+경기 교통사고 다발지역의 (lat, lng) — 사고건수만큼 반복해 밀도 계산 시 자연히 가중된다."""
+def iter_accident_points(weighted: bool = True):
+    """서울+경기 교통사고 다발지역의 (lat, lng).
+
+    weighted=True(기본)면 사고건수만큼 반복해 밀도 계산 시 자연히 가중된다(facility_density용).
+    weighted=False면 지점당 한 번만 — 동 중심에서 가장 가까운 지점까지 거리를 잴 때는
+    반복이 필요 없다(가장 가까운 점은 어차피 하나뿐이라 중복이 결과에 영향을 주지 않고
+    cKDTree만 불필요하게 커진다).
+    """
     with ACCIDENT_CSV.open(encoding="cp949", errors="replace", newline="") as f:
         for row in csv.DictReader(f):
             addr = row.get("사고다발지역시도시군구", "")
@@ -170,7 +187,7 @@ def iter_accident_points():
                 count = max(1, int(row.get("사고건수", 1)))
             except (KeyError, ValueError):
                 continue
-            for _ in range(count):
+            for _ in range(count if weighted else 1):
                 yield lat, lng
 
 
@@ -329,20 +346,23 @@ def count_points_by_dong(points: list, step: float, cells: dict, bbox) -> dict:
 
 def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None:
     """dong_code/lat/lng를 가진 레코드에 경찰서까지 거리(police_dist_m), 비상벨까지 거리(bell_dist_m),
-    상점 수(store_count)를 채운다."""
+    가장 가까운 교통사고 다발지역까지 거리(accident_dist_m), 상점 수(store_count)를 채운다."""
     pois = load_pois()
     centroids = [(r["lat"], r["lng"]) for r in records]
     police_dists = nearest_police_distances_m(centroids, [(lat, lng) for lat, lng in pois["police"]])
     bell_points = dump_bell_points()
     bell_dists = nearest_bell_distances_m(centroids, bell_points)
+    accident_points = list(iter_accident_points(weighted=False)) if ACCIDENT_CSV.exists() else []
+    accident_dists = nearest_accident_distances_m(centroids, accident_points)
     stores_by_dong = count_points_by_dong(pois["stores"], step, cells, bbox)
-    for record, police_dist, bell_dist in zip(records, police_dists, bell_dists):
+    for record, police_dist, bell_dist, accident_dist in zip(records, police_dists, bell_dists, accident_dists):
         record["police_dist_m"] = police_dist
         record["bell_dist_m"] = bell_dist
+        record["accident_dist_m"] = accident_dist
         record["store_count"] = stores_by_dong.get(record["dong_code"], 0)
     print(
-        f"  {len(pois['police'])} police, {len(bell_points)} bells, {len(pois['stores'])} stores "
-        f"-> {sum(stores_by_dong.values())} stores assigned"
+        f"  {len(pois['police'])} police, {len(bell_points)} bells, {len(accident_points)} accident spots, "
+        f"{len(pois['stores'])} stores -> {sum(stores_by_dong.values())} stores assigned"
     )
 
 
@@ -364,20 +384,33 @@ def load_population() -> dict[str, float]:
     return population
 
 
+def load_floating_population() -> dict[str, float]:
+    """있으면 구 단위 평균 유동인구를, 없으면 빈 dict를 반환한다(등록인구로 전부 폴백)."""
+    if not FLOATING_POP_CSV.exists():
+        return {}
+    return parse_floating_population_csv(FLOATING_POP_CSV)
+
+
 def add_crime_rate(records: list[dict], cells: dict, crime_by_gu: dict) -> None:
     """레코드에 시·군·구 단위로 맞춘 범죄 건수(crime_count)와 1만 명당 범죄율(crime_rate)을 채운다.
 
     범죄 통계는 시 단위("수원시")인데 동 격자는 구 단위("수원시 장안구")라, 같은 단위로 묶는다.
     이름이 안 맞으면 0건으로 두지 않고 KeyError로 멈춘다.
+
+    유동인구 데이터가 있는 구는 등록인구 대신 그 값으로 범죄율을 계산한다(더 실제에 가까움).
     """
-    population = load_population()
+    floating = load_floating_population()
+    population = {**load_population(), **floating}
     known = set(crime_by_gu) & set(population)
     gu_by_dong = {cell["dong_code"]: cell["gu_name"] for cell in cells.values()}
     for record in records:
         key = region_key_for(gu_by_dong[record["dong_code"]], known)
         record["crime_count"] = crime_by_gu[key]
         record["crime_rate"] = crime_rate_per_10k(crime_by_gu[key], population[key])
-    print(f"  crime rate assigned for {len(records)} dongs ({len(known)} regions)")
+    print(
+        f"  crime rate assigned for {len(records)} dongs ({len(known)} regions, "
+        f"{len(set(floating) & known)} using floating population)"
+    )
 
 
 def ensure_new_columns() -> None:
@@ -389,6 +422,7 @@ def ensure_new_columns() -> None:
         ("crime_rate", "FLOAT DEFAULT 0"),
         ("lights_known", "BOOLEAN DEFAULT TRUE"),
         ("bell_dist_m", "FLOAT DEFAULT 0"),
+        ("accident_dist_m", "FLOAT DEFAULT 0"),
     )
     with engine.begin() as conn:
         for name, ddl in new_columns:
@@ -435,6 +469,7 @@ def refresh_derived_factors() -> None:
             zone.lights_known = rec["lights_known"]
             zone.police_dist_m = rec["police_dist_m"]
             zone.bell_dist_m = rec["bell_dist_m"]
+            zone.accident_dist_m = rec["accident_dist_m"]
             zone.store_count = rec["store_count"]
             zone.crime_count = rec["crime_count"]
             zone.crime_rate = rec["crime_rate"]

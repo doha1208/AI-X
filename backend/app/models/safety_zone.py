@@ -25,6 +25,8 @@ class SafetyZone(Base):
     store_count: Mapped[int] = mapped_column(Integer, default=0)
     # 동 중심에서 가장 가까운 안전비상벨까지의 거리(m).
     bell_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
+    # 동 중심에서 가장 가까운 교통사고 다발지역까지의 거리(m).
+    accident_dist_m: Mapped[float] = mapped_column(Float, default=0.0)
     safety_score: Mapped[float] = mapped_column(Float, default=0.0)
 
 

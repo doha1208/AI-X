@@ -1,6 +1,8 @@
 from app.services.poi_factors import (
+    ACCIDENT_DIST_CAP_M,
     BELL_DIST_CAP_M,
     POLICE_DIST_CAP_M,
+    nearest_accident_distances_m,
     nearest_bell_distances_m,
     nearest_police_distances_m,
 )
@@ -33,4 +35,15 @@ def test_bell_distance_uses_its_own_shorter_cap():
 
 def test_bell_distance_matches_the_generic_nearest_neighbor_math():
     dists = nearest_bell_distances_m([(37.500, 127.000)], [(37.501, 127.000)])
+    assert 105 < dists[0] < 118
+
+
+def test_accident_distance_uses_its_own_cap_between_bell_and_police():
+    assert BELL_DIST_CAP_M < ACCIDENT_DIST_CAP_M < POLICE_DIST_CAP_M
+    assert nearest_accident_distances_m([(37.5, 127.0)], [(38.5, 127.0)]) == [ACCIDENT_DIST_CAP_M]
+    assert nearest_accident_distances_m([(37.5, 127.0)], []) == [ACCIDENT_DIST_CAP_M]
+
+
+def test_accident_distance_matches_the_generic_nearest_neighbor_math():
+    dists = nearest_accident_distances_m([(37.500, 127.000)], [(37.501, 127.000)])
     assert 105 < dists[0] < 118
