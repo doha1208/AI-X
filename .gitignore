@@ -35,3 +35,6 @@ Thumbs.db
 # Local Codex development instructions (DEVELOPMENT.md is intentionally tracked)
 /AGENTS.md
 /.agents/
+
+# aaaaa
+.pytest_cache/
