@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { SafetyZone } from "@/lib/api";
-import { loadKakaoSdk, type LatLng } from "@/lib/kakao";
+import {
+  loadKakaoSdk,
+  type KakaoMap,
+  type KakaoMouseEvent,
+  type KakaoOverlay,
+  type LatLng,
+} from "@/lib/kakao";
 import { LocateIcon } from "@/components/icons";
 
 const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
@@ -84,8 +90,8 @@ export function SafetyMap({
   height = 400,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const overlaysRef = useRef<any[]>([]);
+  const mapRef = useRef<KakaoMap | null>(null);
+  const overlaysRef = useRef<KakaoOverlay[]>([]);
   const hasAutoCenteredRef = useRef(false);
   const lastFocusDongCodeRef = useRef<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -139,7 +145,7 @@ export function SafetyMap({
     const relayoutMap = () => map.relayout();
     window.addEventListener("resize", relayoutMap);
 
-    kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
+    kakao.maps.event.addListener(map, "click", (mouseEvent: KakaoMouseEvent) => {
       onSelectRef.current?.({
         lat: mouseEvent.latLng.getLat(),
         lng: mouseEvent.latLng.getLng(),
@@ -155,7 +161,7 @@ export function SafetyMap({
     const container = containerRef.current;
     container.addEventListener("contextmenu", handleNativeContextMenu, true);
 
-    kakao.maps.event.addListener(map, "rightclick", (mouseEvent: any) => {
+    kakao.maps.event.addListener(map, "rightclick", (mouseEvent: KakaoMouseEvent) => {
       const pos = lastContextPos.current;
       if (!pos) return;
       onContextMenuRef.current?.({
@@ -170,7 +176,7 @@ export function SafetyMap({
       container.removeEventListener("contextmenu", handleNativeContextMenu, true);
       window.removeEventListener("resize", relayoutMap);
     };
-  }, [loaded]);
+  }, [loaded, center.lat, center.lng]);
 
   // 내 위치를 처음 얻었을 때 한 번만 그쪽으로 이동한다. 이후 위치가 갱신돼도
   // 사용자가 지도를 옮겨둔 상태를 덮어쓰지 않는다(재이동은 "내 위치로" 버튼으로).
@@ -314,7 +320,7 @@ export function SafetyMap({
       overlaysRef.current.push(polyline);
 
       const bounds = new kakao.maps.LatLngBounds();
-      path.forEach((p: any) => bounds.extend(p));
+      path.forEach((p) => bounds.extend(p));
       if (comparePath) comparePath.forEach((p) => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
       map.setBounds(bounds);
     }

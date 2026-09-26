@@ -1,10 +1,14 @@
 import asyncio
+import math
+import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.safety_zone import SafetyZone, scoped_zones_query
+from app.core.config import settings
+from app.core.security import decode_token
 from app.schemas.safety import (
     RouteAlternative,
     RouteMode,
@@ -15,14 +19,60 @@ from app.schemas.safety import (
 )
 from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
-from app.services.safe_route import find_safe_routes
+from app.services.safe_route import find_safe_routes, route_artifact_runtime
 from app.services.safety_score import compute_zone_period_scores
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
+from app.services.route_request_limit import RouteRequestGate
+from app.observability import log_route, metrics
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
 Point = tuple[float, float]
+
+route_request_gate = RouteRequestGate(
+    max_concurrent=settings.route_max_concurrent,
+    ip_requests_per_minute=settings.route_ip_requests_per_minute,
+    ip_burst=settings.route_ip_burst,
+    user_requests_per_minute=settings.route_user_requests_per_minute,
+    user_burst=settings.route_user_burst,
+    max_tracked_buckets=settings.route_request_max_tracked_buckets,
+)
+
+
+def _client_ip(request: Request) -> str:
+    direct_ip = request.client.host if request.client else "unknown"
+    trusted_proxies = {ip.strip() for ip in settings.trusted_proxy_ips.split(",") if ip.strip()}
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if direct_ip in trusted_proxies and forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return direct_ip
+
+
+def _authenticated_user_id(request: Request) -> str | None:
+    token = request.cookies.get("access_token")
+    payload = decode_token(token) if token else None
+    if payload and payload.get("type") == "access" and isinstance(payload.get("sub"), str):
+        return payload["sub"]
+    return None
+
+
+async def limit_route_requests(request: Request):
+    admission = route_request_gate.acquire(
+        client_ip=_client_ip(request),
+        user_id=_authenticated_user_id(request),
+    )
+    if not admission.granted:
+        retry_after = admission.retry_after_seconds or 1
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="경로 요청이 잠시 많습니다. 잠시 후 다시 시도해 주세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    try:
+        yield
+    finally:
+        admission.release()
 
 
 def _path_distance_m(points: list[Point]) -> float:
@@ -52,8 +102,30 @@ def _zones_passed(points: list[Point], zones: list[SafetyZone]) -> list[SafetyZo
     return passed
 
 
-def _zone_out(z: SafetyZone, score_map: dict[str, float]) -> SafetyZoneOut:
-    return SafetyZoneOut(dong_code=z.dong_code, dong_name=z.dong_name, lat=z.lat, lng=z.lng, safety_score=score_map[z.dong_code])
+def _zone_out(zone: SafetyZone, score_map: dict[str, float]) -> SafetyZoneOut:
+    return SafetyZoneOut(
+        dong_code=zone.dong_code,
+        dong_name=zone.dong_name,
+        lat=zone.lat,
+        lng=zone.lng,
+        safety_score=score_map[zone.dong_code],
+    )
+
+
+def _artifact_score_map_for_zones(
+    zones: list[SafetyZone], period: str
+) -> dict[str, float] | None:
+    scores = route_artifact_runtime.score_map(period)
+    if scores is None:
+        return None
+    if any(
+        zone.dong_code not in scores
+        or not isinstance(scores[zone.dong_code], (int, float))
+        or not math.isfinite(scores[zone.dong_code])
+        for zone in zones
+    ):
+        return None
+    return scores
 
 
 @router.get("/zones", response_model=list[SafetyZoneOut])
@@ -92,19 +164,20 @@ def nearby_bells_endpoint(
 
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])
 def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depends(get_db)):
-    """안전 점수 상위 동을 추천한다.
-
-    DB의 safety_score 컬럼(ingest 시점의 전체 서울+경기 정규화 값)이 아니라, 조회된(scoped)
-    동 전체를 기준으로 그때그때 다시 정규화해서 정렬한다 — nearby_zones와 같은 이유.
-    """
     zones = scoped_zones_query(db).all()
-    score_map = compute_zone_period_scores(zones, "day")
-    top = sorted(zones, key=lambda z: score_map[z.dong_code], reverse=True)[:limit]
-    return [_zone_out(z, score_map) for z in top]
+    scores = _artifact_score_map_for_zones(zones, "day")
+    if scores is None:
+        scores = compute_zone_period_scores(zones, "day")
+    top = sorted(zones, key=lambda zone: scores[zone.dong_code], reverse=True)[:limit]
+    return [_zone_out(zone, scores) for zone in top]
 
 
 @router.post("/route", response_model=RouteResponse)
-async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
+async def route_safety(
+    payload: RouteRequest,
+    db: Session = Depends(get_db),
+    _request_limit: None = Depends(limit_route_requests),
+):
     """출발지→도착지 경로를 3단계 우선순위로 계산한다.
 
     1) safety_weighted: OSM 도로망 그래프 위에서 안전점수를 비용으로 반영해
@@ -114,26 +187,50 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
        보행자 최단경로를 받아 그 위에 안전점수만 표시(대안 없음).
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
+    started_at = time.perf_counter()
     zones = scoped_zones_query(db).all()
+    if not zones:
+        metrics.record_route(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            duration_seconds=time.perf_counter() - started_at,
+            mode="failed",
+            fallback_reason="safety_zones_unavailable",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "reason": "safety_zones_unavailable",
+                "action": "안전 데이터가 준비될 때까지 잠시 후 다시 시도해 주세요.",
+            },
+        )
     period = period_for(payload.at)
-    score_map = compute_zone_period_scores(zones, period)
+    score_map = _artifact_score_map_for_zones(zones, period)
+    if score_map is None:
+        score_map = compute_zone_period_scores(zones, period)
 
-    # 안전 가중 탐색과 Tmap 최단경로를 동시에 돌린다 — Tmap은 safety_weighted일 때
-    # 비교선으로, 실패했을 때는 폴백 경로로 쓰이니 순서와 무관하게 항상 필요하다.
-    # 순차로 기다리면(특히 실시간 재경로 폴링 중) Tmap 응답 지연(최대 8초)이
-    # 그대로 사용자 대기 시간에 더해지므로 asyncio.gather로 병렬화한다.
-    safe_routes, tmap_points = await asyncio.gather(
-        asyncio.to_thread(
-            find_safe_routes,
-            payload.start_lat,
-            payload.start_lng,
-            payload.end_lat,
-            payload.end_lng,
-            zones,
-            period=period,
-        ),
-        get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
+    safe_route_task = asyncio.to_thread(
+        find_safe_routes,
+        payload.start_lat,
+        payload.start_lng,
+        payload.end_lat,
+        payload.end_lng,
+        zones,
+        period=period,
     )
+    if payload.include_comparison:
+        # 직접 검색은 비교선을 유지하므로 두 경로를 병렬로 가져온다.
+        safe_routes, tmap_points = await asyncio.gather(
+            safe_route_task,
+            get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
+        )
+    else:
+        # 실시간 재경로는 안전 경로만 요청한다. 자체 경로가 없을 때만 Tmap 폴백을 쓴다.
+        safe_routes = await safe_route_task
+        tmap_points = None
+        if not safe_routes:
+            tmap_points = await get_pedestrian_route(
+                payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng
+            )
 
     shortest_route_points: list[RoutePoint] | None = None
     candidates: list[dict]
@@ -171,11 +268,21 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
             safety_score=c["score"],
             distance_m=c["distance_m"],
+            zones_passed=[
+                SafetyZoneOut(
+                    dong_code=z.dong_code,
+                    dong_name=z.dong_name,
+                    lat=z.lat,
+                    lng=z.lng,
+                    safety_score=score_map[z.dong_code],
+                )
+                for z in _zones_passed(c["points"], zones)
+            ],
         )
         for c in candidates
     ]
 
-    return RouteResponse(
+    response = RouteResponse(
         safety_score=best["score"],
         zones_passed=passed,
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
@@ -183,3 +290,19 @@ async def route_safety(payload: RouteRequest, db: Session = Depends(get_db)):
         alternatives=alternatives,
         shortest_route_points=shortest_route_points,
     )
+    fallback_reason = "none" if mode == "safety_weighted" else "safe_route_unavailable"
+    if mode == "straight_line":
+        fallback_reason = "tmap_unavailable"
+    metrics.record_route(
+        status_code=status.HTTP_200_OK,
+        duration_seconds=time.perf_counter() - started_at,
+        mode=mode,
+        fallback_reason=fallback_reason,
+    )
+    log_route(
+        status_code=status.HTTP_200_OK,
+        duration_seconds=time.perf_counter() - started_at,
+        mode=mode,
+        fallback_reason=fallback_reason,
+    )
+    return response

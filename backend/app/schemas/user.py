@@ -9,6 +9,7 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    remember_me: bool = False
 
 
 class UserOut(BaseModel):
@@ -19,11 +20,5 @@ class UserOut(BaseModel):
         from_attributes = True
 
 
-class TokenPair(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
+class CsrfTokenOut(BaseModel):
+    csrf_token: str

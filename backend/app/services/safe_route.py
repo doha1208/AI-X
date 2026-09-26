@@ -1,8 +1,12 @@
 import logging
+import hashlib
+import json
 import math
 import pickle
 import socket
 import threading
+import time
+from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,11 +15,20 @@ import numpy as np
 import osmnx as ox
 from scipy.spatial import cKDTree
 
+from app.core.config import settings
 from app.models.safety_zone import SafetyZone
-from app.services.facility_density import FacilityIndex, edge_local_scores, load_facility_index
+from app.services.facility_density import (
+    FACILITY_POINTS_PATH,
+    FacilityIndex,
+    edge_local_scores,
+    load_facility_index,
+)
 from app.services.geo import haversine_km
 from app.services.road_score import road_safety_score
+from app.services.route_artifact import RouteArtifact, load_current_artifact
 from app.services.safety_score import Period, compute_zone_period_scores
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
+from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -473,6 +486,223 @@ def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
     return {"points": points, "score": avg_score, "distance_m": total_length}
 
 
+class RouteArtifactRuntime:
+    """HTTP 요청이 읽기 전용 경로 산출물만 조회하도록 하는 런타임 보관소."""
+
+    def __init__(self, cache_size: int | None = None) -> None:
+        self._artifact: RouteArtifact | None = None
+        self._tree: cKDTree | None = None
+        self._lock = threading.Lock()
+        self._cache_size = max(1, cache_size or settings.route_result_cache_size)
+        self._result_cache: OrderedDict[tuple[str, Period, int, int, int], list[dict]] = OrderedDict()
+        self._manifest_mtime_ns: int | None = None
+        self._last_reload_check = float("-inf")
+
+    def install(self, artifact: RouteArtifact) -> None:
+        """완성된 산출물과 그 노드 색인을 한 번에 교체한다."""
+
+        tree = cKDTree(artifact.node_points)
+        with self._lock:
+            self._artifact = artifact
+            self._tree = tree
+            self._result_cache.clear()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._artifact = None
+            self._tree = None
+            self._result_cache.clear()
+            self._manifest_mtime_ns = None
+
+    def status(self) -> dict[str, bool | str | None]:
+        with self._lock:
+            return {
+                "available": self._artifact is not None,
+                "version": self._artifact.version if self._artifact is not None else None,
+            }
+
+    def score_map(self, period: Period) -> dict[str, float] | None:
+        with self._lock:
+            if self._artifact is None:
+                return None
+            scores = self._artifact.score_by_period.get(period)
+            return dict(scores) if scores is not None else None
+
+    def load(self, directory: Path) -> bool:
+        artifact = load_current_artifact(directory)
+        if artifact is None:
+            return False
+        self.install(artifact)
+        try:
+            manifest_mtime_ns = (directory / "current.json").stat().st_mtime_ns
+        except OSError:
+            manifest_mtime_ns = None
+        with self._lock:
+            self._manifest_mtime_ns = manifest_mtime_ns
+        return True
+
+    def reload_if_changed(self, directory: Path, *, now: float) -> bool:
+        """새 매니페스트가 완전히 검증된 경우에만 현재 산출물을 교체한다."""
+
+        with self._lock:
+            if now - self._last_reload_check < settings.route_artifact_reload_seconds:
+                return False
+            self._last_reload_check = now
+            current_mtime_ns = self._manifest_mtime_ns
+        try:
+            manifest_mtime_ns = (directory / "current.json").stat().st_mtime_ns
+        except OSError:
+            return False
+        if manifest_mtime_ns == current_mtime_ns:
+            return False
+
+        artifact = load_current_artifact(directory)
+        if artifact is None:
+            return False
+        self.install(artifact)
+        with self._lock:
+            self._manifest_mtime_ns = manifest_mtime_ns
+        return True
+
+    def find_routes(
+        self,
+        start_lat: float,
+        start_lng: float,
+        end_lat: float,
+        end_lng: float,
+        *,
+        period: Period,
+        k: int,
+    ) -> list[dict] | None:
+        with self._lock:
+            artifact = self._artifact
+            tree = self._tree
+        if artifact is None or tree is None:
+            return None
+
+        graph = artifact.graph_by_period.get(period)
+        if graph is None:
+            return None
+        try:
+            _, origin_idx = tree.query((start_lat, start_lng * _LNG_SCALE))
+            _, destination_idx = tree.query((end_lat, end_lng * _LNG_SCALE))
+            origin = artifact.node_ids[int(origin_idx)]
+            destination = artifact.node_ids[int(destination_idx)]
+            cache_key = (artifact.version, period, origin, destination, k)
+            with self._lock:
+                cached = self._result_cache.get(cache_key)
+                if cached is not None:
+                    self._result_cache.move_to_end(cache_key)
+                    metrics.record_route_cache("hit")
+                    return cached
+            metrics.record_route_cache("miss")
+            paths = nx.shortest_simple_paths(graph, origin, destination, weight="safety_cost")
+            routes: list[dict] = []
+            for path in paths:
+                routes.append(_summarize_path(graph, path))
+                if len(routes) >= k:
+                    break
+            with self._lock:
+                if self._artifact is artifact:
+                    self._result_cache[cache_key] = routes
+                    self._result_cache.move_to_end(cache_key)
+                    while len(self._result_cache) > self._cache_size:
+                        self._result_cache.popitem(last=False)
+            return routes or None
+        except (IndexError, nx.NetworkXNoPath, nx.NodeNotFound, ValueError) as exc:
+            logger.warning("Artifact safety-route search failed: %s", exc)
+            return None
+
+
+route_artifact_runtime = RouteArtifactRuntime()
+
+
+def build_route_artifact(
+    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+) -> RouteArtifact:
+    """배치 실행에서만 호출하는 낮·밤 안전 가중 경로 그래프 생성기.
+
+    로컬 OSM 도로망이 없으면 HTTP 요청에서 다운로드로 보완하지 않고, 산출물 생성 자체를
+    실패시킨다. 성공한 이전 산출물은 게시 단계에서 그대로 유지된다.
+    """
+
+    if not zones:
+        raise ValueError("Safety zones are required to build a route artifact")
+    graph = _load_local_graph()
+    if graph is None or graph.number_of_nodes() == 0:
+        raise RuntimeError("Local walking graph is required to build a route artifact")
+
+    zone_index = _build_zone_index(zones)
+    # 산출물은 공공시설 좌표의 스냅샷이다. 장기 실행되는 빌더가 이전 KD-tree를
+    # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
+    # 빌드마다 파일에서 다시 읽는다.
+    facilities = load_facility_index()
+    graph_by_period: dict[Period, nx.DiGraph] = {}
+    score_by_period: dict[Period, dict[str, float]] = {}
+    for period in ("day", "night"):
+        score_map = compute_zone_period_scores(zones, period, profile=profile)
+        score_by_period[period] = score_map
+        graph_by_period[period] = _build_scored_graph(
+            graph, zones, score_map, zone_index, period, facilities
+        )
+
+    node_ids = list(graph.nodes)
+    node_points = np.array(
+        [(graph.nodes[node_id]["y"], graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
+    )
+    return RouteArtifact(
+        version=version,
+        region=region,
+        graph_by_period=graph_by_period,
+        node_ids=node_ids,
+        node_points=node_points,
+        profile_version=profile.version,
+        data_version=route_input_data_version(zones),
+        score_by_period=score_by_period,
+    )
+
+
+def _zone_data_version(zones: list[SafetyZone]) -> str:
+    fields = (
+        "dong_code", "lat", "lng", "cctv_count", "streetlight_count", "lights_known",
+        "crime_rate", "police_dist_m", "store_count", "bell_dist_m", "accident_dist_m",
+    )
+    records = [
+        {field: getattr(zone, field) for field in fields}
+        for zone in sorted(zones, key=lambda zone: zone.dong_code)
+    ]
+    encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    """경로 산출물에 쓰는 신뢰된 입력 파일의 내용 지문.
+
+    파일이 없거나 읽을 수 없는 상태도 별도 값으로 남겨, 시설 좌표가 사라진 경우에도
+    이전 시설 점수 산출물이 최신으로 오인되지 않게 한다.
+    """
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return "missing"
+    return digest.hexdigest()
+
+
+def route_input_data_version(
+    zones: list[SafetyZone], *, facility_points_path: Path = FACILITY_POINTS_PATH
+) -> str:
+    """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
+    payload = {
+        "zones": _zone_data_version(zones),
+        "facility_points": _file_sha256(facility_points_path),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def find_safe_routes(
     start_lat: float,
     start_lng: float,
@@ -482,39 +712,16 @@ def find_safe_routes(
     k: int = K_ALTERNATIVES,
     period: Period = "day",
 ) -> list[dict] | None:
-    """도로망 그래프(OSM) + 안전구역 점수로 가중치를 준 경로를 최대 k개까지 찾는다.
+    """로드된 안전 경로 산출물에서 안전 가중 경로를 최대 k개까지 찾는다.
 
-    안전점수가 가장 높은(비용이 가장 낮은) 순서로 정렬되어 반환된다.
-    period(day/night)에 따라 안전점수 계산 가중치가 달라진다.
-
-    ponytail: bbox 단위 인메모리 캐시만 사용 — osmnx 자체 디스크 캐시가 있어
-    동일 지역 재요청은 이미 빠르다. 그래프 다운로드 실패/미커버 지역이면
-    None을 반환해 호출부가 Tmap/직선 샘플링으로 폴백하게 한다.
+    HTTP 요청에서는 OSM 다운로드·그래프 점수화·산출물 생성을 하지 않는다. 산출물이
+    없거나 경로가 없으면 None을 반환해 호출부가 Tmap/직선 폴백을 적용한다.
     """
-    if not zones:
-        return None
-
-    score_map = compute_zone_period_scores(zones, period)
-    zone_index = _build_zone_index(zones)
+    _ = zones  # 호출 계약 호환성을 위해 유지한다. 산출물에는 이미 점수가 반영돼 있다.
+    route_artifact_runtime.reload_if_changed(
+        Path(settings.route_artifact_dir), now=time.monotonic()
+    )
     k = _alternatives_for(haversine_km(start_lat, start_lng, end_lat, end_lng), k)
-    bbox = _route_bbox(start_lat, start_lng, end_lat, end_lng)
-    graph = _get_graph(bbox)
-    if graph is None or graph.number_of_nodes() == 0:
-        return None
-
-    try:
-        orig = _nearest_node(graph, start_lat, start_lng)
-        dest = _nearest_node(graph, end_lat, end_lng)
-        simple = _get_scored_graph(graph, zones, score_map, zone_index, period)
-        path_iter = nx.shortest_simple_paths(simple, orig, dest, weight="safety_cost")
-
-        routes: list[dict] = []
-        for path in path_iter:
-            routes.append(_summarize_path(simple, path))
-            if len(routes) >= k:
-                break
-    except (nx.NetworkXNoPath, nx.NodeNotFound, ValueError) as exc:
-        logger.warning("Safety-weighted path search failed: %s", exc)
-        return None
-
-    return routes or None
+    return route_artifact_runtime.find_routes(
+        start_lat, start_lng, end_lat, end_lng, period=period, k=k
+    )

@@ -3,32 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { nearbyBells, nearbyZones, residenceRecommend, routeSafety, type RouteResult, type SafetyZone } from "@/lib/api";
-import { clearToken, getEmailFromToken, getToken } from "@/lib/auth";
+import { endSession, getSessionUser } from "@/lib/auth";
 import { haversineMeters } from "@/lib/geo";
 import { geocodeAddress, reverseGeocode, type LatLng } from "@/lib/kakao";
-
-// 경로 선에서 이만큼(m) 안에 있는 비상벨만 지도에 남긴다 — 그 바깥은 "가는 길"과
-// 무관해서 표시하면 오히려 방해된다.
-const ROUTE_BELL_RADIUS_M = 60;
-// 위 필터를 걸기 전 넉넉히 후보를 받아올 개수. 실제로 남는 건 훨씬 적다.
-const ROUTE_BELL_FETCH_LIMIT = 400;
-
-// 경로를 감싸는 원 하나로 후보를 받은 뒤, 실제 경로 선(꼭짓점 기준) 근처만 남긴다.
-// 도로망 그래프 노드 간격이 촘촘해서(대부분 수십 m) 꼭짓점까지의 거리로 충분히
-// "경로 근처"를 근사할 수 있다 — 선분 대 점 거리 계산까지는 필요 없다.
-async function bellsNearRoute(points: LatLng[]): Promise<LatLng[]> {
-  if (points.length === 0) return [];
-  const lats = points.map((p) => p.lat);
-  const lngs = points.map((p) => p.lng);
-  const center = {
-    lat: (Math.min(...lats) + Math.max(...lats)) / 2,
-    lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
-  };
-  const farthestM = Math.max(...points.map((p) => haversineMeters(center, p)));
-  const radiusKm = (farthestM + 200) / 1000; // 여유를 둬서 경계 근처 벨도 후보에 포함
-  const candidates = await nearbyBells(center.lat, center.lng, radiusKm, ROUTE_BELL_FETCH_LIMIT);
-  return candidates.filter((bell) => points.some((p) => haversineMeters(bell, p) <= ROUTE_BELL_RADIUS_M));
-}
+import { useRouteBells } from "@/lib/useRouteBells";
 import { SafetyMap } from "@/components/SafetyMap";
 import {
   AlertIcon,
@@ -43,9 +21,6 @@ import {
   TrophyIcon,
 } from "@/components/icons";
 import styles from "./page.module.css";
-
-// ponytail: 토큰을 localStorage에 보관 (XSS 노출 위험). 프로덕션 전환 시
-// httpOnly 쿠키 기반 세션으로 교체하고 백엔드에 CSRF 보호 추가 필요.
 
 function scoreColor(score: number): string {
   if (score >= 70) return "var(--safe)";
@@ -66,14 +41,20 @@ const REROUTE_DISTANCE_M = 50;
 const REROUTE_MIN_INTERVAL_MS = 5000;
 const ARRIVAL_RADIUS_M = 30;
 
+function getGeolocationAvailable() {
+  return Boolean(navigator.geolocation);
+}
+
 export default function Dashboard() {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [displayName, setDisplayName] = useState("");
+  const [sessionUser, setSessionUser] = useState<{ id: number; email: string } | null | undefined>(undefined);
+  const [geolocationAvailable] = useState(
+    () => typeof navigator !== "undefined" && getGeolocationAvailable()
+  );
   const [recommended, setRecommended] = useState<SafetyZone[]>([]);
   const [nearby, setNearby] = useState<SafetyZone[]>([]);
-  const [bells, setBells] = useState<{ lat: number; lng: number }[]>([]);
   const [route, setRoute] = useState<RouteResult | null>(null);
+  const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
   const [selectedZone, setSelectedZone] = useState<SafetyZone | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -86,10 +67,7 @@ export default function Dashboard() {
   >(null);
 
   function requestMyLocation() {
-    if (!navigator.geolocation) {
-      setLocationDenied(true);
-      return;
-    }
+    if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
@@ -107,6 +85,20 @@ export default function Dashboard() {
   const watchIdRef = useRef<number | null>(null);
   const lastRouteFetchRef = useRef<{ origin: LatLng; at: number } | null>(null);
   const isRefetchingRef = useRef(false);
+  const routeRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getSessionUser()
+      .then((user) => { if (active) setSessionUser(user); })
+      .catch(() => { if (active) { setSessionUser(null); router.replace("/login"); } });
+    return () => { active = false; };
+  }, [router]);
+
+  const activeAlternative = route?.alternatives[selectedAlternativeIndex] ?? route?.alternatives[0] ?? null;
+  const routeBells = useRouteBells(activeAlternative?.route_points);
+  const [nearbyBellsState, setNearbyBellsState] = useState<{ lat: number; lng: number }[]>([]);
+  const bells = activeAlternative ? routeBells : nearbyBellsState;
 
   function stopNavigation() {
     if (watchIdRef.current !== null) {
@@ -133,21 +125,31 @@ export default function Dashboard() {
     if (!movedEnough || !enoughTimePassed || isRefetchingRef.current) return;
 
     isRefetchingRef.current = true;
+    routeRequestRef.current?.abort();
+    const controller = new AbortController();
+    routeRequestRef.current = controller;
     try {
-      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng);
+      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng, {
+        includeComparison: false,
+        signal: controller.signal,
+      });
+      if (routeRequestRef.current !== controller) return;
       setRoute(result);
+      setSelectedAlternativeIndex(0);
       lastRouteFetchRef.current = { origin: here, at: Date.now() };
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.warn("[live-route] recompute failed:", err instanceof Error ? err.message : err);
       // 재계산 실패는 배너로 방해하지 않는다 — 기존 경로를 유지하고 다음 위치 갱신에서 재시도.
     } finally {
-      isRefetchingRef.current = false;
+      if (routeRequestRef.current === controller) isRefetchingRef.current = false;
     }
   }
 
   function startNavigation() {
     if (!route || !navigator.geolocation) return;
-    const end = route.route_points[route.route_points.length - 1];
+    const end = (activeAlternative?.route_points ?? route.route_points).at(-1);
+    if (!end) return;
     destinationRef.current = { lat: end.lat, lng: end.lng };
     lastRouteFetchRef.current = myLocation ? { origin: myLocation, at: Date.now() } : null;
     setNavigating(true);
@@ -229,9 +231,10 @@ export default function Dashboard() {
   async function runNearbySearch(coords: LatLng) {
     try {
       setRoute(null);
+      setSelectedAlternativeIndex(0);
       setNearby(await nearbyZones(coords.lat, coords.lng, 5));
       // 비상벨은 데이터가 촘촘해서(동 중앙값 약 67m) 좁은 반경만 조회한다.
-      nearbyBells(coords.lat, coords.lng, 1).then(setBells).catch(() => setBells([]));
+      nearbyBells(coords.lat, coords.lng, 1).then(setNearbyBellsState).catch(() => setNearbyBellsState([]));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "조회 실패");
@@ -253,16 +256,10 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
-    setDisplayName(getEmailFromToken(token)?.split("@")[0] ?? "회원");
+    if (!sessionUser) return;
     loadRecommended();
-    requestMyLocation();
-  }, [router]);
+    if (geolocationAvailable) requestMyLocation();
+  }, [sessionUser, geolocationAvailable]);
 
   useEffect(() => {
     if (!mapFullscreen && !contextMenu) return;
@@ -306,31 +303,40 @@ export default function Dashboard() {
     }
     try {
       stopNavigation();
-      const result = await routeSafety(start.lat, start.lng, end.lat, end.lng);
+      routeRequestRef.current?.abort();
+      const controller = new AbortController();
+      routeRequestRef.current = controller;
+      const result = await routeSafety(start.lat, start.lng, end.lat, end.lng, { signal: controller.signal });
+      if (routeRequestRef.current !== controller) return;
       setNearby([]);
       setRoute(result);
+      setSelectedAlternativeIndex(0);
       setError(null);
-
-      bellsNearRoute(result.route_points).then(setBells).catch(() => setBells([]));
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "경로 조회 실패");
     }
   }
 
-  function handleLogout() {
-    clearToken();
-    router.replace("/login");
+  async function handleLogout() {
+    try {
+      await endSession();
+    } finally {
+      setSessionUser(null);
+      router.replace("/login");
+    }
   }
 
   const mapZones = useMemo(
     () =>
       Array.from(
-        new Map([...recommended, ...nearby, ...(route?.zones_passed ?? [])].map((z) => [z.dong_code, z])).values()
+        new Map([...recommended, ...nearby, ...(activeAlternative?.zones_passed ?? route?.zones_passed ?? [])].map((z) => [z.dong_code, z])).values()
       ),
-    [recommended, nearby, route]
+    [recommended, nearby, route, activeAlternative]
   );
 
-  if (!ready) return null;
+  if (sessionUser === undefined || sessionUser === null) return null;
+  const displayName = sessionUser.email.split("@")[0] || "회원";
 
   return (
     <main className={styles.page}>
@@ -565,7 +571,7 @@ export default function Dashboard() {
                   지도를 클릭해서 {pickMode === "nearby" ? "검색 위치를" : pickMode === "start" ? "출발지를" : "도착지를"} 선택하세요
                 </p>
               )}
-              {locationDenied && !myLocation && (
+              {(locationDenied || !geolocationAvailable) && !myLocation && (
                 <p className={styles.locationHint}>
                   내 위치를 가져오지 못했어요. 브라우저 주소창의 위치 권한을 허용한 뒤{" "}
                   <button type="button" className={styles.pickLink} onClick={requestMyLocation}>
@@ -579,7 +585,7 @@ export default function Dashboard() {
                   bells={bells}
                   center={myLocation ?? undefined}
                   myLocation={myLocation ?? undefined}
-                  routePath={route?.route_points}
+                  routePath={activeAlternative?.route_points ?? route?.route_points}
                   comparePath={route?.shortest_route_points ?? undefined}
                   focusZone={selectedZone}
                   onSelect={handleMapPick}
@@ -616,7 +622,7 @@ export default function Dashboard() {
                       bells={bells}
                       center={myLocation ?? undefined}
                       myLocation={myLocation ?? undefined}
-                      routePath={route?.route_points}
+                      routePath={activeAlternative?.route_points ?? route?.route_points}
                       comparePath={route?.shortest_route_points ?? undefined}
                       focusZone={selectedZone}
                       onSelect={handleMapPick}
@@ -644,6 +650,21 @@ export default function Dashboard() {
                       지도의 초록 실선이 안전 경로, 회색 점선이 최단경로예요 — 서로 다른 길이면 안전 가중치가 실제로 반영된 거예요
                     </p>
                   )}
+                  {route.alternatives.length > 1 && (
+                    <div className={styles.alternativeList} aria-label="대안 경로 선택">
+                      {route.alternatives.map((alternative, index) => (
+                        <button
+                          key={`${alternative.distance_m}-${index}`}
+                          type="button"
+                          className={`${styles.alternativeCard} ${activeAlternative === alternative ? styles.alternativeCardActive : ""}`}
+                          onClick={() => setSelectedAlternativeIndex(index)}
+                        >
+                          <span>경로 {index + 1}</span>
+                          <strong>{alternative.safety_score.toFixed(0)}점 · {(alternative.distance_m / 1000).toFixed(1)}km</strong>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className={styles.navToggleRow}>
                     {navigating ? (
                       <>
@@ -662,10 +683,11 @@ export default function Dashboard() {
                   </div>
                   <div className={styles.resultSummary}>
                     <span>경로 전체 안전지수</span>
-                    <strong>{route.safety_score.toFixed(0)}점</strong>
+                    <strong>{(activeAlternative?.safety_score ?? route.safety_score).toFixed(0)}점</strong>
                   </div>
+                  <p className={styles.routeModeHint}>거리 {((activeAlternative?.distance_m ?? 0) / 1000).toFixed(1)}km</p>
                   <ul className={styles.rankList}>
-                    {route.zones_passed.map((z) => (
+                    {(activeAlternative?.zones_passed ?? route.zones_passed).map((z) => (
                       <li key={z.dong_code} className={styles.rankItem}>
                         <span className={styles.rankInfo}>
                           <div className={styles.rankName}>{z.dong_name}</div>

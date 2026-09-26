@@ -1,37 +1,9 @@
-from typing import Literal
-
-Period = Literal["day", "night"]
-
-# 요소별 가중치 — period마다 합 1.0.
-# ponytail: MVP 값 — night는 CCTV(사후 확인용)보다 보안등(즉시 시야 확보)
-# 비중을 높임. 실제 체감 안전도와 맞춰보며 조정 필요.
-#
-# crime_rate는 구/시 단위 값이라 같은 도시의 모든 동이 같은 값을 공유하는, 가장 거친
-# 데이터다 — 그런데도 예전엔 가중치가 제일 높았다(day 0.30). 제일 덜 세밀한 신호가
-# 제일 크게 반영되는 게 맞지 않아 다른 동 단위(더 세밀한) 요소로 옮겼다.
-_PERIOD_WEIGHTS: dict[Period, dict[str, float]] = {
-    "day": {
-        "cctv_count": 0.20,
-        "streetlight_count": 0.15,
-        "crime_rate": 0.20,
-        "police_dist_m": 0.10,
-        "store_count": 0.15,
-        "bell_dist_m": 0.10,
-        "accident_dist_m": 0.10,
-    },
-    "night": {
-        "cctv_count": 0.15,
-        "streetlight_count": 0.30,
-        "crime_rate": 0.20,
-        "police_dist_m": 0.05,
-        "store_count": 0.05,
-        "bell_dist_m": 0.15,
-        "accident_dist_m": 0.10,
-    },
-}
-
-# 값을 모르는(None) 요소에 주는 점수 — 예: 보안등 데이터를 못 받은 지자체의 동.
-UNKNOWN_SCORE = 50.0
+from app.services.scoring_profile import (
+    DEFAULT_SCORING_PROFILE,
+    Period,
+    ScoringProfile,
+    validate_profile,
+)
 
 # 값이 작을수록 안전한 요소(1만 명당 범죄율, 가장 가까운 경찰서·비상벨까지의 거리).
 # accident_dist_m은 반대다 — 사고다발지역은 가까울수록 위험하므로 멀수록(값이 클수록) 안전하다.
@@ -65,7 +37,7 @@ def _factor_value(record: dict, factor: str):
     """요소 값. 보안등 데이터를 못 받은 지역(lights_known=False)의 보안등은 None(모름)이다."""
     if factor == "streetlight_count" and record.get("lights_known") is False:
         return None
-    return record.get(factor, 0)
+    return record.get(factor)
 
 
 def _normalize(value: float, lo: float, hi: float) -> float:
@@ -74,53 +46,51 @@ def _normalize(value: float, lo: float, hi: float) -> float:
     return max(0.0, min(100.0, (value - lo) / (hi - lo) * 100))
 
 
-def _percentile(sorted_values: list[float], pct: float) -> float:
-    """0(최소)~100(최대) 사이 백분위수. 선형 보간(가장 흔한 방식)."""
+def _percentile(sorted_values: list[float], percentile: float) -> float:
     if len(sorted_values) == 1:
         return sorted_values[0]
-    idx = (pct / 100) * (len(sorted_values) - 1)
-    lo_i, hi_i = int(idx), min(int(idx) + 1, len(sorted_values) - 1)
-    return sorted_values[lo_i] + (sorted_values[hi_i] - sorted_values[lo_i]) * (idx - lo_i)
+    index = (percentile / 100) * (len(sorted_values) - 1)
+    lower_index, upper_index = int(index), min(int(index) + 1, len(sorted_values) - 1)
+    return sorted_values[lower_index] + (sorted_values[upper_index] - sorted_values[lower_index]) * (index - lower_index)
 
 
-# police_dist_m/bell_dist_m는 이미 상한(CAP)이 있어 극단값이 없지만, cctv_count/
-# streetlight_count/store_count/crime_rate는 캡이 없다 — 동 하나가 유독 튀면(예: 상권
-# 밀집 동의 CCTV 수백 대) min-max 정규화 폭 전체가 그 값에 맞춰져 나머지 동들의 점수가
-# 0 근처로 뭉개진다. 상하위 5%를 경계로 써서 극단값을 완충한다(범위 밖 값은 _normalize의
-# clamp로 그대로 0/100에 붙는다 — 순위 자체는 그대로 유지).
 _OUTLIER_CLIP_PERCENTILE = 5
 
 
-def compute_safety_scores(records: list[dict], period: Period = "day") -> list[dict]:
+def compute_safety_scores(
+    records: list[dict], period: Period = "day", profile: ScoringProfile | None = None
+) -> list[dict]:
     """요소별 수치(cctv_count/streetlight_count/crime_rate/police_dist_m/store_count)를
     가진 레코드 목록을 받아 0~100 안전 지수(safety_score)를 채워 반환한다. 높을수록 안전.
 
     같은 동 집합(예: 서울 전체) 안에서의 상대 비교용 min-max 정규화.
     CCTV/보안등/상점은 많을수록, 범죄율(1만 명당)·경찰서 거리는 작을수록 점수가 높다.
     period(day/night)에 따라 요소별 가중치 배분이 달라진다.
-    crime_rate/police_dist_m/store_count처럼 키가 없는 요소는 0으로 보고(전 레코드 동일 → 중립 50점).
+    키가 없는 요소와 값이 None인 요소는 "모름"으로 보고 중립 점수를 준다.
     값이 None인 요소는 "모름"이라 정규화 범위에서 빼고 UNKNOWN_SCORE(50점)를 준다.
     """
     if not records:
         return records
 
-    weights = _PERIOD_WEIGHTS[period]
+    profile = profile or DEFAULT_SCORING_PROFILE
+    validate_profile(profile)
+    weights = profile.weights[period]
     bounds = {}
     for factor in weights:
         known = sorted(v for v in (_factor_value(r, factor) for r in records) if v is not None)
         if not known:
             bounds[factor] = (0, 0)
             continue
-        lo = _percentile(known, _OUTLIER_CLIP_PERCENTILE)
-        hi = _percentile(known, 100 - _OUTLIER_CLIP_PERCENTILE)
-        bounds[factor] = (lo, hi) if hi > lo else (known[0], known[-1])
+        lower = _percentile(known, _OUTLIER_CLIP_PERCENTILE)
+        upper = _percentile(known, 100 - _OUTLIER_CLIP_PERCENTILE)
+        bounds[factor] = (lower, upper) if upper > lower else (known[0], known[-1])
 
     for record in records:
         total = 0.0
         for factor, weight in weights.items():
             value = _factor_value(record, factor)
             if value is None:
-                score = UNKNOWN_SCORE  # 데이터를 못 받은 요소는 좋지도 나쁘지도 않게 본다
+                score = profile.unknown_score  # 데이터를 못 받은 요소는 좋지도 나쁘지도 않게 본다
             else:
                 score = _normalize(value, *bounds[factor])
                 score = 100 - score if factor in _LOWER_IS_SAFER else score
@@ -129,7 +99,9 @@ def compute_safety_scores(records: list[dict], period: Period = "day") -> list[d
     return records
 
 
-def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str, float]:
+def compute_zone_period_scores(
+    zones: list, period: Period = "day", profile: ScoringProfile | None = None
+) -> dict[str, float]:
     """SafetyZone ORM 목록을 dong_code -> period-가중 안전점수로 변환한다.
 
     저장된 zone.safety_score 컬럼(day 기준, 거주지 추천용)은 건드리지 않는
@@ -143,13 +115,13 @@ def compute_zone_period_scores(zones: list, period: Period = "day") -> dict[str,
             "cctv_count": z.cctv_count,
             "streetlight_count": z.streetlight_count,
             "lights_known": z.lights_known is not False,
-            "crime_rate": z.crime_rate or 0,
-            "police_dist_m": z.police_dist_m or 0,
-            "store_count": z.store_count or 0,
-            "bell_dist_m": z.bell_dist_m or 0,
-            "accident_dist_m": z.accident_dist_m or 0,
+            "crime_rate": z.crime_rate,
+            "police_dist_m": z.police_dist_m,
+            "store_count": z.store_count,
+            "bell_dist_m": z.bell_dist_m,
+            "accident_dist_m": getattr(z, "accident_dist_m", None),
         }
         for z in zones
     ]
-    scored = compute_safety_scores(records, period=period)
+    scored = compute_safety_scores(records, period=period, profile=profile)
     return {r["dong_code"]: r["safety_score"] for r in scored}
