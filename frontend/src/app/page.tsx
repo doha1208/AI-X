@@ -6,29 +6,7 @@ import { nearbyBells, nearbyZones, residenceRecommend, routeSafety, type RouteRe
 import { endSession, getSessionUser } from "@/lib/auth";
 import { haversineMeters } from "@/lib/geo";
 import { geocodeAddress, reverseGeocode, type LatLng } from "@/lib/kakao";
-
-// 경로 선에서 이만큼(m) 안에 있는 비상벨만 지도에 남긴다 — 그 바깥은 "가는 길"과
-// 무관해서 표시하면 오히려 방해된다.
-const ROUTE_BELL_RADIUS_M = 60;
-// 위 필터를 걸기 전 넉넉히 후보를 받아올 개수. 실제로 남는 건 훨씬 적다.
-const ROUTE_BELL_FETCH_LIMIT = 400;
-
-// 경로를 감싸는 원 하나로 후보를 받은 뒤, 실제 경로 선(꼭짓점 기준) 근처만 남긴다.
-// 도로망 그래프 노드 간격이 촘촘해서(대부분 수십 m) 꼭짓점까지의 거리로 충분히
-// "경로 근처"를 근사할 수 있다 — 선분 대 점 거리 계산까지는 필요 없다.
-async function bellsNearRoute(points: LatLng[], signal: AbortSignal): Promise<LatLng[]> {
-  if (points.length === 0) return [];
-  const lats = points.map((p) => p.lat);
-  const lngs = points.map((p) => p.lng);
-  const center = {
-    lat: (Math.min(...lats) + Math.max(...lats)) / 2,
-    lng: (Math.min(...lngs) + Math.max(...lngs)) / 2,
-  };
-  const farthestM = Math.max(...points.map((p) => haversineMeters(center, p)));
-  const radiusKm = (farthestM + 200) / 1000; // 여유를 둬서 경계 근처 벨도 후보에 포함
-  const candidates = await nearbyBells(center.lat, center.lng, radiusKm, ROUTE_BELL_FETCH_LIMIT, { signal });
-  return candidates.filter((bell) => points.some((p) => haversineMeters(bell, p) <= ROUTE_BELL_RADIUS_M));
-}
+import { useRouteBells } from "@/lib/useRouteBells";
 import { SafetyMap } from "@/components/SafetyMap";
 import {
   AlertIcon,
@@ -75,7 +53,6 @@ export default function Dashboard() {
   );
   const [recommended, setRecommended] = useState<SafetyZone[]>([]);
   const [nearby, setNearby] = useState<SafetyZone[]>([]);
-  const [bells, setBells] = useState<{ lat: number; lng: number }[]>([]);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [selectedAlternativeIndex, setSelectedAlternativeIndex] = useState(0);
   const [selectedZone, setSelectedZone] = useState<SafetyZone | null>(null);
@@ -109,7 +86,6 @@ export default function Dashboard() {
   const lastRouteFetchRef = useRef<{ origin: LatLng; at: number } | null>(null);
   const isRefetchingRef = useRef(false);
   const routeRequestRef = useRef<AbortController | null>(null);
-  const bellsRequestRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -120,21 +96,9 @@ export default function Dashboard() {
   }, [router]);
 
   const activeAlternative = route?.alternatives[selectedAlternativeIndex] ?? route?.alternatives[0] ?? null;
-
-  useEffect(() => {
-    if (!activeAlternative) return;
-    const controller = new AbortController();
-    const requestId = ++bellsRequestRef.current;
-    void bellsNearRoute(activeAlternative.route_points, controller.signal)
-      .then((nextBells) => {
-        if (bellsRequestRef.current === requestId) setBells(nextBells);
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (bellsRequestRef.current === requestId) setBells([]);
-      });
-    return () => controller.abort();
-  }, [activeAlternative]);
+  const routeBells = useRouteBells(activeAlternative?.route_points);
+  const [nearbyBellsState, setNearbyBellsState] = useState<{ lat: number; lng: number }[]>([]);
+  const bells = activeAlternative ? routeBells : nearbyBellsState;
 
   function stopNavigation() {
     if (watchIdRef.current !== null) {
@@ -270,7 +234,7 @@ export default function Dashboard() {
       setSelectedAlternativeIndex(0);
       setNearby(await nearbyZones(coords.lat, coords.lng, 5));
       // 비상벨은 데이터가 촘촘해서(동 중앙값 약 67m) 좁은 반경만 조회한다.
-      nearbyBells(coords.lat, coords.lng, 1).then(setBells).catch(() => setBells([]));
+      nearbyBells(coords.lat, coords.lng, 1).then(setNearbyBellsState).catch(() => setNearbyBellsState([]));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "조회 실패");

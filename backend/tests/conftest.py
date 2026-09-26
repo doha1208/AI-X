@@ -5,13 +5,24 @@ from pathlib import Path
 
 import pytest
 
-_TEST_DATABASE_PATH = Path(__file__).parent / ".test-suite.db"
-if _TEST_DATABASE_PATH.exists():
-    _TEST_DATABASE_PATH.unlink()
+_TEST_DATABASE_PATH: Path | None = None
 
-os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DATABASE_PATH.as_posix()}"
-os.environ["APP_ENV"] = "test"
-os.environ["REGION_SCOPE_PREFIX"] = ""
+
+@pytest.hookimpl(trylast=True)
+def pytest_configure(config: pytest.Config) -> None:
+    global _TEST_DATABASE_PATH
+
+    tmp_path_factory = config._tmp_path_factory
+    _TEST_DATABASE_PATH = tmp_path_factory.mktemp("database") / "app.db"
+    os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DATABASE_PATH.as_posix()}"
+    os.environ["APP_ENV"] = "test"
+    os.environ["REGION_SCOPE_PREFIX"] = ""
+
+
+@pytest.fixture(scope="session")
+def test_database_path() -> Path:
+    assert _TEST_DATABASE_PATH is not None
+    return _TEST_DATABASE_PATH
 
 
 @pytest.fixture(autouse=True)
@@ -30,5 +41,3 @@ def pytest_sessionfinish(session, exitstatus):
     from app.db.session import engine
 
     engine.dispose()
-    if _TEST_DATABASE_PATH.exists():
-        _TEST_DATABASE_PATH.unlink()

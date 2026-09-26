@@ -2,6 +2,7 @@ import httpx
 import time
 
 from app.core.config import settings
+from app.observability import metrics
 
 TMAP_PEDESTRIAN_URL = "https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1"
 
@@ -46,7 +47,11 @@ async def get_pedestrian_route(
             res = await client.post(TMAP_PEDESTRIAN_URL, json=payload, headers=headers)
             res.raise_for_status()
             data = res.json()
-    except (httpx.HTTPError, ValueError):
+    except httpx.HTTPError:
+        metrics.record_tmap_failure("http_error")
+        return None
+    except ValueError:
+        metrics.record_tmap_failure("invalid_response")
         return None
 
     points: list[tuple[float, float]] = []
@@ -58,6 +63,7 @@ async def get_pedestrian_route(
             points.append((lat, lng))
 
     if not points:
+        metrics.record_tmap_failure("invalid_response")
         return None
     _route_cache[key] = (now + settings.tmap_route_cache_seconds, points)
     return points

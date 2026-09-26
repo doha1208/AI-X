@@ -23,6 +23,7 @@ from app.services.road_score import road_safety_score
 from app.services.route_artifact import RouteArtifact, load_current_artifact
 from app.services.safety_score import Period, compute_zone_period_scores
 from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
+from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -552,7 +553,9 @@ class RouteArtifactRuntime:
                 cached = self._result_cache.get(cache_key)
                 if cached is not None:
                     self._result_cache.move_to_end(cache_key)
+                    metrics.record_route_cache("hit")
                     return cached
+            metrics.record_route_cache("miss")
             paths = nx.shortest_simple_paths(graph, origin, destination, weight="safety_cost")
             routes: list[dict] = []
             for path in paths:

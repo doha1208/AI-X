@@ -5,7 +5,7 @@ services:
     env_file:
       - ./backend/.env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       APP_ENV: production
       DATABASE_URL: sqlite:////data/app.db

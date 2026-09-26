@@ -1,5 +1,6 @@
 import asyncio
 import math
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -23,6 +24,7 @@ from app.services.safety_score import compute_zone_period_scores
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
+from app.observability import metrics
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
@@ -171,8 +173,15 @@ async def route_safety(
        보행자 최단경로를 받아 그 위에 안전점수만 표시(대안 없음).
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
+    started_at = time.perf_counter()
     zones = scoped_zones_query(db).all()
     if not zones:
+        metrics.record_route(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            duration_seconds=time.perf_counter() - started_at,
+            mode="failed",
+            fallback_reason="safety_zones_unavailable",
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
@@ -268,7 +277,7 @@ async def route_safety(
         for c in candidates
     ]
 
-    return RouteResponse(
+    response = RouteResponse(
         safety_score=best["score"],
         zones_passed=passed,
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
@@ -276,3 +285,13 @@ async def route_safety(
         alternatives=alternatives,
         shortest_route_points=shortest_route_points,
     )
+    fallback_reason = "none" if mode == "safety_weighted" else "safe_route_unavailable"
+    if mode == "straight_line":
+        fallback_reason = "tmap_unavailable"
+    metrics.record_route(
+        status_code=status.HTTP_200_OK,
+        duration_seconds=time.perf_counter() - started_at,
+        mode=mode,
+        fallback_reason=fallback_reason,
+    )
+    return response

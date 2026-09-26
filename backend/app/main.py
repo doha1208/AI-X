@@ -11,6 +11,7 @@ from app.db.session import Base, engine
 from app.db.schema import ensure_database_schema
 from app.models import safety_zone, scoring_profile, user  # noqa: F401 (register models before create_all)
 from app.services.safe_route import route_artifact_runtime
+from app.observability import metrics_response
 
 Base.metadata.create_all(bind=engine)
 ensure_database_schema(engine)
@@ -44,3 +45,8 @@ app.include_router(safety_router)
 @app.get("/health")
 def health():
     return {"status": "ok", "route_artifact": route_artifact_runtime.status()}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    return metrics_response()
