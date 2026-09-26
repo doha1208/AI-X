@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { nearbyBells, nearbyZones, residenceRecommend, routeSafety, type RouteResult, type SafetyZone } from "@/lib/api";
 import { clearToken, getEmailFromToken, getToken } from "@/lib/auth";
@@ -66,10 +66,32 @@ const REROUTE_DISTANCE_M = 50;
 const REROUTE_MIN_INTERVAL_MS = 5000;
 const ARRIVAL_RADIUS_M = 30;
 
+function subscribeToBrowserState() {
+  return () => {};
+}
+
+function getServerToken() {
+  return null;
+}
+
+function getGeolocationAvailable() {
+  return Boolean(navigator.geolocation);
+}
+
+function getServerGeolocationAvailable() {
+  return true;
+}
+
 export default function Dashboard() {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [displayName, setDisplayName] = useState("");
+  const token = useSyncExternalStore(subscribeToBrowserState, getToken, getServerToken);
+  const geolocationAvailable = useSyncExternalStore(
+    subscribeToBrowserState,
+    getGeolocationAvailable,
+    getServerGeolocationAvailable
+  );
+  const ready = token !== null;
+  const displayName = token ? getEmailFromToken(token)?.split("@")[0] ?? "회원" : "";
   const [recommended, setRecommended] = useState<SafetyZone[]>([]);
   const [nearby, setNearby] = useState<SafetyZone[]>([]);
   const [bells, setBells] = useState<{ lat: number; lng: number }[]>([]);
@@ -86,10 +108,7 @@ export default function Dashboard() {
   >(null);
 
   function requestMyLocation() {
-    if (!navigator.geolocation) {
-      setLocationDenied(true);
-      return;
-    }
+    if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
@@ -255,16 +274,13 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    const token = getToken();
     if (!token) {
       router.replace("/login");
       return;
     }
-    setReady(true);
-    setDisplayName(getEmailFromToken(token)?.split("@")[0] ?? "회원");
     loadRecommended();
-    requestMyLocation();
-  }, [router]);
+    if (geolocationAvailable) requestMyLocation();
+  }, [router, token, geolocationAvailable]);
 
   useEffect(() => {
     if (!mapFullscreen && !contextMenu) return;
@@ -567,7 +583,7 @@ export default function Dashboard() {
                   지도를 클릭해서 {pickMode === "nearby" ? "검색 위치를" : pickMode === "start" ? "출발지를" : "도착지를"} 선택하세요
                 </p>
               )}
-              {locationDenied && !myLocation && (
+              {(locationDenied || !geolocationAvailable) && !myLocation && (
                 <p className={styles.locationHint}>
                   내 위치를 가져오지 못했어요. 브라우저 주소창의 위치 권한을 허용한 뒤{" "}
                   <button type="button" className={styles.pickLink} onClick={requestMyLocation}>

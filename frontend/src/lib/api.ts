@@ -19,6 +19,34 @@ export type RouteResult = {
   shortest_route_points: { lat: number; lng: number }[] | null;
 };
 
+export type ScoreWeights = Record<"day" | "night", Record<string, number>>;
+
+export type ScoringProfile = {
+  id: number;
+  version: string;
+  name: string;
+  description: string | null;
+  weights: ScoreWeights;
+  unknown_score: number;
+  status: "draft" | "active";
+  created_at: string;
+  created_by: string;
+};
+
+export type ScoreBuild = {
+  id: number;
+  profile_id: number;
+  profile_version: string;
+  status: "queued" | "building" | "succeeded" | "failed";
+  artifact_version: string | null;
+  error_code: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type ScoringProfileDraft = Pick<ScoringProfile, "version" | "name" | "description" | "weights" | "unknown_score">;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -80,4 +108,27 @@ export function routeSafety(
       include_comparison: options.includeComparison ?? true,
     }),
   });
+}
+
+function adminRequest<T>(path: string, token: string, options: RequestInit = {}) {
+  return request<T>(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...options.headers } });
+}
+
+export function listScoringProfiles(token: string) {
+  return adminRequest<ScoringProfile[]>("/admin/scoring-profiles", token);
+}
+
+export function listScoreBuilds(token: string) {
+  return adminRequest<ScoreBuild[]>("/admin/scoring-profiles/builds", token);
+}
+
+export function createScoringProfileDraft(token: string, draft: ScoringProfileDraft) {
+  return adminRequest<ScoringProfile>("/admin/scoring-profiles", token, {
+    method: "POST",
+    body: JSON.stringify(draft),
+  });
+}
+
+export function applyScoringProfile(token: string, profileId: number) {
+  return adminRequest<ScoreBuild>(`/admin/scoring-profiles/${profileId}/apply`, token, { method: "POST" });
 }
