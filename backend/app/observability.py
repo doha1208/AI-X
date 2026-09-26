@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import logging
 from typing import Literal
 
 from fastapi import Response
@@ -55,6 +57,22 @@ def create_metrics(registry: CollectorRegistry | None = None) -> RouteMetrics:
 
 
 metrics = create_metrics()
+logger = logging.getLogger("app.route")
+logger.setLevel(logging.INFO)
+
+
+def configure_observability() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+
+def log_route(*, status_code: int, duration_seconds: float, mode: RouteMode, fallback_reason: FallbackReason) -> None:
+    logger.info(json.dumps({
+        "event": "route_completed",
+        "status_code": status_code,
+        "duration_ms": round(duration_seconds * 1000, 2),
+        "mode": mode,
+        "fallback_reason": fallback_reason,
+    }))
 
 
 def metrics_response() -> Response:

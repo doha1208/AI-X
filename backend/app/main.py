@@ -11,11 +11,12 @@ from app.db.session import Base, engine
 from app.db.schema import ensure_database_schema
 from app.models import safety_zone, scoring_profile, user  # noqa: F401 (register models before create_all)
 from app.services.safe_route import route_artifact_runtime
-from app.observability import metrics_response
+from app.observability import configure_observability, metrics_response
 
 Base.metadata.create_all(bind=engine)
 ensure_database_schema(engine)
 
+configure_observability()
 app = FastAPI(title="안심 거주지 · 귀갓길 추천 플랫폼")
 
 

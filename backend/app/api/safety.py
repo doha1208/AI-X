@@ -24,7 +24,7 @@ from app.services.safety_score import compute_zone_period_scores
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
-from app.observability import metrics
+from app.observability import log_route, metrics
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
@@ -289,6 +289,12 @@ async def route_safety(
     if mode == "straight_line":
         fallback_reason = "tmap_unavailable"
     metrics.record_route(
+        status_code=status.HTTP_200_OK,
+        duration_seconds=time.perf_counter() - started_at,
+        mode=mode,
+        fallback_reason=fallback_reason,
+    )
+    log_route(
         status_code=status.HTTP_200_OK,
         duration_seconds=time.perf_counter() - started_at,
         mode=mode,

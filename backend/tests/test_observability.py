@@ -23,3 +23,13 @@ def test_metrics_endpoint_exposes_prometheus_content():
 
     assert response.status_code == 200
     assert "route_duration_seconds" in response.text
+
+
+def test_route_log_is_structured_and_excludes_sensitive_values(caplog):
+    from app.observability import log_route
+
+    log_route(status_code=200, duration_seconds=0.25, mode="tmap", fallback_reason="safe_route_unavailable")
+
+    assert '"event": "route_completed"' in caplog.messages[-1]
+    assert "37.50000" not in caplog.messages[-1]
+    assert "secret-token" not in caplog.messages[-1]
