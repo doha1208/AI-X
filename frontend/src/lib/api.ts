@@ -1,6 +1,14 @@
 // 배포 기본값은 동일 출처 프록시다. 로컬에서는 .env.local로 localhost:8000을 지정한다.
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api";
 
+function errorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (detail && typeof detail === "object" && "action" in detail && typeof detail.action === "string") {
+    return detail.action;
+  }
+  return fallback;
+}
+
 export type SafetyZone = {
   dong_code: string;
   dong_name: string;
@@ -54,7 +62,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? `Request failed: ${res.status}`);
+    throw new Error(errorMessage(body.detail, `Request failed: ${res.status}`));
   }
   return res.json();
 }

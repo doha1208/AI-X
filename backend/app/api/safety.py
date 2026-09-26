@@ -174,6 +174,14 @@ async def route_safety(
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
     zones = scoped_zones_query(db).all()
+    if not zones:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "reason": "safety_zones_unavailable",
+                "action": "안전 데이터가 준비될 때까지 잠시 후 다시 시도해 주세요.",
+            },
+        )
     period = period_for(payload.at)
     score_map = _artifact_score_map_for_zones(zones, period)
     if score_map is None:

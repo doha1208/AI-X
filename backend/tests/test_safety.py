@@ -99,6 +99,24 @@ def test_route_safety_accepts_night_timestamp():
     assert len(body["zones_passed"]) >= 1
 
 
+def test_route_safety_reports_a_recoverable_error_when_no_safety_zones_exist():
+    db = SessionLocal()
+    db.query(SafetyZone).delete()
+    db.commit()
+    db.close()
+
+    res = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert res.status_code == 422
+    assert res.json()["detail"] == {
+        "reason": "safety_zones_unavailable",
+        "action": "안전 데이터가 준비될 때까지 잠시 후 다시 시도해 주세요.",
+    }
+
+
 def test_route_fallback_ignores_incomplete_artifact_score_map(monkeypatch):
     from app.api import safety as safety_api
 
