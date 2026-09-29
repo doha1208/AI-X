@@ -289,6 +289,7 @@ async def route_safety(
         zones_passed=passed,
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
         mode=mode,
+        period=period,
         alternatives=alternatives,
         shortest_route_points=shortest_route_points,
         shortest_zones_passed=shortest_zones_passed,

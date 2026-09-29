@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.services.time_period import Period
+
 RouteMode = Literal["safety_weighted", "tmap", "straight_line"]
 MAX_WALKING_DISTANCE_KM = 10.0
 
@@ -59,6 +61,8 @@ class RouteResponse(BaseModel):
     zones_passed: list[SafetyZoneOut]
     route_points: list[RoutePoint]
     mode: RouteMode
+    # timeMode가 "자동"일 때도 프론트가 실제로 어느 시간대 가중치가 쓰였는지 배지로 보여줄 수 있게.
+    period: Period
     alternatives: list[RouteAlternative]
     # mode가 safety_weighted일 때만 비교용으로 채워짐 — 안전 가중 경로가
     # 실제 최단경로와 다르다는 걸 지도에서 눈으로 확인할 수 있게 한다.

@@ -296,3 +296,48 @@ def test_route_comparison_reports_the_dongs_the_shortest_route_passes(monkeypatc
 
     assert [z["dong_code"] for z in body["shortest_zones_passed"]] == ["TEST1", "TEST2"]
     assert all(isinstance(z["safety_score"], (int, float)) for z in body["shortest_zones_passed"])
+
+
+def test_route_response_reports_which_day_night_period_was_used(monkeypatch):
+    """timeMode가 자동일 때도 프론트가 "야간 기준" 배지를 붙일 수 있도록, 실제로 어느
+    시간대 가중치를 썼는지 응답에 포함한다."""
+    from app.api import safety as safety_api
+    from app.services.route_request_limit import RouteRequestGate
+
+    # route_request_gate는 모듈 전역 싱글턴이라 앞선 테스트들의 요청이 버스트 한도를
+    # 이미 써버렸을 수 있다 — 이 테스트는 별도로 넉넉한 한도를 쓴다.
+    monkeypatch.setattr(
+        safety_api,
+        "route_request_gate",
+        RouteRequestGate(max_concurrent=2, ip_requests_per_minute=100, ip_burst=100, user_requests_per_minute=100, user_burst=100),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [{"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}],
+    )
+
+    async def no_comparison(*_):
+        return None
+
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", no_comparison)
+
+    night = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01,
+            "at": "2026-01-01T23:00:00+09:00",
+        },
+    ).json()
+    day = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01,
+            "at": "2026-01-01T12:00:00+09:00",
+        },
+    ).json()
+
+    assert night["period"] == "night"
+    assert day["period"] == "day"
