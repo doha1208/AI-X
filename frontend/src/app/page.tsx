@@ -72,7 +72,7 @@ function ResidencePage({ search }: { search: string }) {
         (best, z) => (!best || haversineMeters(place, z) < haversineMeters(place, best) ? z : best),
         null
       );
-      if (closest) addRecent("searches", closest.dong_name);
+      if (closest) addRecent("searches", { label: closest.dong_name, lat: closest.lat, lng: closest.lng });
       // 비상벨은 데이터가 촘촘해서(동 중앙값 약 67m) 좁은 반경만 조회한다.
       if (settings.showBells) {
         nearbyBells(place.lat, place.lng, 1).then(setBells).catch(() => setBells([]));

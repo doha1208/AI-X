@@ -158,7 +158,7 @@ function RoutePage({ search }: { search: string }) {
         at: routeTimeFor(settings.timeMode),
       });
       if (requestRef.current !== controller) return;
-      addRecent("destinations", end.label);
+      addRecent("destinations", end);
       setRoute(result);
       setSelected(0);
     } catch (err) {
@@ -243,7 +243,12 @@ function RoutePage({ search }: { search: string }) {
 
           {route ? (
             <section className={styles.results} aria-label="경로 검색 결과">
-              <p className={styles.resultsLabel}>검색 결과 {route.alternatives.length}개</p>
+              <p className={styles.resultsLabel}>
+                검색 결과 {route.alternatives.length}개
+                <span className={`${styles.periodBadge} ${route.period === "night" ? styles.periodNight : ""}`}>
+                  {route.period === "night" ? "야간 기준" : "주간 기준"}
+                </span>
+              </p>
               {route.mode !== "safety_weighted" && (
                 <p className={styles.fallback}>
                   <InfoIcon size={14} />
