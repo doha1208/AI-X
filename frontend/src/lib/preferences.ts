@@ -35,7 +35,7 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 // 서버 렌더링·사생활 보호 모드처럼 localStorage를 못 쓰는 환경에서는 기본값으로 동작한다.
-function readJson(key: string): unknown {
+export function readJson(key: string): unknown {
   try {
     const raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : null;
@@ -44,7 +44,7 @@ function readJson(key: string): unknown {
   }
 }
 
-function writeJson(key: string, value: unknown): void {
+export function writeJson(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {

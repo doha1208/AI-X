@@ -72,22 +72,6 @@
   justify-self: end;
 }
 
-.bellButton {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.bellButton:hover {
-  color: var(--text);
-}
-
 .avatar {
   display: grid;
   place-items: center;
@@ -102,8 +86,7 @@
 
 .tab:focus-visible,
 .brand:focus-visible,
-.avatar:focus-visible,
-.bellButton:focus-visible {
+.avatar:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
 }

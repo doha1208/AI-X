@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellIcon, ShieldPinIcon } from "@/components/icons";
+import { NotificationBell } from "@/components/NotificationBell";
+import { ShieldPinIcon } from "@/components/icons";
 import styles from "./AppHeader.module.css";
 
 const TABS = [
@@ -43,9 +44,7 @@ export function AppHeader({ userInitial }: Props) {
       </nav>
 
       <div className={styles.actions}>
-        <button type="button" className={styles.bellButton} aria-label="알림 (준비 중)" title="준비 중">
-          <BellIcon size={18} />
-        </button>
+        <NotificationBell />
         <Link href="/me" className={styles.avatar} aria-label="내 정보">
           {userInitial}
         </Link>
