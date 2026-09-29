@@ -1,0 +1,135 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 64px;
+  padding: 0 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: start;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brandIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: #fff;
+}
+
+.brandAccent {
+  color: var(--brand);
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tab {
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.tabActive,
+.tabActive:hover {
+  color: var(--brand);
+  font-weight: 700;
+  background: transparent;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-self: end;
+}
+
+.bellButton {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.bellButton:hover {
+  color: var(--text);
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brand-light);
+  color: var(--brand);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.tab:focus-visible,
+.brand:focus-visible,
+.avatar:focus-visible,
+.bellButton:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* 휴대폰에서는 탭을 화면 아래로 내려 한 손으로 누르기 쉽게 한다. */
+@media (max-width: 720px) {
+  .header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .tabs {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    gap: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+
+  .tab {
+    flex: 1;
+    padding: 14px 4px;
+    border-radius: 0;
+    font-size: 13px;
+    text-align: center;
+  }
+}

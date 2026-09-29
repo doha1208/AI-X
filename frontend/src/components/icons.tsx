@@ -221,3 +221,88 @@ export function MapPinIcon({ size = 18, className }: IconProps) {
     </svg>
   );
 }
+
+export function PlusIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+export function MinusIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+export function SwapIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M8 4v16" />
+      <path d="m4 8 4-4 4 4" />
+      <path d="M16 20V4" />
+      <path d="m20 16-4 4-4-4" />
+    </svg>
+  );
+}
+
+export function NavigationIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M3 11 21 3l-8 18-2-8-8-2Z" />
+    </svg>
+  );
+}
+
+export function TurnRightIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M5 20v-7a4 4 0 0 1 4-4h11" />
+      <path d="m15 4 5 5-5 5" />
+    </svg>
+  );
+}
+
+export function SpeakerIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+      <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M19 6a8.5 8.5 0 0 1 0 12" />
+    </svg>
+  );
+}
+
+export function SpeakerOffIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+      <path d="m17 9 5 6" />
+      <path d="m22 9-5 6" />
+    </svg>
+  );
+}
+
+export function ShareIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="18" cy="5" r="2.5" />
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="19" r="2.5" />
+      <path d="m8.2 10.8 7.6-4.6" />
+      <path d="m8.2 13.2 7.6 4.6" />
+    </svg>
+  );
+}
+
+export function PhoneIcon({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2Z" />
+    </svg>
+  );
+}

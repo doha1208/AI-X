@@ -29,6 +29,7 @@ export type RouteResult = {
   mode: RouteMode;
   alternatives: RouteAlternative[];
   shortest_route_points: { lat: number; lng: number }[] | null;
+  shortest_zones_passed?: SafetyZone[] | null;
 };
 
 export type RouteAlternative = {
@@ -164,7 +165,7 @@ export function routeSafety(
   startLng: number,
   endLat: number,
   endLng: number,
-  options: { includeComparison?: boolean; signal?: AbortSignal } = {}
+  options: { includeComparison?: boolean; signal?: AbortSignal; at?: string } = {}
 ) {
   return request<RouteResult>("/safety/route", {
     method: "POST",
@@ -174,6 +175,7 @@ export function routeSafety(
       end_lat: endLat,
       end_lng: endLng,
       include_comparison: options.includeComparison ?? true,
+      at: options.at,
     }),
     signal: options.signal,
   });

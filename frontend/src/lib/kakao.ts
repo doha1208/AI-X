@@ -12,6 +12,7 @@ export type KakaoLatLngBounds = {
 export type KakaoMap = {
   relayout(): void;
   panTo(position: KakaoLatLng): void;
+  getLevel(): number;
   setLevel(level: number): void;
   setBounds(bounds: KakaoLatLngBounds): void;
 };
@@ -44,6 +45,7 @@ export type KakaoSdk = {
     Polyline: new (options: { path: KakaoLatLng[]; strokeWeight: number; strokeColor: string; strokeOpacity: number; strokeStyle: string }) => KakaoOverlay;
     event: {
       addListener(target: KakaoMap, event: "click" | "rightclick", handler: (event: KakaoMouseEvent) => void): void;
+      addListener(target: KakaoMap, event: "dragstart", handler: () => void): void;
       addListener(target: KakaoOverlay, event: string, handler: () => void): void;
     };
     services: {
