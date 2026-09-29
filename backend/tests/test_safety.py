@@ -273,3 +273,26 @@ def test_health_reports_route_artifact_status(monkeypatch):
     monkeypatch.setattr(main.route_artifact_runtime, "status", lambda: {"available": True, "version": "v1"})
 
     assert client.get("/health").json()["route_artifact"] == {"available": True, "version": "v1"}
+
+
+def test_route_comparison_reports_the_dongs_the_shortest_route_passes(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [{"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}],
+    )
+
+    async def shortest(*_):
+        return [(37.50, 127.00), (37.505, 127.005), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", shortest)
+
+    body = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01},
+    ).json()
+
+    assert [z["dong_code"] for z in body["shortest_zones_passed"]] == ["TEST1", "TEST2"]
+    assert all(isinstance(z["safety_score"], (int, float)) for z in body["shortest_zones_passed"])

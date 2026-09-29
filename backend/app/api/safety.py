@@ -233,6 +233,7 @@ async def route_safety(
             )
 
     shortest_route_points: list[RoutePoint] | None = None
+    shortest_zones_passed: list[SafetyZoneOut] | None = None
     candidates: list[dict]
     if safe_routes:
         mode: RouteMode = "safety_weighted"
@@ -240,6 +241,7 @@ async def route_safety(
         # 안전 가중 경로가 실제 최단경로와 다르다는 걸 지도에서 비교해 보여주는 참고선.
         if tmap_points:
             shortest_route_points = [RoutePoint(lat=lat, lng=lng) for lat, lng in tmap_points]
+            shortest_zones_passed = [_zone_out(z, score_map) for z in _zones_passed(tmap_points, zones)]
     else:
         if tmap_points:
             mode = "tmap"
@@ -289,6 +291,7 @@ async def route_safety(
         mode=mode,
         alternatives=alternatives,
         shortest_route_points=shortest_route_points,
+        shortest_zones_passed=shortest_zones_passed,
     )
     fallback_reason = "none" if mode == "safety_weighted" else "safe_route_unavailable"
     if mode == "straight_line":
