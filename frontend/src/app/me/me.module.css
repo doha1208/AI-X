@@ -102,10 +102,74 @@
 }
 
 .settingsHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 20px 24px;
   border-bottom: 1px solid var(--border);
   font-size: 15px;
   font-weight: 700;
+}
+
+.contactsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 24px 20px;
+}
+
+.contactsBody .settingHint {
+  margin-top: 0;
+}
+
+.contactRemove {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.contactRemove:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.contactForm {
+  display: flex;
+  gap: 8px;
+}
+
+.contactInput {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.contactAdd {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+}
+
+.contactAdd:hover {
+  background: var(--brand-dark);
 }
 
 .settingRow {

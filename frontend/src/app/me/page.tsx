@@ -5,15 +5,19 @@ import { useRouter } from "next/navigation";
 import { endSession } from "@/lib/auth";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import {
+  isValidPhone,
+  loadEmergencyContacts,
   loadRecent,
   loadSettings,
+  saveEmergencyContacts,
   saveSettings,
+  type EmergencyContact,
   type RecentEntry,
   type Settings,
   type TimeMode,
 } from "@/lib/preferences";
 import { AppHeader } from "@/components/AppHeader";
-import { InfoIcon, MapPinIcon, SearchIcon } from "@/components/icons";
+import { CloseIcon, InfoIcon, MapPinIcon, PhoneIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import styles from "./me.module.css";
 
 function timeAgo(at: number, now: number): string {
@@ -58,6 +62,27 @@ export default function MyInfoPage() {
   const [recentSearches] = useState(() => loadRecent("searches"));
   const [recentDestinations] = useState(() => loadRecent("destinations"));
   const [now] = useState(() => Date.now());
+  const [contacts, setContacts] = useState<EmergencyContact[]>(loadEmergencyContacts);
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+
+  function addContact(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const name = contactName.trim();
+    const phone = contactPhone.trim();
+    if (!isValidPhone(phone)) return;
+    const next = [...contacts, { name: name || "보호자", phone }];
+    setContacts(next);
+    saveEmergencyContacts(next);
+    setContactName("");
+    setContactPhone("");
+  }
+
+  function removeContact(index: number) {
+    const next = contacts.filter((_, i) => i !== index);
+    setContacts(next);
+    saveEmergencyContacts(next);
+  }
 
   function updateSettings(patch: Partial<Settings>) {
     setSettings((current) => {
@@ -143,6 +168,79 @@ export default function MyInfoPage() {
               <option value="day">항상 낮 기준</option>
               <option value="night">항상 밤 기준</option>
             </select>
+          </div>
+
+          <div className={styles.settingRow}>
+            <div>
+              <p className={styles.settingLabel} id="keep-screen-on-setting">길안내 중 화면 꺼지지 않게 하기</p>
+              <p className={styles.settingHint}>
+                걷는 동안 화면이 꺼지면 위치 갱신과 음성 안내가 함께 멈춰요. 배터리는 더 빨리 닳을 수 있어요.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.keepScreenOn}
+              aria-labelledby="keep-screen-on-setting"
+              className={`${styles.switch} ${settings.keepScreenOn ? styles.switchOn : ""}`}
+              onClick={() => updateSettings({ keepScreenOn: !settings.keepScreenOn })}
+            >
+              <span className={styles.switchKnob} />
+            </button>
+          </div>
+        </section>
+
+        <section className={`${styles.card} ${styles.settingsCard}`}>
+          <h2 className={styles.settingsHeader}>
+            <PhoneIcon size={16} />
+            긴급 연락처
+          </h2>
+          <div className={styles.contactsBody}>
+            <p className={styles.settingHint}>
+              길안내 화면의 SOS에서 여기 등록한 번호로 현재 위치 문자를 보낼 수 있어요. 이 기기에만 저장돼요.
+            </p>
+            {contacts.length > 0 && (
+              <ul className={styles.recentList}>
+                {contacts.map((contact, index) => (
+                  <li key={`${contact.phone}-${index}`} className={styles.recentItem}>
+                    <span>
+                      {contact.name} · {contact.phone}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.contactRemove}
+                      onClick={() => removeContact(index)}
+                      aria-label={`${contact.name} 연락처 삭제`}
+                    >
+                      <CloseIcon size={14} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {contacts.length < 3 && (
+              <form className={styles.contactForm} onSubmit={addContact}>
+                <input
+                  className={styles.contactInput}
+                  value={contactName}
+                  onChange={(e) => setContactName(e.target.value)}
+                  placeholder="이름 (예: 엄마)"
+                  aria-label="연락처 이름"
+                />
+                <input
+                  className={styles.contactInput}
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  placeholder="전화번호"
+                  inputMode="tel"
+                  aria-label="전화번호"
+                  required
+                />
+                <button type="submit" className={styles.contactAdd} aria-label="연락처 추가">
+                  <PlusIcon size={16} />
+                </button>
+              </form>
+            )}
           </div>
         </section>
 
