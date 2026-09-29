@@ -194,6 +194,57 @@ MAX_ALTERNATIVES_KM = 6.0
 def _alternatives_for(straight_km: float, k: int) -> int:
     return k if straight_km <= MAX_ALTERNATIVES_KM else 1
 
+
+# 대안 경로가 서로 거의 같은 골목 변형이 되지 않도록, 필요한 대안 수보다 더 많은 후보를
+# 살펴보고 겹치지 않는 것들을 고른다. k=1일 때는 다양성이 의미 없으니 넓히지 않는다
+# (긴 경로는 Yen's 알고리즘 자체가 느려서 후보를 늘리면 응답 시간이 커진다).
+ALT_SEARCH_MULTIPLIER = 4
+ALT_SEARCH_MAX = 12
+# ponytail: 체감 기반 값 — 실제 지도에서 "이건 사실상 같은 길"로 보이는 비율 확인 후 조정.
+ROUTE_OVERLAP_MAX = 0.6
+
+
+def _search_budget(k: int) -> int:
+    return k if k <= 1 else min(k * ALT_SEARCH_MULTIPLIER, ALT_SEARCH_MAX)
+
+
+def _path_edges(path: list[int]) -> frozenset[tuple[int, int]]:
+    return frozenset(zip(path[:-1], path[1:]))
+
+
+def _overlap_fraction(graph: nx.DiGraph, edges: frozenset, selected_edges: set) -> float:
+    if not edges:
+        return 0.0
+    total = 0.0
+    overlap = 0.0
+    for u, v in edges:
+        length = graph[u][v].get("length", 0.0)
+        total += length
+        if (u, v) in selected_edges or (v, u) in selected_edges:
+            overlap += length
+    return overlap / total if total else 0.0
+
+
+def _diverse_routes(graph: nx.DiGraph, candidates: list[tuple[list[int], dict]], k: int) -> list[dict]:
+    """candidates는 비용 오름차순(가장 안전한 순)이라고 가정한다. 이미 고른 경로들과 많이
+    겹치는 후보는 일단 미루고, 그래도 k개를 못 채우면 미뤄둔 것부터 순서대로 채운다 —
+    다양성이 없는 것보다 대안이 아예 없는 게 더 나쁘다."""
+    selected: list[dict] = []
+    selected_edges: set[tuple[int, int]] = set()
+    leftover: list[dict] = []
+    for path, summary in candidates:
+        edges = _path_edges(path)
+        if selected and _overlap_fraction(graph, edges, selected_edges) > ROUTE_OVERLAP_MAX:
+            leftover.append(summary)
+            continue
+        selected.append(summary)
+        selected_edges |= edges
+    for summary in leftover:
+        if len(selected) >= k:
+            break
+        selected.append(summary)
+    return selected[:k]
+
 _graph_cache: dict[tuple[float, float, float, float], nx.MultiDiGraph] = {}
 
 
@@ -624,11 +675,13 @@ class RouteArtifactRuntime:
                     return cached
             metrics.record_route_cache("miss")
             paths = nx.shortest_simple_paths(graph, origin, destination, weight="safety_cost")
-            routes: list[dict] = []
+            search_budget = _search_budget(k)
+            candidates: list[tuple[list[int], dict]] = []
             for path in paths:
-                routes.append(_summarize_path(graph, path))
-                if len(routes) >= k:
+                candidates.append((path, _summarize_path(graph, path)))
+                if len(candidates) >= search_budget:
                     break
+            routes = _diverse_routes(graph, candidates, k)
             with self._lock:
                 if self._artifact is artifact:
                     self._result_cache[cache_key] = routes

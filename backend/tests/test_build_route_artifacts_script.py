@@ -20,6 +20,12 @@ from app.services.safe_route import route_input_data_version
 from scripts import build_route_artifacts as script
 
 
+def _raise(exc: BaseException) -> None:
+    # 제너레이터 안에서 StopIteration을 던지면(예: 흔한 (_ for _ in ()).throw(...) 트릭)
+    # PEP 479에 따라 RuntimeError로 바뀐다 — 평범한 함수에서 던져야 그대로 전파된다.
+    raise exc
+
+
 def _artifact(version: str) -> RouteArtifact:
     graph = nx.DiGraph()
     graph.add_node(1, y=37.5, x=127.0)
@@ -247,7 +253,7 @@ def test_worker_processes_queue_and_runs_one_freshness_check(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(worker, "SessionLocal", lambda: _WorkerSession(calls))
     monkeypatch.setattr(worker.time, "monotonic", lambda: 0.0)
-    monkeypatch.setattr(worker.time, "sleep", lambda _: (_ for _ in ()).throw(StopIteration))
+    monkeypatch.setattr(worker.time, "sleep", lambda _: _raise(StopIteration()))
 
     with pytest.raises(StopIteration):
         worker.run_worker(directory=tmp_path, region="seoul-gyeonggi", poll_seconds=1, refresh_seconds=1800)

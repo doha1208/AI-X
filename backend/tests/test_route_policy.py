@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Settings, validate_runtime_settings
+from app.core.config import DEFAULT_SECRET_KEY, Settings, validate_runtime_settings
 from app.core.security import create_access_token
 from app.schemas.safety import RouteRequest
 from app.services.route_request_limit import RouteRequestGate
@@ -45,8 +45,11 @@ def test_route_request_rejects_straight_line_distance_over_ten_kilometers():
 
 
 def test_production_rejects_default_jwt_secret():
+    # secret_key를 명시하지 않으면 개발 머신의 .env에 있는 실제 SECRET_KEY가 그대로
+    # 읽혀서(BaseSettings의 env_file), 이 테스트가 확인하려는 "기본값 그대로 두면 막힌다"는
+    # 전제가 성립하지 않는다 — 기본값을 명시해 환경과 무관하게 만든다.
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        validate_runtime_settings(Settings(app_env="production"))
+        validate_runtime_settings(Settings(app_env="production", secret_key=DEFAULT_SECRET_KEY))
 
 
 def test_development_allows_default_jwt_secret_for_local_startup():
