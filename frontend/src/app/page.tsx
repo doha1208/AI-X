@@ -6,7 +6,16 @@ import { nearbyBells, nearbyZones, residenceRecommend, type SafetyZone } from "@
 import { haversineMeters } from "@/lib/geo";
 import { reverseGeocode, type LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
+import { addNotification } from "@/lib/notifications";
 import { addRecent, loadSettings } from "@/lib/preferences";
+import {
+  applyScoreChanges,
+  loadWatchedZones,
+  MAX_WATCHED_ZONES,
+  saveWatchedZones,
+  toggleWatchedZone,
+  type WatchedZone,
+} from "@/lib/watchedZones";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
@@ -19,6 +28,8 @@ import styles from "./page.module.css";
 const NEARBY_RADIUS_KM = 5;
 const TOP_NEARBY = 5;
 const TOP_ALL = 10;
+// 관심 동네의 최신 점수는 그 동네 중심에서 좁게 조회해 같은 동 코드를 찾는다.
+const WATCH_LOOKUP_KM = 1;
 
 const SAFETY_LEGEND = [
   { label: "안전 (70~100)", swatch: "dot" as const, color: "var(--safe)" },
@@ -50,6 +61,7 @@ function ResidencePage({ search }: { search: string }) {
   const [scope, setScope] = useState<"nearby" | "all">(initialNear ? "nearby" : "all");
   const [bells, setBells] = useState<LatLng[]>([]);
   const [selectedZone, setSelectedZone] = useState<SafetyZone | null>(null);
+  const [watched, setWatched] = useState<WatchedZone[]>(loadWatchedZones);
   const [picking, setPicking] = useState(false);
   const [searching, setSearching] = useState(initialNear !== null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +100,25 @@ function ResidencePage({ search }: { search: string }) {
     residenceRecommend(TOP_ALL)
       .then(setAllRanking)
       .catch((err) => setError(err instanceof Error ? err.message : "추천 목록을 불러오지 못했어요"));
+  }, []);
+
+  // 관심 동네의 안전지수가 지난번 확인 때와 달라졌으면 알림으로 남긴다(데이터 재적재 후 처음 열 때 걸린다).
+  useEffect(() => {
+    const saved = loadWatchedZones();
+    if (saved.length === 0) return;
+    let cancelled = false;
+    Promise.all(saved.map((w) => nearbyZones(w.lat, w.lng, WATCH_LOOKUP_KM).catch(() => [] as SafetyZone[]))).then(
+      (results) => {
+        if (cancelled) return;
+        const { next, messages } = applyScoreChanges(loadWatchedZones(), results.flat());
+        saveWatchedZones(next);
+        setWatched(next);
+        messages.forEach((message) => addNotification("score", message));
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -207,21 +238,39 @@ function ResidencePage({ search }: { search: string }) {
             <p className={styles.panelEmpty}>이 주변에서 안전 구역을 찾지 못했어요. 다른 위치를 검색해보세요.</p>
           ) : (
             <ol className={styles.rankList}>
-              {ranking.map((zone, i) => (
-                <li key={zone.dong_code}>
-                  <button
-                    type="button"
-                    className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
-                    onClick={() => setSelectedZone(zone)}
-                  >
-                    <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
-                    <span className={styles.rankName}>{zone.dong_name}</span>
-                    <span className={`${styles.scoreBadge} ${scoreTone(zone.safety_score)}`}>
-                      {zone.safety_score.toFixed(0)}점
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {ranking.map((zone, i) => {
+                const isWatched = watched.some((w) => w.dong_code === zone.dong_code);
+                return (
+                  <li key={zone.dong_code} className={styles.rankRow}>
+                    <button
+                      type="button"
+                      className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
+                      onClick={() => setSelectedZone(zone)}
+                    >
+                      <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
+                      <span className={styles.rankName}>{zone.dong_name}</span>
+                      <span className={`${styles.scoreBadge} ${scoreTone(zone.safety_score)}`}>
+                        {zone.safety_score.toFixed(0)}점
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.watchButton} ${isWatched ? styles.watchButtonOn : ""}`}
+                      aria-pressed={isWatched}
+                      aria-label={`${zone.dong_name} 관심 동네 ${isWatched ? "해제" : "저장"}`}
+                      title={
+                        !isWatched && watched.length >= MAX_WATCHED_ZONES
+                          ? `관심 동네는 ${MAX_WATCHED_ZONES}곳까지 저장할 수 있어요`
+                          : "점수가 바뀌면 알림으로 알려드려요"
+                      }
+                      disabled={!isWatched && watched.length >= MAX_WATCHED_ZONES}
+                      onClick={() => setWatched(toggleWatchedZone(zone))}
+                    >
+                      {isWatched ? "관심 중" : "관심"}
+                    </button>
+                  </li>
+                );
+              })}
             </ol>
           )}
 

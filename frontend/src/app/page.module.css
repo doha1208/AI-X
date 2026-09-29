@@ -175,6 +175,50 @@
   cursor: pointer;
 }
 
+.rankRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rankRow .rankItem {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.watchButton {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.watchButton:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.watchButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.watchButtonOn {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.watchButton:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .rankItem:hover {
   background: var(--surface-muted);
 }
