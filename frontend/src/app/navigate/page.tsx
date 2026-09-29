@@ -1,28 +1,38 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { routeSafety, type SafetyZone } from "@/lib/api";
+import { routeSafety, type RoutePeriod, type SafetyZone } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
 import { acceptFix, GEO_OPTIONS, toFix, type Fix } from "@/lib/locationFilter";
 import { loadHandoff } from "@/lib/guideHandoff";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
-import { loadRecent, loadSettings, routeTimeFor, saveSettings, type Settings } from "@/lib/preferences";
+import {
+  addRecent,
+  loadEmergencyContacts,
+  loadRecent,
+  loadSettings,
+  routeTimeFor,
+  saveSettings,
+  type Settings,
+} from "@/lib/preferences";
 import {
   formatDistance,
   guideOptions,
+  nearestPointOnPath,
   nextTurn,
   progressAlong,
   walkingMinutes,
-  zoneSummary,
   type GuideKind,
   type GuideOption,
   type TurnDirection,
 } from "@/lib/routeGuidance";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
+import { useWakeLock } from "@/lib/useWakeLock";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { ChoicePanel } from "./ChoicePanel";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapControls, PickConfirm, usePendingPick } from "@/components/MapOverlays";
 import { withSearch } from "@/components/WithSearch";
@@ -46,12 +56,18 @@ const ARRIVAL_RADIUS_M = 30;
 const OFF_ROUTE_M = 40;
 const REROUTE_MIN_INTERVAL_MS = 5000;
 const TOAST_MS = 2500;
+// 목적지까지 이보다 가까워지면 한 번 "곧 도착"을 안내한다(30m 도착 안내와는 별개).
+const NEAR_ARRIVAL_M = 100;
+// 이 점수 미만이면 scoreLevel()이 "주의"로 분류한다 — 새로 진입할 때 한 번 음성으로 알린다.
+const CAUTION_SCORE = 40;
+// 내 위치가 경로에서 이 거리 안이면 GPS 떨림을 줄이려고 마커를 경로 위로 붙여서 보여준다.
+const SNAP_TO_ROUTE_M = 25;
 
 const TURN_TEXT: Record<TurnDirection, string> = { left: "좌회전", right: "우회전", arrive: "앞 목적지" };
 
 function scoreLevel(score: number): { label: string; tone: string } {
   if (score >= 70) return { label: "안전", tone: styles.toneSafe };
-  if (score >= 40) return { label: "보통", tone: styles.toneCaution };
+  if (score >= CAUTION_SCORE) return { label: "보통", tone: styles.toneCaution };
   return { label: "주의", tone: styles.toneWarning };
 }
 
@@ -86,7 +102,9 @@ function NavigatePage({ search }: { search: string }) {
   const [position, setPosition] = useState<LatLng | null>(null);
   // 목적지를 정하면 먼저 안전 경로·최단 경로를 보여주고(choice), 고른 경로(mode)로 안내한다(guided).
   // 길찾기 탭에서 이미 경로를 골라 넘어온 경우(?mode=safe|shortest)에는 고르는 단계를 건너뛴다.
-  const [choice, setChoice] = useState<{ options: GuideOption[]; safetyWeighted: boolean } | null>(null);
+  const [choice, setChoice] = useState<{ options: GuideOption[]; safetyWeighted: boolean; period: RoutePeriod } | null>(
+    null
+  );
   const [mode, setMode] = useState<GuideKind | null>(() => {
     const requested = new URLSearchParams(search).get("mode");
     return requested === "safe" || requested === "shortest" ? requested : null;
@@ -99,6 +117,9 @@ function NavigatePage({ search }: { search: string }) {
   const [previewKind, setPreviewKind] = useState<GuideKind>("safe");
   const [denied, setDenied] = useState(false);
   const [arrived, setArrived] = useState(false);
+  // 길찾기에서 고른 출발지가 지금 위치와 다를 때, 새 경로를 찾는 대신 먼저 그 출발점으로
+  // 이동하라고 안내한다(경로 첫 지점 근처에 아직 못 왔을 때만 — progress.index === 0).
+  const [headingToStart, setHeadingToStart] = useState(false);
   const [rerouting, setRerouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -140,7 +161,7 @@ function NavigatePage({ search }: { search: string }) {
       });
       const found = guideOptions(result);
       if (purpose === "options") {
-        setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted" });
+        setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted", period: result.period });
       } else {
         const next = found.find((option) => option.kind === mode) ?? found[0];
         if (mode === "shortest" && next.kind !== "shortest") {
@@ -177,8 +198,19 @@ function NavigatePage({ search }: { search: string }) {
       if (settings.voiceOn) speak("목적지에 도착했어요. 안내를 종료합니다.", settings.voiceVolume);
       return;
     }
-    const offRoute = !guided || progressAlong(guided.points, here).offRouteM > OFF_ROUTE_M;
-    if (!offRoute) return;
+    const progress = guided ? progressAlong(guided.points, here) : null;
+    if (progress && progress.offRouteM <= OFF_ROUTE_M) {
+      onRouteOnceRef.current = true;
+      setHeadingToStart(false);
+      return;
+    }
+    if (progress && progress.index === 0 && !onRouteOnceRef.current) {
+      // 아직 경로에 한 번도 올라서지 못했다 — 새 경로를 찾지 않고 출발점으로 걸어오라고만 안내한다.
+      // (경로 위를 걷다 첫 구간에서 벗어난 경우는 여기 걸리지 않고 재탐색된다.)
+      setHeadingToStart(true);
+      return;
+    }
+    setHeadingToStart(false);
     if (Date.now() - lastFetchAtRef.current < REROUTE_MIN_INTERVAL_MS) return;
     void fetchRoute(here, destination, "guide", guided !== null);
   }
@@ -212,6 +244,51 @@ function NavigatePage({ search }: { search: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turnKey, settings.voiceOn]);
 
+  useWakeLock(settings.keepScreenOn && mode !== null && !arrived && !denied && destination !== null);
+
+  useEffect(() => {
+    if (!headingToStart || !settings.voiceOn) return;
+    speak("먼저 출발지까지 이동해주세요", settings.voiceVolume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [headingToStart, settings.voiceOn]);
+
+  const wasReroutingRef = useRef(false);
+  useEffect(() => {
+    if (rerouting && !wasReroutingRef.current && settings.voiceOn) {
+      speak("경로를 벗어나 다시 찾을게요", settings.voiceVolume);
+    }
+    wasReroutingRef.current = rerouting;
+  }, [rerouting, settings.voiceOn, settings.voiceVolume]);
+
+  const cautionZoneCode = guidance?.zone && guidance.zone.safety_score < CAUTION_SCORE ? guidance.zone.dong_code : null;
+  useEffect(() => {
+    if (!cautionZoneCode || !settings.voiceOn) return;
+    speak("주의 구역에 들어섰어요", settings.voiceVolume);
+    // 같은 주의 구역 안에서 위치가 갱신될 때마다 다시 말하지 않도록 동 코드가 바뀔 때만 반응한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cautionZoneCode, settings.voiceOn]);
+
+  const announcedNearArrivalRef = useRef(false);
+  const onRouteOnceRef = useRef(false);
+  useEffect(() => {
+    announcedNearArrivalRef.current = false; // 새 경로를 시작하면 다시 안내할 수 있게 초기화한다.
+    onRouteOnceRef.current = false;
+  }, [guided]);
+  useEffect(() => {
+    const remaining = guidance?.progress.remainingM;
+    if (remaining === undefined || remaining > NEAR_ARRIVAL_M || announcedNearArrivalRef.current) return;
+    announcedNearArrivalRef.current = true;
+    if (settings.voiceOn) speak(`목적지까지 ${formatDistance(remaining)} 남았어요`, settings.voiceVolume);
+  }, [guidance, settings.voiceOn, settings.voiceVolume]);
+
+  // GPS 떨림 때문에 내 위치 마커가 경로 옆에서 흔들리지 않도록, 경로에 충분히 가까우면
+  // 마커를 경로 위 가장 가까운 지점에 붙여서 보여준다(실제 위치 계산에는 원본 좌표를 그대로 쓴다).
+  const snappedLocation = useMemo(() => {
+    if (!mode || !guided || !position || arrived || guided.points.length < 2) return null;
+    const snapped = nearestPointOnPath(guided.points, position);
+    return snapped.distanceM <= SNAP_TO_ROUTE_M ? snapped.point : null;
+  }, [mode, guided, position, arrived]);
+
   function updateVoice(patch: Partial<Pick<Settings, "voiceOn" | "voiceVolume">>) {
     if (patch.voiceOn === false && "speechSynthesis" in window) window.speechSynthesis.cancel();
     setSettings((current) => {
@@ -232,6 +309,7 @@ function NavigatePage({ search }: { search: string }) {
     setMode(null);
     setGuided(null);
     setArrived(false);
+    setHeadingToStart(false);
     setRouteError(null);
   }
 
@@ -241,6 +319,7 @@ function NavigatePage({ search }: { search: string }) {
     stopPicking();
     setChooseError(null);
     lastFetchAtRef.current = 0;
+    addRecent("destinations", place);
     window.history.replaceState(null, "", `/navigate?${placeQuery("end", place)}`);
     // 위치가 이미 있으면 다음 GPS 갱신을 기다리지 않고 바로 두 경로를 비교한다.
     const here = position ?? location;
@@ -286,10 +365,14 @@ function NavigatePage({ search }: { search: string }) {
     mapPick.clear();
   }
 
+  function locationLink(here: LatLng): string {
+    return `https://map.kakao.com/link/map/${encodeURIComponent("내 현재 위치")},${here.lat},${here.lng}`;
+  }
+
   async function shareLocation() {
     const here = position ?? location;
     if (!here) return;
-    const url = `https://map.kakao.com/link/map/${encodeURIComponent("내 현재 위치")},${here.lat},${here.lng}`;
+    const url = locationLink(here);
     try {
       if (navigator.share) {
         await navigator.share({ title: "내 현재 위치", url });
@@ -302,9 +385,30 @@ function NavigatePage({ search }: { search: string }) {
     }
   }
 
+  // 등록해 둔 보호자 번호로 현재 위치가 담긴 SMS 초안을 연다 — 실제 발송은 사용자가 문자
+  // 앱에서 직접 눌러야 하고, 여기서 자동으로 보내지 않는다.
+  function smsGuardians() {
+    const here = position ?? location;
+    if (!here) {
+      showToast("현재 위치를 아직 찾지 못했어요");
+      return;
+    }
+    const contacts = loadEmergencyContacts();
+    if (contacts.length === 0) {
+      showToast("내 정보에서 긴급 연락처를 먼저 등록해주세요");
+      return;
+    }
+    const body = `[긴급] 도움이 필요해요. 지금 위치: ${locationLink(here)}`;
+    const numbers = contacts.map((c) => c.phone.replace(/[^\d+]/g, "")).join(",");
+    // iOS는 전화번호 뒤에 ?가 아니라 &로 body를 붙여야 인식한다.
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    window.location.href = `sms:${numbers}${isIOS ? "&" : "?"}body=${encodeURIComponent(body)}`;
+  }
+
   if (!user) return null;
 
   const myLocation = position ?? location ?? undefined;
+  const displayLocation = snappedLocation ?? myLocation;
   const phase = !destination ? "choose" : denied ? "denied" : arrived ? "arrived" : mode ? "guiding" : "select";
   const safeOption = choice?.options.find((o) => o.kind === "safe");
   // 카드를 누르면 그 경로만 지도에서 강조하고(실선), 나머지는 비교용 점선으로 둔다.
@@ -324,8 +428,8 @@ function NavigatePage({ search }: { search: string }) {
         <SafetyMap
           ref={mapRef}
           bells={phase === "guiding" ? routeBells : undefined}
-          center={myLocation}
-          myLocation={myLocation}
+          center={displayLocation}
+          myLocation={displayLocation}
           routePath={phase === "guiding" ? guided?.points : phase === "select" ? previewOption?.points : undefined}
           comparePath={phase === "select" ? otherOption?.points : undefined}
           labels={labels}
@@ -349,6 +453,19 @@ function NavigatePage({ search }: { search: string }) {
                   <button type="button" className={styles.retryButton} onClick={retryRoute}>
                     다시 시도
                   </button>
+                </>
+              ) : headingToStart && guidance ? (
+                <>
+                  <span className={styles.turnIcon}>
+                    <MapPinIcon size={26} />
+                  </span>
+                  <div className={styles.turnText} aria-live="polite">
+                    <p className={styles.turnTitle}>
+                      {formatDistance(guidance.progress.offRouteM)}{" "}
+                      <span className={styles.turnAction}>출발지로 이동</span>
+                    </p>
+                    <p className={styles.turnSub}>목적지 · {destination?.label}</p>
+                  </div>
                 </>
               ) : guidance ? (
                 <>
@@ -481,88 +598,18 @@ function NavigatePage({ search }: { search: string }) {
         )}
 
         {phase === "select" && (
-          <section className={styles.choicePanel} aria-label="안내 경로 선택">
-            <div className={styles.choiceHeader}>
-              <div>
-                <h1 className={styles.choiceTitle}>어떤 길로 안내할까요?</h1>
-                <p className={styles.choiceSub}>목적지 · {destination?.label}</p>
-              </div>
-              <button type="button" className={styles.ghostButton} onClick={reset}>
-                취소
-              </button>
-            </div>
-
-            {routeError ? (
-              <div className={styles.choiceStatus} role="alert">
-                <p className={styles.error}>경로를 찾지 못했어요: {routeError}</p>
-                <button type="button" className={styles.startButton} onClick={retryRoute}>
-                  다시 시도
-                </button>
-              </div>
-            ) : !choice ? (
-              <p className={styles.choiceStatus} role="status">
-                {myLocation ? "안전 경로와 최단 경로를 비교하는 중..." : "현재 위치를 찾는 중..."}
-              </p>
-            ) : (
-              <>
-                <div className={styles.choiceList}>
-                  {choice.options.map((option) => {
-                    const summary = zoneSummary(option.zones);
-                    const isSafe = option.kind === "safe";
-                    // 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
-                    const reallyShortest = !isSafe && (!safeOption || option.distanceM < safeOption.distanceM);
-                    const title = isSafe
-                      ? choice.safetyWeighted ? "안전 경로" : "도보 경로"
-                      : reallyShortest ? "최단 경로" : "일반 도보 경로";
-                    const selected = option === previewOption;
-                    return (
-                      <div
-                        key={option.kind}
-                        className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ""}`}
-                      >
-                        <button
-                          type="button"
-                          className={styles.choiceSelect}
-                          onClick={() => setPreviewKind(option.kind)}
-                          aria-pressed={selected}
-                        >
-                          <span className={styles.choiceKind}>
-                            <span className={selected ? styles.swatchLine : styles.swatchDash} aria-hidden />
-                            {title}
-                            {isSafe && choice.safetyWeighted && <span className={styles.recommendTag}>추천</span>}
-                          </span>
-                          <span className={styles.choiceTime}>
-                            {walkingMinutes(option.distanceM)}분 <small>{formatDistance(option.distanceM)}</small>
-                          </span>
-                          <span className={styles.choiceMeta}>
-                            {summary.average !== null && (
-                              <span className={scoreLevel(summary.average).tone}>
-                                지나는 동 평균 {summary.average.toFixed(0)}점
-                              </span>
-                            )}
-                            <span>{summary.cautionCount > 0 ? `주의 구역 ${summary.cautionCount}곳` : "주의 구역 없음"}</span>
-                          </span>
-                          {!selected && <span className={styles.choiceHint}>눌러서 지도에서 보기</span>}
-                        </button>
-                        {selected && (
-                          <button type="button" className={styles.choiceStart} onClick={() => chooseOption(option)}>
-                            이 길로 안내 시작
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {!choice.safetyWeighted ? (
-                  <p className={styles.choiceNote}>안전 경로를 찾지 못해 일반 도보 경로로만 안내할 수 있어요.</p>
-                ) : (
-                  choice.options.length === 1 && (
-                    <p className={styles.choiceNote}>최단 경로를 가져오지 못해 안전 경로로만 안내할 수 있어요.</p>
-                  )
-                )}
-              </>
-            )}
-          </section>
+          <ChoicePanel
+            destination={destination}
+            choice={choice}
+            safeOption={safeOption}
+            previewOption={previewOption}
+            myLocation={myLocation}
+            routeError={routeError}
+            onPreview={setPreviewKind}
+            onChoose={chooseOption}
+            onRetry={retryRoute}
+            onCancel={reset}
+          />
         )}
 
         {phase === "choose" && picking && (
@@ -627,7 +674,11 @@ function NavigatePage({ search }: { search: string }) {
                 <ul className={styles.recentList}>
                   {recent.map((entry) => (
                     <li key={entry.label}>
-                      <button type="button" className={styles.recentItem} onClick={() => void chooseByText(entry.label)}>
+                      <button
+                        type="button"
+                        className={styles.recentItem}
+                        onClick={() => startTo({ lat: entry.lat, lng: entry.lng, label: entry.label })}
+                      >
                         <MapPinIcon size={15} />
                         {entry.label}
                       </button>
@@ -689,6 +740,16 @@ function NavigatePage({ search }: { search: string }) {
             <PhoneIcon size={18} />
             <span>SOS</span>
           </a>
+          <button
+            type="button"
+            className={styles.sideButton}
+            onClick={smsGuardians}
+            disabled={!myLocation}
+            aria-label="보호자에게 위치 문자 보내기"
+          >
+            <AlertIcon size={18} />
+            <span>보호자문자</span>
+          </button>
           <button
             type="button"
             className={styles.sideButton}

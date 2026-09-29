@@ -443,8 +443,25 @@
 }
 
 .choiceTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 19px;
   font-weight: 800;
+}
+
+.periodBadge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.periodNight {
+  background: #1a1f36;
+  color: #d7deff;
 }
 
 .choiceSub {
