@@ -1,4 +1,4 @@
-from app.services.road_score import road_safety_score
+from app.services.road_score import is_car_only, road_safety_score
 
 
 def test_lit_road_beats_unlit_road_at_night():
@@ -33,6 +33,23 @@ def test_merged_edge_with_list_tags_uses_the_worst_case():
     good = road_safety_score({"highway": "residential", "lit": "yes"}, "night")
     bad = road_safety_score({"highway": "path", "lit": "no"}, "night")
     assert mixed == bad < good
+
+
+def test_car_only_roads_are_not_walkable():
+    assert is_car_only({"highway": "trunk", "name": "자유로"})
+    assert is_car_only({"highway": "primary_link"})
+    assert is_car_only({"highway": "secondary", "tunnel": "yes"})  # 지하차도
+    assert is_car_only({"highway": "tertiary", "sidewalk": "no"})
+    assert is_car_only({"highway": "busway"})
+    assert is_car_only({"highway": ["residential", "trunk"]})
+
+
+def test_ordinary_streets_and_roads_with_sidewalks_stay_walkable():
+    assert not is_car_only({"highway": "residential", "sidewalk": "no"})  # 골목은 인도 없이 걷는 게 보통
+    assert not is_car_only({"highway": "primary"})
+    assert not is_car_only({"highway": "footway", "tunnel": "yes"})  # 보행 지하도
+    assert not is_car_only({"highway": "trunk", "sidewalk": "both"})
+    assert not is_car_only({"highway": "secondary_link"})
 
 
 def test_unknown_tags_are_neutral_and_score_stays_in_range():

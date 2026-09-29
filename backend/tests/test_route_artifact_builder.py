@@ -49,6 +49,24 @@ def test_build_route_artifact_precomputes_day_and_night_graphs(monkeypatch):
     assert artifact.data_version == sr.route_input_data_version(_zones())
 
 
+def test_build_route_artifact_leaves_out_car_only_roads(monkeypatch):
+    graph = _tiny_walk_graph()
+    graph.add_node(3, y=37.502, x=127.002)
+    graph.add_node(4, y=37.503, x=127.003)
+    graph.add_edge(2, 3, length=140.0, highway="residential")
+    graph.add_edge(1, 3, length=200.0, highway="primary", tunnel="yes")  # 지하차도 지름길
+    graph.add_edge(3, 4, length=140.0, highway="trunk")  # 자동차 전용에 가까운 간선도로로만 닿는 노드
+    monkeypatch.setattr(sr, "_load_local_graph", lambda: graph)
+    monkeypatch.setattr(sr, "load_facility_index", lambda: None)
+
+    artifact = sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi")
+
+    day = artifact.graph_by_period["day"]
+    assert not day.has_edge(1, 3)
+    assert artifact.node_ids == [1, 2, 3]  # 걸어서 못 가는 노드로는 출발·도착을 붙이지 않는다
+    assert len(artifact.node_points) == 3
+
+
 def test_route_input_data_version_changes_when_facility_points_change(tmp_path):
     facility_points = tmp_path / "facility_points.json"
     facility_points.write_text('{"cctv": []}', encoding="utf-8")

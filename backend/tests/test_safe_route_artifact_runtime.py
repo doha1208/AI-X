@@ -2,6 +2,7 @@ import json
 
 import networkx as nx
 import numpy as np
+from shapely.geometry import LineString
 
 from app.core.config import settings
 from app.services import safe_route as sr
@@ -30,6 +31,19 @@ def test_runtime_finds_route_in_loaded_artifact_without_graph_fetch(monkeypatch)
     routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
 
     assert routes == [{"points": [(37.5, 127.0), (37.501, 127.001)], "score": 70.0, "distance_m": 140.0}]
+
+
+def test_route_points_follow_the_road_shape_not_a_straight_line():
+    artifact = _artifact()
+    # osmnx가 합친 간선은 모양(geometry)을 따로 가진다 — 역방향 간선은 좌표 순서가 반대일 수 있다.
+    curve = LineString([(127.001, 37.501), (127.0, 37.5012), (127.0, 37.5)])
+    artifact.graph_by_period["day"][1][2]["geometry"] = curve
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(artifact)
+
+    routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert routes[0]["points"] == [(37.5, 127.0), (37.5012, 127.0), (37.501, 127.001)]
 
 
 def test_find_safe_routes_returns_none_without_a_loaded_artifact(monkeypatch):

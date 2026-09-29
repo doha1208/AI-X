@@ -24,7 +24,7 @@ from app.services.facility_density import (
     load_facility_index,
 )
 from app.services.geo import haversine_km
-from app.services.road_score import road_safety_score
+from app.services.road_score import is_car_only, road_safety_score
 from app.services.route_artifact import RouteArtifact, load_current_artifact
 from app.services.safety_score import Period, compute_zone_period_scores
 from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
@@ -431,6 +431,8 @@ def _build_scored_graph(
     dead_ends = _dead_end_nodes(graph)
 
     for i, (u, v, data) in enumerate(edges):
+        if is_car_only(data):
+            continue
         zone_score = score_map[zones[zone_idx[i]].dong_code]
         road_score = road_safety_score(data, period, dead_end=u in dead_ends or v in dead_ends)
         local_score = local_scores[i] if local_scores is not None else zone_score
@@ -441,7 +443,17 @@ def _build_scored_graph(
                 simple[u][v].update(data, edge_score=score, safety_cost=cost)
         else:
             simple.add_edge(u, v, **data, edge_score=score, safety_cost=cost)
+    _keep_largest_walk_network(simple)
     return simple
+
+
+def _keep_largest_walk_network(graph: nx.DiGraph) -> None:
+    """차도 구간을 빼면 거기로만 닿던 노드가 고립된다. 출발·도착점이 그런 노드에 붙으면 경로가
+    없다고 나오므로, 서로 걸어서 이어지는 가장 큰 도로망만 남긴다(방금 만든 그래프라 제자리 수정)."""
+    if graph.number_of_nodes() == 0:
+        return
+    main = max(nx.weakly_connected_components(graph), key=len)
+    graph.remove_nodes_from([n for n in graph.nodes if n not in main])
 
 
 # (graph 객체 id, period) -> 이미 안전점수를 배정하고 단순화한 그래프.
@@ -474,11 +486,26 @@ def _get_scored_graph(
         return simple
 
 
+def _edge_points(graph: nx.DiGraph, u: int, v: int) -> list[tuple[float, float]]:
+    """u→v 구간의 실제 도로 모양. osmnx가 합친 간선은 geometry에 굽은 모양을 담고 있어서,
+    노드만 이으면 굽은 길을 가로질러(건물·차도 위로) 그리게 된다. 역방향 간선은 좌표가 반대일 수 있다."""
+    start = (graph.nodes[u]["y"], graph.nodes[u]["x"])
+    end = (graph.nodes[v]["y"], graph.nodes[v]["x"])
+    geometry = graph[u][v].get("geometry")
+    if geometry is None:
+        return [start, end]
+    coords = [(lat, lng) for lng, lat in geometry.coords]
+    if math.dist(coords[0], start) > math.dist(coords[-1], start):
+        coords.reverse()
+    return [start, *coords[1:-1], end]
+
+
 def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
-    points = [(graph.nodes[n]["y"], graph.nodes[n]["x"]) for n in path]
+    points = [(graph.nodes[path[0]]["y"], graph.nodes[path[0]]["x"])]
     total_length = 0.0
     weighted_score = 0.0
     for u, v in zip(path[:-1], path[1:]):
+        points.extend(_edge_points(graph, u, v)[1:])
         edge = graph[u][v]
         total_length += edge["length"]
         weighted_score += edge["length"] * edge["edge_score"]
@@ -646,9 +673,11 @@ def build_route_artifact(
             graph, zones, score_map, zone_index, period, facilities
         )
 
-    node_ids = list(graph.nodes)
+    # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
+    walk_graph = graph_by_period["day"]
+    node_ids = list(walk_graph.nodes)
     node_points = np.array(
-        [(graph.nodes[node_id]["y"], graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
+        [(walk_graph.nodes[node_id]["y"], walk_graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
     )
     return RouteArtifact(
         version=version,

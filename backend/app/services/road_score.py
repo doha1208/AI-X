@@ -65,6 +65,26 @@ def _sidewalk_adjust(raw: Any) -> float:
     return bonus if values & _SIDEWALK_YES else 0.0
 
 
+# 보행자를 차도로 안내하게 되는 구간. OSM 도보망 필터(osmnx "walk")는 자동차전용도로 태그가
+# 빠진 간선도로·램프·지하차도까지 남기므로 여기서 한 번 더 거른다.
+_CAR_ONLY_HIGHWAYS = {"trunk", "trunk_link", "primary_link", "busway"}
+_CAR_ROADS = {"trunk", "primary", "secondary", "tertiary"}
+
+
+def is_car_only(tags: dict[str, Any]) -> bool:
+    """걸어서 다니면 안 되는(또는 인도가 없는 차도) 구간인지. 인도가 있다고 표시됐으면 걸을 수 있다고 본다."""
+    sidewalk = set(_values(tags.get("sidewalk")))
+    if sidewalk & _SIDEWALK_YES:
+        return False
+    highways = set(_values(tags.get("highway")))
+    if highways & _CAR_ONLY_HIGHWAYS:
+        return True
+    if not {h.removesuffix("_link") for h in highways} & _CAR_ROADS:
+        return False
+    # 큰길의 지하차도, 인도가 없다고 표시된 큰길
+    return "yes" in _values(tags.get("tunnel")) or bool(sidewalk & _SIDEWALK_NO)
+
+
 def road_safety_score(tags: dict[str, Any], period: Period, dead_end: bool = False) -> float:
     score = _highway_score(tags.get("highway"))
     score += _lit_adjust(tags.get("lit"), period)
