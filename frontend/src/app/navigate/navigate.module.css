@@ -1,0 +1,892 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+.stage {
+  position: relative;
+  height: calc(100dvh - 64px);
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.card {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+
+/* ---- 상단 방향 안내 카드 ---- */
+
+.turnCard {
+  composes: card;
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(520px, calc(100% - 32px));
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  transform: translateX(-50%);
+}
+
+.turnIcon {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: #fff;
+}
+
+.turnIconError {
+  background: var(--danger);
+}
+
+.mirror {
+  transform: scaleX(-1);
+}
+
+.turnText {
+  flex: 1;
+  min-width: 0;
+}
+
+.turnTitle {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.turnAction {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand);
+}
+
+.turnSub {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.soundButton,
+.retryButton {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.soundButton {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+}
+
+.soundButtonOpen {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+/* 음성 안내 설정: 방향 안내 카드 바로 아래 오른쪽에 붙는다. */
+.voicePanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 280px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+
+.voiceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.voiceTitle {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border: none;
+  border-radius: 13px;
+  background: var(--border);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switchOn {
+  background: var(--brand);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+
+.switchOn .switchKnob {
+  transform: translateX(18px);
+}
+
+.volumeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.volumeSlider {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.volumeSlider:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.volumeValue {
+  width: 38px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+}
+
+.previewButton {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.previewButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.retryButton {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rerouting {
+  position: absolute;
+  top: 112px;
+  left: 50%;
+  z-index: 20;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #fff4d6;
+  color: #8a5a00;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  transform: translateX(-50%);
+}
+
+/* ---- 왼쪽 현재 구간 안전도 ---- */
+
+.zoneCard {
+  composes: card;
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 15;
+  width: 180px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+}
+
+.zoneLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.zoneScore {
+  margin-top: 4px;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.zoneScore small {
+  margin-left: 2px;
+  font-size: 14px;
+}
+
+.zoneName {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.meter {
+  height: 6px;
+  margin-top: 10px;
+  border-radius: 3px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: currentColor;
+}
+
+.toneSafe {
+  color: var(--safe);
+}
+
+.toneCaution {
+  color: #b7791f;
+}
+
+.toneWarning {
+  color: var(--warning);
+}
+
+/* ---- 오른쪽 버튼 묶음 ---- */
+
+.controls {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  z-index: 20;
+  transform: translateY(-50%);
+}
+
+.sideButton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.sideButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sos {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+/* ---- 하단 남은 시간·거리 패널 ---- */
+
+.bottomPanel {
+  composes: card;
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
+  padding: 16px 20px;
+  border-radius: var(--radius-lg);
+}
+
+.stats {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.statLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.statValue {
+  margin-top: 2px;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.statValue small {
+  margin-left: 2px;
+  font-size: 15px;
+}
+
+.statDivider {
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+}
+
+.endButton {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 14px 20px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.endButton:hover {
+  background: var(--danger-bg);
+}
+
+.progressLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.progress {
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--brand);
+  transition: width 0.4s;
+}
+
+/* ---- 경로 선택(안전 경로 vs 최단 경로) ---- */
+
+.choicePanel {
+  composes: card;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(640px, calc(100% - 32px));
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  transform: translateX(-50%);
+}
+
+.choiceHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.choiceTitle {
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.choiceSub {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.choiceStatus {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.choiceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.choiceCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.choiceCard:hover {
+  border-color: var(--text-faint);
+}
+
+.choiceCardSelected,
+.choiceCardSelected:hover {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  box-shadow: var(--shadow-card);
+}
+
+.choiceSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choiceHint {
+  margin-top: 4px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.choiceStart {
+  padding: 11px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--brand);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.choiceStart:hover {
+  background: var(--brand-dark);
+}
+
+.choiceKind {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.swatchLine,
+.swatchDash {
+  width: 22px;
+  border-top: 4px solid var(--brand);
+  border-radius: 2px;
+}
+
+.swatchDash {
+  border-top: 3px dashed #9aa0a6;
+}
+
+.recommendTag {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+}
+
+.choiceTime {
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.choiceTime small {
+  margin-left: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.choiceMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.choiceNote {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #8a5a00;
+}
+
+/* ---- 가운데 카드(목적지 선택·권한·도착) ---- */
+
+.centerCard {
+  composes: card;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: min(440px, calc(100% - 32px));
+  padding: 28px 24px;
+  border-radius: var(--radius-lg);
+  transform: translate(-50%, -50%);
+}
+
+.stateIcon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 4px;
+  border-radius: 50%;
+  background: var(--surface-muted);
+}
+
+.centerTitle {
+  font-size: 22px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.centerSub {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.centerActions {
+  display: flex;
+  gap: 8px;
+}
+
+.centerActions > * {
+  flex: 1;
+}
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.searchRow:focus-within {
+  border-color: var(--brand);
+  background: var(--surface);
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.startButton,
+.ghostButton {
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.startButton {
+  border: none;
+  background: var(--brand);
+  color: #fff;
+}
+
+.startButton:hover {
+  background: var(--brand-dark);
+}
+
+.ghostButton {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pickChip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--brand-light);
+  border-radius: var(--radius-sm);
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* 지도에서 선택하는 동안: 가운데 카드를 숨기고 안내 문구 + 되돌리기 버튼만 띄운다. */
+.pickHint {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border: 1px solid var(--brand);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--brand);
+  font-size: 14px;
+  font-weight: 800;
+  white-space: nowrap;
+  box-shadow: var(--shadow-card);
+  transform: translateX(-50%);
+}
+
+.pickCancel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  cursor: pointer;
+}
+
+.pickCancel:hover {
+  background: var(--surface-muted);
+}
+
+.pickConfirm {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 22;
+  transform: translateX(-50%);
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recent {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.recentTitle {
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.recentList {
+  list-style: none;
+}
+
+.recentItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recentItem:hover {
+  background: var(--surface-muted);
+}
+
+.recentItem svg {
+  flex-shrink: 0;
+  color: var(--warning);
+}
+
+.toast {
+  position: absolute;
+  bottom: 170px;
+  left: 50%;
+  z-index: 40;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: var(--text);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  transform: translateX(-50%);
+}
+
+.soundButton:focus-visible,
+.switch:focus-visible,
+.volumeSlider:focus-visible,
+.previewButton:focus-visible,
+.retryButton:focus-visible,
+.sideButton:focus-visible,
+.endButton:focus-visible,
+.startButton:focus-visible,
+.ghostButton:focus-visible,
+.pickChip:focus-visible,
+.pickCancel:focus-visible,
+.choiceSelect:focus-visible,
+.choiceStart:focus-visible,
+.recentItem:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .stage {
+    height: calc(100dvh - 64px - 56px - env(safe-area-inset-bottom));
+  }
+
+  .turnCard {
+    top: 12px;
+  }
+
+  .pickHint {
+    top: 72px;
+  }
+
+  .pickCancel {
+    top: 12px;
+    right: 12px;
+  }
+
+  .turnTitle {
+    font-size: 22px;
+  }
+
+  .zoneCard {
+    top: 104px;
+    left: 12px;
+    width: 150px;
+    padding: 12px;
+  }
+
+  .zoneScore {
+    font-size: 26px;
+  }
+
+  .controls {
+    top: auto;
+    right: 12px;
+    bottom: 190px;
+    transform: none;
+  }
+
+  .bottomPanel {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    padding: 14px 16px;
+  }
+
+  .statValue {
+    font-size: 22px;
+  }
+
+  .endButton {
+    padding: 12px 14px;
+  }
+}
