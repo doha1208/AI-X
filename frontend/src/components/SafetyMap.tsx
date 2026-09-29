@@ -28,6 +28,8 @@ type Props = {
   bells?: LatLng[];
   center?: LatLng;
   myLocation?: LatLng;
+  // 있으면 내 위치 둘레에 GPS 오차 범위 원을 그린다(미터). 길안내 탭만 넘긴다.
+  accuracyRadiusM?: number | null;
   routePath?: LatLng[];
   comparePath?: LatLng[];
   labels?: MapLabel[];
@@ -121,6 +123,7 @@ export function SafetyMap({
   bells = EMPTY,
   center = DEFAULT_CENTER,
   myLocation,
+  accuracyRadiusM,
   routePath,
   comparePath,
   labels = EMPTY,
@@ -387,6 +390,21 @@ export function SafetyMap({
 
     labels.forEach((label) => addOverlay(label.position, labelElement(label), 9, 1.4));
 
+    if (myLocation && accuracyRadiusM) {
+      const circle = new kakao.maps.Circle({
+        center: new kakao.maps.LatLng(myLocation.lat, myLocation.lng),
+        radius: accuracyRadiusM,
+        strokeWeight: 1,
+        strokeColor: "#4285f4",
+        strokeOpacity: 0.5,
+        fillColor: "#4285f4",
+        fillOpacity: 0.12,
+        zIndex: 1,
+      });
+      circle.setMap(map);
+      overlaysRef.current.push(circle);
+    }
+
     if (myLocation) {
       const marker = followLocation
         ? circleElement(30, "#2e7d32", WALKER_SVG)
@@ -394,7 +412,7 @@ export function SafetyMap({
       if (!followLocation) marker.style.boxShadow = "0 0 0 3px rgba(66,133,244,0.35), 0 1px 4px rgba(0,0,0,0.3)";
       addOverlay(myLocation, marker, 10);
     }
-  }, [loaded, zones, rankedZones, bells, routePath, comparePath, labels, myLocation, followLocation, focusZone, boundaries]);
+  }, [loaded, zones, rankedZones, bells, routePath, comparePath, labels, myLocation, accuracyRadiusM, followLocation, focusZone, boundaries]);
 
   // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
   useEffect(() => {

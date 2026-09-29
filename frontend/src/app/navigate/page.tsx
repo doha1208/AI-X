@@ -4,7 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { routeSafety, type RoutePeriod, type SafetyZone } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
-import { acceptFix, GEO_OPTIONS, toFix, type Fix } from "@/lib/locationFilter";
+import {
+  acceptFix,
+  accuracyCircleRadius,
+  accuracyLevel,
+  GEO_OPTIONS,
+  toFix,
+  type AccuracyLevel,
+  type Fix,
+} from "@/lib/locationFilter";
 import { loadHandoff } from "@/lib/guideHandoff";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import {
@@ -27,6 +35,7 @@ import {
   type GuideOption,
   type TurnDirection,
 } from "@/lib/routeGuidance";
+import { addNotification } from "@/lib/notifications";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { useWakeLock } from "@/lib/useWakeLock";
@@ -100,6 +109,9 @@ function NavigatePage({ search }: { search: string }) {
     placeFromQuery(search, "end")
   );
   const [position, setPosition] = useState<LatLng | null>(null);
+  // GPS 오차(미터). 오차 범위 원과 "위치 오차가 커요" 경고에 쓴다.
+  const [accuracyM, setAccuracyM] = useState<number | null>(null);
+  const [accuracyWarning, setAccuracyWarning] = useState<AccuracyLevel>("ok");
   // 목적지를 정하면 먼저 안전 경로·최단 경로를 보여주고(choice), 고른 경로(mode)로 안내한다(guided).
   // 길찾기 탭에서 이미 경로를 골라 넘어온 경우(?mode=safe|shortest)에는 고르는 단계를 건너뛴다.
   const [choice, setChoice] = useState<{ options: GuideOption[]; safetyWeighted: boolean; period: RoutePeriod } | null>(
@@ -187,6 +199,8 @@ function NavigatePage({ search }: { search: string }) {
     lastFixRef.current = fix;
     const here = { lat: fix.lat, lng: fix.lng };
     setPosition(here);
+    setAccuracyM(fix.accuracy);
+    setAccuracyWarning((previous) => accuracyLevel(fix.accuracy, previous));
     setDenied(false);
     if (!destination || arrived || routeError || inFlightRef.current) return;
     if (!mode) {
@@ -267,6 +281,13 @@ function NavigatePage({ search }: { search: string }) {
     // 같은 주의 구역 안에서 위치가 갱신될 때마다 다시 말하지 않도록 동 코드가 바뀔 때만 반응한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cautionZoneCode, settings.voiceOn]);
+
+  // 소리를 못 들었어도 나중에 알림 목록에서 볼 수 있게 남긴다. 음성 설정이 바뀔 때 다시 쌓이지 않도록 동 코드에만 반응한다.
+  const cautionZoneName = guidance?.zone?.dong_name;
+  useEffect(() => {
+    if (cautionZoneCode) addNotification("caution", `주의 구역에 들어섰어요: ${cautionZoneName}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cautionZoneCode]);
 
   const announcedNearArrivalRef = useRef(false);
   const onRouteOnceRef = useRef(false);
@@ -430,6 +451,7 @@ function NavigatePage({ search }: { search: string }) {
           bells={phase === "guiding" ? routeBells : undefined}
           center={displayLocation}
           myLocation={displayLocation}
+          accuracyRadiusM={accuracyM === null ? null : accuracyCircleRadius(accuracyM)}
           routePath={phase === "guiding" ? guided?.points : phase === "select" ? previewOption?.points : undefined}
           comparePath={phase === "select" ? otherOption?.points : undefined}
           labels={labels}
@@ -550,6 +572,17 @@ function NavigatePage({ search }: { search: string }) {
             </section>
 
             {rerouting && <p className={styles.rerouting}>경로를 벗어나 다시 찾는 중...</p>}
+
+            {!rerouting && accuracyWarning !== "ok" && accuracyM !== null && (
+              <p
+                className={`${styles.accuracyWarning} ${accuracyWarning === "poor" ? styles.accuracyPoor : ""}`}
+                role="status"
+              >
+                {accuracyWarning === "poor"
+                  ? `위치 오차가 아주 커요(약 ${Math.round(accuracyM / 10) * 10}m). 안내가 틀릴 수 있으니 하늘이 트인 곳으로 가보세요.`
+                  : `위치 오차가 커요(약 ${Math.round(accuracyM / 10) * 10}m). 지도의 파란 원 안 어딘가에 있어요.`}
+              </p>
+            )}
 
             {guidance?.zone && zoneLevel && (
               <section className={styles.zoneCard} aria-label="현재 구간 안전도">

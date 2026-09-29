@@ -228,6 +228,28 @@
   transform: translateX(-50%);
 }
 
+.accuracyWarning {
+  position: absolute;
+  top: 112px;
+  left: 50%;
+  z-index: 20;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: #e8f0fe;
+  color: #174ea6;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: var(--shadow-card);
+  transform: translateX(-50%);
+}
+
+.accuracyPoor {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 /* ---- 왼쪽 현재 구간 안전도 ---- */
 
 .zoneCard {

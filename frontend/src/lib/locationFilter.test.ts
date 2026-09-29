@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptFix, type Fix } from "./locationFilter";
+import { acceptFix, accuracyCircleRadius, accuracyLevel, type Fix } from "./locationFilter";
 
 // 위도 0.001도 ≈ 111m
 const fix = (lat: number, accuracy: number, time: number): Fix => ({ lat, lng: 127, accuracy, time });
@@ -28,5 +28,35 @@ describe("acceptFix", () => {
 
   it("accepts a far fix after the last accepted one has gone stale", () => {
     expect(acceptFix(fix(37.5, 10, 0), fix(37.52, 10, 30000))).toBe(true);
+  });
+});
+
+describe("accuracyCircleRadius", () => {
+  it("draws nothing when the error is smaller than the marker itself", () => {
+    expect(accuracyCircleRadius(5)).toBeNull();
+    expect(accuracyCircleRadius(14.9)).toBeNull();
+  });
+
+  it("rounds up to 10m steps so GPS jitter does not redraw the map", () => {
+    expect(accuracyCircleRadius(15)).toBe(20);
+    expect(accuracyCircleRadius(20)).toBe(20);
+    expect(accuracyCircleRadius(21)).toBe(30);
+    expect(accuracyCircleRadius(87)).toBe(90);
+  });
+});
+
+describe("accuracyLevel", () => {
+  it("is ok below 50m, low from 50m, poor from 100m", () => {
+    expect(accuracyLevel(49)).toBe("ok");
+    expect(accuracyLevel(50)).toBe("low");
+    expect(accuracyLevel(99)).toBe("low");
+    expect(accuracyLevel(100)).toBe("poor");
+  });
+
+  it("does not flicker: a raised warning clears only after a clear improvement", () => {
+    expect(accuracyLevel(45, "low")).toBe("low");
+    expect(accuracyLevel(39, "low")).toBe("ok");
+    expect(accuracyLevel(85, "poor")).toBe("poor");
+    expect(accuracyLevel(75, "poor")).toBe("low");
   });
 });
