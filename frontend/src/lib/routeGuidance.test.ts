@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { RouteResult } from "./api";
-import { formatDistance, guideOptions, nextTurn, progressAlong, walkingMinutes, zoneSummary } from "./routeGuidance";
+import {
+  formatDistance,
+  guideOptions,
+  nearestPointOnPath,
+  nextTurn,
+  progressAlong,
+  walkingMinutes,
+  zoneSummary,
+} from "./routeGuidance";
 
 const zone = (code: string, score: number) => ({ dong_code: code, dong_name: code, lat: 37.5, lng: 127, safety_score: score });
 
@@ -46,6 +54,7 @@ describe("routeGuidance", () => {
       zones_passed: [zone("A", 80)],
       route_points: safePoints,
       mode: "safety_weighted",
+      period: "day",
       alternatives: [{ route_points: safePoints, safety_score: 70, distance_m: 222, zones_passed: [zone("A", 80)] }],
       shortest_route_points: [start, corner],
       shortest_zones_passed: [zone("A", 80), zone("B", 30)],
@@ -64,6 +73,7 @@ describe("routeGuidance", () => {
       zones_passed: [],
       route_points: [start, corner],
       mode: "tmap",
+      period: "day",
       alternatives: [],
       shortest_route_points: null,
     };
@@ -73,6 +83,15 @@ describe("routeGuidance", () => {
   it("summarises the dongs a route passes with the same rule for every option", () => {
     expect(zoneSummary([zone("A", 80), zone("B", 30), zone("C", 40)])).toEqual({ average: 50, cautionCount: 1 });
     expect(zoneSummary([])).toEqual({ average: null, cautionCount: 0 });
+  });
+
+  it("snaps to the closest point on a segment, not just the nearest vertex", () => {
+    // start(0,0)에서 north1(111m 북쪽)로 가는 직선 구간 중간, 동쪽으로 약 10m 벗어난 위치.
+    const here = { lat: 37.5005, lng: 127.0001 };
+    const { point, distanceM } = nearestPointOnPath([start, north1], here);
+
+    expect(distanceM).toBeLessThan(15); // 두 꼭짓점까지의 거리(약 60m)보다 훨씬 가까워야 한다
+    expect(point.lng).toBeCloseTo(127.0, 3); // 선분(경도 127.0) 위로 투영된다
   });
 
   it("formats walking time and distance for display", () => {

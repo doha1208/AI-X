@@ -9,6 +9,10 @@ const WALK_METERS_PER_MIN = 67;
 // ponytail: 한 꼭짓점의 꺾임만 본다 — 여러 짧은 구간에 걸쳐 도는 회전은 놓칠 수 있다.
 const TURN_THRESHOLD_DEG = 45;
 
+// 두 지점의 오차(위경도 몇백 m 안)에서는 위도 1도와 경도 1도 거리 비율이 이 값 정도로
+// 고정된 것처럼 취급해도 근접점 계산 오차가 무시할 만큼 작다 — 서울·경기 위도(37.5도) 기준.
+const LNG_SCALE = Math.cos((37.5 * Math.PI) / 180);
+
 export type TurnDirection = "left" | "right" | "arrive";
 export type Progress = { index: number; offRouteM: number; remainingM: number; totalM: number };
 export type NextTurn = { direction: TurnDirection; distanceM: number; vertex: number };
@@ -50,6 +54,28 @@ export function progressAlong(points: LatLng[], here: LatLng): Progress {
   });
   const remainingM = offRouteM + pathLength(points.slice(index));
   return { index, offRouteM, remainingM, totalM: pathLength(points) };
+}
+
+// 경로 위 실제로 가장 가까운 지점(꼭짓점이 아니라 선분 위 투영점)을 찾는다. 내 위치 마커를
+// 경로에 붙여 보여줄 때(GPS 떨림 완화) 씀 — 꼭짓점만 보면 직선 구간 중간에서 튀어 보인다.
+export function nearestPointOnPath(points: LatLng[], here: LatLng): { point: LatLng; distanceM: number } {
+  if (points.length === 0) return { point: here, distanceM: 0 };
+  const toXY = (p: LatLng) => ({ x: (p.lng - here.lng) * LNG_SCALE, y: p.lat - here.lat });
+  const toLatLng = (x: number, y: number): LatLng => ({ lat: here.lat + y, lng: here.lng + x / LNG_SCALE });
+
+  let best = { point: points[0], distanceM: haversineMeters(here, points[0]) };
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = toXY(points[i]);
+    const b = toXY(points[i + 1]);
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const lenSq = abx * abx + aby * aby;
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, (-a.x * abx + -a.y * aby) / lenSq));
+    const candidate = toLatLng(a.x + abx * t, a.y + aby * t);
+    const distanceM = haversineMeters(here, candidate);
+    if (distanceM < best.distanceM) best = { point: candidate, distanceM };
+  }
+  return best;
 }
 
 export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): NextTurn {

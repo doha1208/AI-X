@@ -21,12 +21,15 @@ export type SafetyZone = {
 };
 
 export type RouteMode = "safety_weighted" | "tmap" | "straight_line";
+export type RoutePeriod = "day" | "night";
 
 export type RouteResult = {
   safety_score: number;
   zones_passed: SafetyZone[];
   route_points: { lat: number; lng: number }[];
   mode: RouteMode;
+  // timeMode가 자동일 때 실제로 어느 시간대 가중치가 쓰였는지 — "야간 기준" 배지에 쓴다.
+  period: RoutePeriod;
   alternatives: RouteAlternative[];
   shortest_route_points: { lat: number; lng: number }[] | null;
   shortest_zones_passed?: SafetyZone[] | null;
