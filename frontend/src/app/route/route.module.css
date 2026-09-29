@@ -1,0 +1,395 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  height: calc(100dvh - 64px);
+  min-height: 520px;
+}
+
+/* ---- 왼쪽 사이드바 ---- */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 16px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.sidebarHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.linkButton {
+  padding: 4px;
+  border: none;
+  background: none;
+  color: var(--brand);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fields {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 44px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.field:focus-within {
+  border-color: var(--brand);
+  background: var(--surface);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dotStart {
+  border: 2px solid var(--brand);
+}
+
+.dotEnd {
+  background: var(--warning);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.pickButton {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pickButton:hover,
+.pickButtonActive {
+  background: var(--brand-light);
+  color: var(--brand);
+}
+
+.swapButton {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+
+.swapButton:hover {
+  color: var(--brand);
+}
+
+.primaryButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 4px 12px rgba(47, 107, 58, 0.25);
+  cursor: pointer;
+}
+
+.primaryButton:hover {
+  background: var(--brand-dark);
+}
+
+.primaryButton:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.hint,
+.empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.empty {
+  padding: 8px 4px;
+}
+
+.error {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ---- 경로 카드 ---- */
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.resultsLabel {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.fallback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: #fff4d6;
+  color: #8a5a00;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.routeCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.routeCardActive {
+  border: 2px solid var(--brand);
+  box-shadow: var(--shadow-card);
+}
+
+.routeCardMain {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 16px;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+div.routeCardMain {
+  cursor: default;
+}
+
+.tag {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tagBest {
+  top: 0;
+  right: 0;
+  border-radius: 0 0 0 10px;
+  background: var(--brand);
+  color: #fff;
+}
+
+.routeTime {
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.routeTime small {
+  margin-left: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.routeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.scoreBadge {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.scoreSafe {
+  background: #e3f2e5;
+  color: var(--safe);
+}
+
+.scoreCaution {
+  background: #fff4d6;
+  color: #b7791f;
+}
+
+.scoreWarning {
+  background: var(--danger-bg);
+  color: var(--warning);
+}
+
+.passed {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.routeCardDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--brand);
+}
+
+/* ---- 지도 ---- */
+
+.mapArea {
+  position: relative;
+  min-width: 0;
+}
+
+.legend {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+
+.pickConfirm {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  z-index: 20;
+  transform: translateX(-50%);
+}
+
+.controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10;
+}
+
+.linkButton:focus-visible,
+.pickButton:focus-visible,
+.swapButton:focus-visible,
+.primaryButton:focus-visible,
+.routeCardMain:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ---- 휴대폰: 입력·결과 위, 지도 아래 ---- */
+
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 60vh;
+    height: auto;
+    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+
+  .legend {
+    display: none;
+  }
+}
