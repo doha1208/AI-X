@@ -81,6 +81,8 @@
 
 .menu {
   position: fixed;
+  top: var(--menu-y);
+  left: var(--menu-x);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -100,7 +102,8 @@
 }
 
 .menuItem {
-  padding: 9px 10px;
+  min-height: 44px;
+  padding: 10px;
   border: none;
   border-radius: var(--radius-sm);
   background: none;
@@ -152,11 +155,40 @@
 
 .pickPrimary,
 .pickSecondary {
+  min-height: 44px;
   padding: 11px 14px;
   border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 800;
   cursor: pointer;
+}
+
+@media (max-width: 767px) {
+  .menu {
+    top: auto;
+    right: 12px;
+    bottom: calc(var(--mobile-navigation-height) + 12px);
+    left: 12px;
+    max-height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height) - 24px);
+    overflow-y: auto;
+    border-radius: var(--radius-md);
+  }
+
+  .legend {
+    box-shadow: none;
+  }
+
+  .controlButton,
+  .menuItem,
+  .pickPrimary,
+  .pickSecondary {
+    touch-action: manipulation;
+  }
+
+  .pickConfirm {
+    max-height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height) - 24px);
+    overflow-y: auto;
+  }
 }
 
 .pickPrimary {

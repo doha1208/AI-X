@@ -144,7 +144,10 @@ export function MapContextMenu({ menu, items, onClose }: { menu: MenuState; item
     <div
       className={styles.menu}
       role="menu"
-      style={{ left: Math.min(menu.x, window.innerWidth - 250), top: Math.min(menu.y, window.innerHeight - 200) }}
+      style={{
+        "--menu-x": `${Math.max(8, Math.min(menu.x, window.innerWidth - 250))}px`,
+        "--menu-y": `${Math.max(8, Math.min(menu.y, window.innerHeight - 200))}px`,
+      } as React.CSSProperties}
       onClick={(e) => e.stopPropagation()}
     >
       <p className={styles.menuAddress}>{menu.loading ? "주소를 찾는 중..." : label}</p>

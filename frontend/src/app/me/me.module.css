@@ -226,9 +226,9 @@
   outline-offset: 2px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .shell {
-    padding: 32px 16px calc(96px + env(safe-area-inset-bottom));
+    padding: 32px 16px calc(var(--mobile-navigation-height) + 32px);
   }
 
   .recentGrid {

@@ -9,12 +9,19 @@ export type KakaoLatLngBounds = {
   extend(position: KakaoLatLng): void;
 };
 
+export type KakaoPoint = { x: number; y: number };
+
+export type KakaoMapProjection = {
+  coordsFromContainerPoint(point: KakaoPoint): KakaoLatLng;
+};
+
 export type KakaoMap = {
   relayout(): void;
   panTo(position: KakaoLatLng): void;
   getLevel(): number;
   setLevel(level: number): void;
   setBounds(bounds: KakaoLatLngBounds): void;
+  getProjection(): KakaoMapProjection;
 };
 
 export type KakaoOverlay = {
@@ -38,6 +45,7 @@ export type KakaoSdk = {
     Map: new (container: HTMLElement, options: { center: KakaoLatLng; level: number }) => KakaoMap;
     LatLng: new (lat: number, lng: number) => KakaoLatLng;
     LatLngBounds: new () => KakaoLatLngBounds;
+    Point: new (x: number, y: number) => KakaoPoint;
     CustomOverlay: new (options: { position: KakaoLatLng; content: HTMLElement; yAnchor: number; zIndex: number }) => KakaoOverlay;
     InfoWindow: new (options: { position: KakaoLatLng; content: string; removable: boolean }) => { open(map: KakaoMap): void; close(): void };
     Polygon: new (options: { path: KakaoLatLng[][]; strokeWeight: number; strokeColor: string; strokeOpacity: number; fillColor: string; fillOpacity: number; zIndex: number }) => KakaoOverlay;

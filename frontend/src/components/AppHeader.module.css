@@ -43,6 +43,9 @@
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 14px;
   border-radius: var(--radius-sm);
   font-size: 15px;
@@ -51,6 +54,10 @@
   text-decoration: none;
   white-space: nowrap;
   transition: color 0.15s, background 0.15s;
+}
+
+.tabIcon {
+  display: none;
 }
 
 .tab:hover {
@@ -109,9 +116,12 @@
 }
 
 /* 휴대폰에서는 탭을 화면 아래로 내려 한 손으로 누르기 쉽게 한다. */
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .header {
+    box-sizing: border-box;
     grid-template-columns: 1fr auto;
+    height: var(--app-header-height);
+    padding: env(safe-area-inset-top) 12px 0;
   }
 
   .tabs {
@@ -120,16 +130,63 @@
     bottom: 0;
     left: 0;
     gap: 0;
+    height: var(--mobile-navigation-height);
     padding-bottom: env(safe-area-inset-bottom);
     background: var(--surface);
     border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 18px rgb(0 0 0 / 6%);
   }
 
   .tab {
+    flex-direction: column;
+    gap: 3px;
     flex: 1;
-    padding: 14px 4px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 7px 2px 5px;
     border-radius: 0;
-    font-size: 13px;
+    font-size: 11px;
     text-align: center;
+    touch-action: manipulation;
+  }
+
+  .tabIcon {
+    display: block;
+  }
+
+  .tabActive {
+    background: var(--brand-light);
+  }
+
+  .brand {
+    gap: 7px;
+    min-height: 44px;
+    font-size: 17px;
+  }
+
+  .brandIcon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bellButton {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .header {
+    padding: 0 14px;
+  }
+
+  .tab {
+    padding-inline: 10px;
+    font-size: 14px;
   }
 }
