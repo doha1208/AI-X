@@ -23,6 +23,7 @@ import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapControls, PickConfirm, usePendingPick } from "@/components/MapOverlays";
 import { withSearch } from "@/components/WithSearch";
@@ -40,6 +41,7 @@ import {
   TurnRightIcon,
 } from "@/components/icons";
 import styles from "./navigate.module.css";
+import type { SheetSnap } from "@/lib/bottomSheet";
 
 const ARRIVAL_RADIUS_M = 30;
 // 가장 가까운 경로 지점에서 이보다 멀어지면 경로를 벗어난 것으로 보고 다시 찾는다.
@@ -77,8 +79,10 @@ function NavigatePage({ search }: { search: string }) {
   const user = useSessionUser();
   const { location, denied: locationDenied } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState(loadSettings);
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
   const [recent] = useState(() => loadRecent("destinations"));
   const [destination, setDestination] = useState<Place | null>(() =>
     placeFromQuery(search, "end")
@@ -141,6 +145,7 @@ function NavigatePage({ search }: { search: string }) {
       const found = guideOptions(result);
       if (purpose === "options") {
         setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted" });
+        setSheetSnap("half");
       } else {
         const next = found.find((option) => option.kind === mode) ?? found[0];
         if (mode === "shortest" && next.kind !== "shortest") {
@@ -250,6 +255,7 @@ function NavigatePage({ search }: { search: string }) {
   function chooseOption(option: GuideOption) {
     setMode(option.kind);
     setGuided(option);
+    setSheetSnap("collapsed");
     lastFetchAtRef.current = Date.now();
   }
 
@@ -320,7 +326,7 @@ function NavigatePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div className={styles.stage}>
+      <div ref={stageRef} className={styles.stage}>
         <SafetyMap
           ref={mapRef}
           bells={phase === "guiding" ? routeBells : undefined}
@@ -450,8 +456,28 @@ function NavigatePage({ search }: { search: string }) {
               </section>
             )}
 
-            <section className={styles.bottomPanel}>
-              <div className={styles.stats}>
+            <AdaptiveBottomSheet
+              className={styles.bottomPanel}
+              label="길안내 정보"
+              snap={sheetSnap}
+              onSnapChange={setSheetSnap}
+              workspaceRef={stageRef}
+              summary={(
+                <div className={`${styles.stats} ${styles.mobileStats}`}>
+                  <div>
+                    <p className={styles.statLabel}>남은 시간</p>
+                    <p className={styles.statValue}>{guidance ? walkingMinutes(remainingM) : "-"}<small>분</small></p>
+                  </div>
+                  <div className={styles.statDivider} />
+                  <div>
+                    <p className={styles.statLabel}>거리</p>
+                    <p className={styles.statValue}>{guidance ? formatDistance(remainingM) : "-"}</p>
+                  </div>
+                </div>
+              )}
+            >
+              <div className={styles.bottomPanelContent}>
+              <div className={`${styles.stats} ${styles.desktopStats}`}>
                 <div>
                   <p className={styles.statLabel}>남은 시간</p>
                   <p className={styles.statValue}>
@@ -476,12 +502,39 @@ function NavigatePage({ search }: { search: string }) {
               <div className={styles.progress}>
                 <span className={styles.progressFill} style={{ width: `${progressPct}%` }} />
               </div>
-            </section>
+              {guidance?.zone && zoneLevel && (
+                <div className={styles.mobileZoneDetail} aria-label="현재 구간 안전 안내">
+                  <span>현재 구간</span>
+                  <strong className={zoneLevel.tone}>{guidance.zone.dong_name} · {guidance.zone.safety_score.toFixed(0)}점</strong>
+                  <span className={zoneLevel.tone}>{zoneLevel.label} 구역을 통과하고 있어요</span>
+                </div>
+              )}
+              <div className={styles.mobileGuidanceActions}>
+                <button type="button" className={styles.endButton} onClick={endGuidance}>
+                  <CloseIcon size={16} />
+                  안내 종료
+                </button>
+              </div>
+              </div>
+            </AdaptiveBottomSheet>
           </>
         )}
 
         {phase === "select" && (
-          <section className={styles.choicePanel} aria-label="안내 경로 선택">
+          <AdaptiveBottomSheet
+            className={styles.choicePanel}
+            label="안내 경로 선택"
+            snap={sheetSnap}
+            onSnapChange={setSheetSnap}
+            workspaceRef={stageRef}
+            summary={(
+              <div className={styles.choiceSummary}>
+                <span>목적지 · {destination?.label}</span>
+                <strong>{previewOption ? `${walkingMinutes(previewOption.distanceM)}분 · ${formatDistance(previewOption.distanceM)}` : "경로 찾는 중"}</strong>
+              </div>
+            )}
+          >
+          <div className={styles.choicePanelContent}>
             <div className={styles.choiceHeader}>
               <div>
                 <h1 className={styles.choiceTitle}>어떤 길로 안내할까요?</h1>
@@ -562,7 +615,8 @@ function NavigatePage({ search }: { search: string }) {
                 )}
               </>
             )}
-          </section>
+          </div>
+          </AdaptiveBottomSheet>
         )}
 
         {phase === "choose" && picking && (
