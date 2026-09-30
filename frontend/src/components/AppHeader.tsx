@@ -2,15 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NotificationBell } from "@/components/NotificationBell";
-import { ShieldPinIcon } from "@/components/icons";
+import { HomeIcon, NavigationIcon, RouteIcon, ShieldHeartIcon, ShieldPinIcon } from "@/components/icons";
 import styles from "./AppHeader.module.css";
 
 const TABS = [
-  { href: "/", label: "안심 거주지" },
-  { href: "/route", label: "길찾기" },
-  { href: "/navigate", label: "길안내" },
-  { href: "/me", label: "내 정보" },
+  { href: "/", label: "안심 거주지", icon: HomeIcon },
+  { href: "/route", label: "길찾기", icon: RouteIcon },
+  { href: "/navigate", label: "길안내", icon: NavigationIcon },
+  { href: "/me", label: "내 정보", icon: ShieldHeartIcon },
 ];
 
 type Props = { userInitial: string };
@@ -30,6 +29,7 @@ export function AppHeader({ userInitial }: Props) {
       <nav className={styles.tabs} aria-label="주요 메뉴">
         {TABS.map((tab) => {
           const active = pathname === tab.href;
+          const Icon = tab.icon;
           return (
             <Link
               key={tab.href}
@@ -37,14 +37,14 @@ export function AppHeader({ userInitial }: Props) {
               className={`${styles.tab} ${active ? styles.tabActive : ""}`}
               aria-current={active ? "page" : undefined}
             >
-              {tab.label}
+              <Icon size={20} className={styles.tabIcon} />
+              <span>{tab.label}</span>
             </Link>
           );
         })}
       </nav>
 
       <div className={styles.actions}>
-        <NotificationBell />
         <Link href="/me" className={styles.avatar} aria-label="내 정보">
           {userInitial}
         </Link>
