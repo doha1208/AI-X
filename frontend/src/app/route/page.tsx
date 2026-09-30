@@ -76,6 +76,7 @@ function RoutePage({ search }: { search: string }) {
   const [error, setError] = useState<string | null>(null);
   const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
   const [searchExpanded, setSearchExpanded] = useState(true);
+  const [mobileEditing, setMobileEditing] = useState<Field | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const mapPick = usePendingPick();
 
@@ -140,6 +141,14 @@ function RoutePage({ search }: { search: string }) {
   function editText(field: Field, value: string) {
     setTexts((t) => ({ ...t, [field]: value }));
     setPlaces((p) => ({ ...p, [field]: null }));
+  }
+
+  async function confirmMobileEdit() {
+    if (!mobileEditing) return;
+    const place = places[mobileEditing] ?? await resolvePlace(texts[mobileEditing]);
+    if (!place) { setError("주소를 찾을 수 없어요. 정확한 주소를 입력하거나 지도에서 선택해주세요"); return; }
+    setPlace(mobileEditing, place);
+    setMobileEditing(null);
   }
 
   function swap() {
@@ -227,7 +236,28 @@ function RoutePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap}>
+      <section className={`${styles.mobileFlow} ${route ? styles.mobileFlowHidden : ""}`} aria-label="길찾기">
+        {mobileEditing ? (
+          <div className={styles.mobileEditor}>
+            <button type="button" className={styles.mobileBack} onClick={() => setMobileEditing(null)}>← 취소</button>
+            <h1>{mobileEditing === "start" ? "출발지 입력" : "도착지 입력"}</h1>
+            <input autoFocus className={styles.mobileInput} value={texts[mobileEditing]} onChange={(e) => editText(mobileEditing, e.target.value)} placeholder="주소 또는 장소를 입력하세요" />
+            <div className={styles.mobileActions}>
+              {mobileEditing === "start" && <button type="button" onClick={setStartToCurrentLocation}>현재 위치</button>}
+              <button type="button" onClick={() => { setPicking(mobileEditing); setMobileEditing(null); }}>지도에서 선택</button>
+            </div>
+            <button type="button" className={styles.primaryButton} onClick={() => void confirmMobileEdit()}>확인</button>
+          </div>
+        ) : (
+          <div className={styles.mobileIdle}>
+            <h1>길찾기</h1>
+            {fields.map(({ key, placeholder }) => <button key={key} type="button" className={styles.mobilePlaceRow} onClick={() => setMobileEditing(key)}><span>{places[key]?.label ?? placeholder}</span><b>확인</b></button>)}
+            <button type="button" className={styles.primaryButton} disabled={!places.start || !places.end || loading} onClick={() => { const form = document.createElement("form"); void handleSearch({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>); form.remove(); }}>{loading ? "경로 찾는 중..." : "경로 검색"}</button>
+          </div>
+        )}
+      </section>
+
+      <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap} data-has-route={Boolean(route)}>
         <aside className={styles.sidebar}>
           {route && !searchExpanded ? (
             <button type="button" className={styles.compactSearch} onClick={() => setSearchExpanded(true)}>

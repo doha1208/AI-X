@@ -6,6 +6,8 @@
   color: var(--text);
 }
 
+.mobileFlow { display: none; }
+
 .layout {
   display: grid;
   grid-template-columns: 380px 1fr;
@@ -445,6 +447,19 @@ div.routeCardMain {
     min-height: 0;
     overflow: hidden;
   }
+
+  .mobileFlow { display: block; min-height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height)); padding: 20px 16px; background: var(--page-bg); }
+  .mobileIdle, .mobileEditor { display: flex; flex-direction: column; gap: 12px; max-width: 520px; margin: 0 auto; }
+  .mobileIdle h1, .mobileEditor h1 { margin: 0 0 8px; font-size: 22px; }
+  .mobilePlaceRow { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font-size: 15px; text-align: left; }
+  .mobilePlaceRow b { color: var(--brand); font-size: 13px; }
+  .mobileInput { min-height: 52px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 16px; }
+  .mobileActions { display: flex; gap: 8px; }
+  .mobileActions button, .mobileBack { min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--brand-light); color: var(--brand); font-weight: 700; }
+  .mobileBack { align-self: flex-start; background: transparent; padding-left: 0; }
+  .mobileFlowHidden { display: none; }
+  .layout { display: none; }
+  .layout[data-has-route="true"] { display: block; }
 
   .sidebar {
     position: absolute;
