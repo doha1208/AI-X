@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearRouteHistory, getRouteHistory, routeSafety, setRouteHistoryRemember, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
+import { clearRouteHistory, getRouteHistory, routeSafety, saveRouteHistory, setRouteHistoryRemember, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
-import { addRecent, loadSettings, routeTimeFor } from "@/lib/preferences";
+import { loadSettings, routeTimeFor } from "@/lib/preferences";
 import { saveHandoff } from "@/lib/guideHandoff";
 import { formatDistance, guideOptions, walkingMinutes, zoneSummary, type GuideOption } from "@/lib/routeGuidance";
 import { useMyLocation } from "@/lib/useMyLocation";
@@ -207,7 +207,7 @@ function RoutePage({ search }: { search: string }) {
         at: routeTimeFor(settings.timeMode),
       });
       if (requestRef.current !== controller) return;
-      addRecent("destinations", end);
+      void saveRouteHistory(start, end).catch(() => undefined);
       setRoute(result);
       setSelected(0);
       setSearchExpanded(false);

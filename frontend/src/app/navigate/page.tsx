@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { routeSafety, type RoutePeriod, type SafetyZone } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
@@ -442,6 +443,18 @@ function NavigatePage({ search }: { search: string }) {
   }
 
   if (!user) return null;
+  if (!guided) {
+    return (
+      <main className={styles.page}>
+        <AppHeader userInitial={userInitial(user)} />
+        <section className={styles.emptyState} aria-label="길찾기 필요">
+          <h1>먼저 길찾기를 해주세요</h1>
+          <p>길찾기에서 경로를 고른 뒤 실시간 안내를 시작할 수 있어요.</p>
+          <Link href="/route" className={styles.returnRoute}>길찾기로 이동</Link>
+        </section>
+      </main>
+    );
+  }
 
   const myLocation = position ?? location ?? undefined;
   const displayLocation = snappedLocation ?? myLocation;

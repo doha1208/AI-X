@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import NavigatePage from "./page";
 
@@ -36,37 +36,9 @@ describe("NavigatePage responsive presentation", () => {
     searchQuery = "end=37.500000,127.000000&endName=테스트%20목적지";
   });
 
-  it("keeps one map and presents route choice in the shared adaptive sheet", () => {
+  it("returns direct visits to route planning without mounting a map", () => {
     render(<NavigatePage />);
-
-    expect(screen.getAllByTestId("safety-map")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "안내 경로 선택 펼치기" })).toBeInTheDocument();
-    expect(screen.getByText("어떤 길로 안내할까요?")).toBeInTheDocument();
-  });
-
-  it("keeps recent destinations folded until the user asks for them, so they do not cover the map", () => {
-    searchQuery = "";
-    localStorage.setItem(
-      "ansim:recent-destinations",
-      JSON.stringify([
-        { label: "수원역", lat: 37.2658, lng: 126.9999, at: Date.now() },
-        { label: "아주대학교", lat: 37.2846, lng: 127.0446, at: Date.now() },
-      ])
-    );
-
-    render(<NavigatePage />);
-
-    const toggle = screen.getByRole("button", { name: /최근 목적지/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: /수원역/ })).not.toBeInTheDocument();
-
-    fireEvent.click(toggle);
-
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: /수원역/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /아주대학교/ })).toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    expect(screen.queryByRole("button", { name: /수원역/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("safety-map")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "길찾기로 이동" })).toHaveAttribute("href", "/route");
   });
 });
