@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { routeSafety, type RouteResult } from "@/lib/api";
+import { clearRouteHistory, getRouteHistory, routeSafety, setRouteHistoryRemember, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { addRecent, loadSettings, routeTimeFor } from "@/lib/preferences";
@@ -77,8 +77,11 @@ function RoutePage({ search }: { search: string }) {
   const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
   const [searchExpanded, setSearchExpanded] = useState(true);
   const [mobileEditing, setMobileEditing] = useState<Field | null>(null);
+  const [history, setHistory] = useState<RouteHistorySnapshot | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const mapPick = usePendingPick();
+
+  useEffect(() => { void getRouteHistory().then(setHistory).catch(() => setHistory(null)); }, []);
 
   const shortestOption = useMemo(() => (route ? guideOptions(route).find((o) => o.kind === "shortest") : undefined), [route]);
   const activeAlt = typeof selected === "number" ? (route?.alternatives[selected] ?? route?.alternatives[0]) : undefined;
@@ -252,7 +255,12 @@ function RoutePage({ search }: { search: string }) {
           <div className={styles.mobileIdle}>
             <h1>길찾기</h1>
             {fields.map(({ key, placeholder }) => <button key={key} type="button" className={styles.mobilePlaceRow} onClick={() => setMobileEditing(key)}><span>{places[key]?.label ?? placeholder}</span><b>확인</b></button>)}
-            <button type="button" className={styles.primaryButton} disabled={!places.start || !places.end || loading} onClick={() => { const form = document.createElement("form"); void handleSearch({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>); form.remove(); }}>{loading ? "경로 찾는 중..." : "경로 검색"}</button>
+            <button type="button" className={styles.primaryButton} disabled={!places.start || !places.end || loading} onClick={() => void handleSearch({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>)}>{loading ? "경로 찾는 중..." : "경로 검색"}</button>
+            <div className={styles.historyControls}>
+              <label><input type="checkbox" checked={history?.rememberRouteHistory ?? true} onChange={(e) => void setRouteHistoryRemember(e.target.checked).then(setHistory)} /> 경로 기억</label>
+              <button type="button" onClick={() => { if (window.confirm("최근 경로를 모두 삭제할까요?")) void clearRouteHistory().then(() => setHistory((value) => value ? { ...value, items: [] } : value); }}>전체 기록 삭제</button>
+            </div>
+            {history?.items.map((item) => <button key={`${item.start.lat}-${item.end.lat}`} type="button" className={styles.historyItem} onClick={() => { setPlace("start", item.start); setPlace("end", item.end); }}>{item.start.label} → {item.end.label}</button>)}
           </div>
         )}
       </section>

@@ -457,6 +457,10 @@ div.routeCardMain {
   .mobileActions { display: flex; gap: 8px; }
   .mobileActions button, .mobileBack { min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--brand-light); color: var(--brand); font-weight: 700; }
   .mobileBack { align-self: flex-start; background: transparent; padding-left: 0; }
+  .historyControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+  .historyControls label { display: flex; align-items: center; gap: 6px; }
+  .historyControls button { border: 0; background: none; color: var(--brand); font-weight: 700; }
+  .historyItem { min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-align: left; }
   .mobileFlowHidden { display: none; }
   .layout { display: none; }
   .layout[data-has-route="true"] { display: block; }
