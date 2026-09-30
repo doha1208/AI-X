@@ -31,22 +31,25 @@ import {
   nextTurn,
   progressAlong,
   walkingMinutes,
+  zoneSummary,
   type GuideKind,
   type GuideOption,
   type TurnDirection,
 } from "@/lib/routeGuidance";
-import { addNotification } from "@/lib/notifications";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
-import { ChoicePanel } from "./ChoicePanel";
+import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
+import { RoutePeek } from "@/components/RoutePeek";
+import { ChoicePanel, choiceTitle } from "./ChoicePanel";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapControls, PickConfirm, usePendingPick } from "@/components/MapOverlays";
 import { withSearch } from "@/components/WithSearch";
 import {
   AlertIcon,
+  ChevronRightIcon,
   CloseIcon,
   LocateIcon,
   MapPinIcon,
@@ -59,6 +62,7 @@ import {
   TurnRightIcon,
 } from "@/components/icons";
 import styles from "./navigate.module.css";
+import type { SheetSnap } from "@/lib/bottomSheet";
 
 const ARRIVAL_RADIUS_M = 30;
 // 가장 가까운 경로 지점에서 이보다 멀어지면 경로를 벗어난 것으로 보고 다시 찾는다.
@@ -69,6 +73,10 @@ const TOAST_MS = 2500;
 const NEAR_ARRIVAL_M = 100;
 // 이 점수 미만이면 scoreLevel()이 "주의"로 분류한다 — 새로 진입할 때 한 번 음성으로 알린다.
 const CAUTION_SCORE = 40;
+// 경로 칩 + 안내 시작 버튼이 접힌 시트 안에 들어가는 높이(손잡이 44 + 칩 약 87 + 버튼 44 + 여백, 실측 기준).
+const PEEK_SHEET_HEIGHT = 204;
+// 안내 중에는 위쪽 방향 안내 카드(다음 회전)가 항상 보여야 한다 — 시트를 맨 위로 올려도 카드 아래에서 멈추게 한다.
+const GUIDING_SHEET_TOP_GAP = 100;
 // 내 위치가 경로에서 이 거리 안이면 GPS 떨림을 줄이려고 마커를 경로 위로 붙여서 보여준다.
 const SNAP_TO_ROUTE_M = 25;
 
@@ -102,9 +110,13 @@ function NavigatePage({ search }: { search: string }) {
   const user = useSessionUser();
   const { location, denied: locationDenied } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const [settings, setSettings] = useState(loadSettings);
   const [voicePanelOpen, setVoicePanelOpen] = useState(false);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
   const [recent] = useState(() => loadRecent("destinations"));
+  // 최근 목적지가 쌓이면 목적지 카드가 지도를 덮는다 — 누르기 전에는 접어 둔다.
+  const [recentOpen, setRecentOpen] = useState(false);
   const [destination, setDestination] = useState<Place | null>(() =>
     placeFromQuery(search, "end")
   );
@@ -174,6 +186,8 @@ function NavigatePage({ search }: { search: string }) {
       const found = guideOptions(result);
       if (purpose === "options") {
         setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted", period: result.period });
+        // 지도앱처럼 시트는 접어 두고(경로 칩만 보임) 지도를 넓게 보여준다.
+        setSheetSnap("collapsed");
       } else {
         const next = found.find((option) => option.kind === mode) ?? found[0];
         if (mode === "shortest" && next.kind !== "shortest") {
@@ -282,10 +296,10 @@ function NavigatePage({ search }: { search: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cautionZoneCode, settings.voiceOn]);
 
-  // 소리를 못 들었어도 나중에 알림 목록에서 볼 수 있게 남긴다. 음성 설정이 바뀔 때 다시 쌓이지 않도록 동 코드에만 반응한다.
+  // 소리를 끄고 걷는 사람도 알 수 있게 음성과 함께 화면 배너로도 바로 알린다. 음성 설정이 바뀔 때 다시 뜨지 않도록 동 코드에만 반응한다.
   const cautionZoneName = guidance?.zone?.dong_name;
   useEffect(() => {
-    if (cautionZoneCode) addNotification("caution", `주의 구역에 들어섰어요: ${cautionZoneName}`);
+    if (cautionZoneCode) showToast(`주의 구역에 들어섰어요: ${cautionZoneName}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cautionZoneCode]);
 
@@ -350,6 +364,7 @@ function NavigatePage({ search }: { search: string }) {
   function chooseOption(option: GuideOption) {
     setMode(option.kind);
     setGuided(option);
+    setSheetSnap("collapsed");
     lastFetchAtRef.current = Date.now();
   }
 
@@ -445,7 +460,7 @@ function NavigatePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div className={styles.stage}>
+      <div ref={stageRef} className={styles.stage}>
         <SafetyMap
           ref={mapRef}
           bells={phase === "guiding" ? routeBells : undefined}
@@ -600,8 +615,29 @@ function NavigatePage({ search }: { search: string }) {
               </section>
             )}
 
-            <section className={styles.bottomPanel}>
-              <div className={styles.stats}>
+            <AdaptiveBottomSheet
+              className={styles.bottomPanel}
+              label="길안내 정보"
+              snap={sheetSnap}
+              onSnapChange={setSheetSnap}
+              workspaceRef={stageRef}
+              topGap={GUIDING_SHEET_TOP_GAP}
+              summary={(
+                <div className={`${styles.stats} ${styles.mobileStats}`}>
+                  <div>
+                    <p className={styles.statLabel}>남은 시간</p>
+                    <p className={styles.statValue}>{guidance ? walkingMinutes(remainingM) : "-"}<small>분</small></p>
+                  </div>
+                  <div className={styles.statDivider} />
+                  <div>
+                    <p className={styles.statLabel}>거리</p>
+                    <p className={styles.statValue}>{guidance ? formatDistance(remainingM) : "-"}</p>
+                  </div>
+                </div>
+              )}
+            >
+              <div className={styles.bottomPanelContent}>
+              <div className={`${styles.stats} ${styles.desktopStats}`}>
                 <div>
                   <p className={styles.statLabel}>남은 시간</p>
                   <p className={styles.statValue}>
@@ -626,23 +662,68 @@ function NavigatePage({ search }: { search: string }) {
               <div className={styles.progress}>
                 <span className={styles.progressFill} style={{ width: `${progressPct}%` }} />
               </div>
-            </section>
+              {guidance?.zone && zoneLevel && (
+                <div className={styles.mobileZoneDetail} aria-label="현재 구간 안전 안내">
+                  <span>현재 구간</span>
+                  <strong className={zoneLevel.tone}>{guidance.zone.dong_name} · {guidance.zone.safety_score.toFixed(0)}점</strong>
+                  <span className={zoneLevel.tone}>{zoneLevel.label} 구역을 통과하고 있어요</span>
+                </div>
+              )}
+              <div className={styles.mobileGuidanceActions}>
+                <button type="button" className={styles.endButton} onClick={endGuidance}>
+                  <CloseIcon size={16} />
+                  안내 종료
+                </button>
+              </div>
+              </div>
+            </AdaptiveBottomSheet>
           </>
         )}
 
         {phase === "select" && (
-          <ChoicePanel
-            destination={destination}
-            choice={choice}
-            safeOption={safeOption}
-            previewOption={previewOption}
-            myLocation={myLocation}
-            routeError={routeError}
-            onPreview={setPreviewKind}
-            onChoose={chooseOption}
-            onRetry={retryRoute}
-            onCancel={reset}
-          />
+          <AdaptiveBottomSheet
+            className={styles.choicePanel}
+            label="안내 경로 선택"
+            snap={sheetSnap}
+            onSnapChange={setSheetSnap}
+            workspaceRef={stageRef}
+            collapsedHeight={choice ? PEEK_SHEET_HEIGHT : undefined}
+            summary={choice && previewOption ? (
+              <RoutePeek
+                items={choice.options.map((option) => {
+                  const average = zoneSummary(option.zones).average;
+                  return {
+                    key: option.kind,
+                    label: choiceTitle(option, choice, safeOption),
+                    minutes: walkingMinutes(option.distanceM),
+                    distance: formatDistance(option.distanceM),
+                    score: average === null ? undefined : `평균 ${average.toFixed(0)}점`,
+                    active: option === previewOption,
+                  };
+                })}
+                onSelect={(key) => setPreviewKind(key === "shortest" ? "shortest" : "safe")}
+                onStart={() => chooseOption(previewOption)}
+              />
+            ) : (
+              <div className={styles.choiceSummary}>
+                <span>목적지 · {destination?.label}</span>
+                <strong>경로 찾는 중</strong>
+              </div>
+            )}
+          >
+            <ChoicePanel
+              destination={destination}
+              choice={choice}
+              safeOption={safeOption}
+              previewOption={previewOption}
+              myLocation={myLocation}
+              routeError={routeError}
+              onPreview={setPreviewKind}
+              onChoose={chooseOption}
+              onRetry={retryRoute}
+              onCancel={reset}
+            />
+          </AdaptiveBottomSheet>
         )}
 
         {phase === "choose" && picking && (
@@ -703,8 +784,18 @@ function NavigatePage({ search }: { search: string }) {
             )}
             {recent.length > 0 && (
               <div className={styles.recent}>
-                <p className={styles.recentTitle}>최근 목적지</p>
-                <ul className={styles.recentList}>
+                <button
+                  type="button"
+                  className={styles.recentToggle}
+                  aria-expanded={recentOpen}
+                  aria-controls="recent-destinations"
+                  onClick={() => setRecentOpen((open) => !open)}
+                >
+                  <span>최근 목적지 {recent.length}</span>
+                  <ChevronRightIcon size={16} />
+                </button>
+                {recentOpen && (
+                <ul id="recent-destinations" className={styles.recentList}>
                   {recent.map((entry) => (
                     <li key={entry.label}>
                       <button
@@ -718,6 +809,7 @@ function NavigatePage({ search }: { search: string }) {
                     </li>
                   ))}
                 </ul>
+                )}
               </div>
             )}
           </section>
@@ -769,30 +861,35 @@ function NavigatePage({ search }: { search: string }) {
           onZoomOut={() => mapRef.current?.zoomOut()}
           onLocate={myLocation ? () => mapRef.current?.panTo(myLocation) : undefined}
         >
-          <a href="tel:112" className={`${styles.sideButton} ${styles.sos}`} aria-label="112 긴급 신고 전화">
-            <PhoneIcon size={18} />
-            <span>SOS</span>
-          </a>
-          <button
-            type="button"
-            className={styles.sideButton}
-            onClick={smsGuardians}
-            disabled={!myLocation}
-            aria-label="보호자에게 위치 문자 보내기"
-          >
-            <AlertIcon size={18} />
-            <span>보호자문자</span>
-          </button>
-          <button
-            type="button"
-            className={styles.sideButton}
-            onClick={shareLocation}
-            disabled={!myLocation}
-            aria-label="내 위치 공유"
-          >
-            <ShareIcon size={18} />
-            <span>위치공유</span>
-          </button>
+          {/* 경로를 비교하는 동안은 지도를 가리지 않도록 안전 버튼을 숨긴다(안내 중·목적지 고르기에서만 보임). */}
+          {phase !== "select" && (
+            <>
+            <a href="tel:112" className={`${styles.sideButton} ${styles.sos}`} aria-label="112 긴급 신고 전화">
+              <PhoneIcon size={18} />
+              <span>SOS</span>
+            </a>
+            <button
+              type="button"
+              className={styles.sideButton}
+              onClick={smsGuardians}
+              disabled={!myLocation}
+              aria-label="보호자에게 위치 문자 보내기"
+            >
+              <AlertIcon size={18} />
+              <span>보호자문자</span>
+            </button>
+            <button
+              type="button"
+              className={styles.sideButton}
+              onClick={shareLocation}
+              disabled={!myLocation}
+              aria-label="내 위치 공유"
+            >
+              <ShareIcon size={18} />
+              <span>위치공유</span>
+            </button>
+            </>
+          )}
         </MapControls>
 
         {toast && (

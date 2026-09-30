@@ -17,10 +17,10 @@ export function MapControls({ onZoomIn, onZoomOut, onLocate, children, className
   return (
     <div className={`${styles.controls} ${className}`}>
       {children}
-      <button type="button" className={styles.controlButton} onClick={onZoomIn} aria-label="지도 확대">
+      <button type="button" className={`${styles.controlButton} ${styles.zoomButton}`} onClick={onZoomIn} aria-label="지도 확대">
         <PlusIcon size={20} />
       </button>
-      <button type="button" className={styles.controlButton} onClick={onZoomOut} aria-label="지도 축소">
+      <button type="button" className={`${styles.controlButton} ${styles.zoomButton}`} onClick={onZoomOut} aria-label="지도 축소">
         <MinusIcon size={20} />
       </button>
       {onLocate && (
@@ -144,7 +144,10 @@ export function MapContextMenu({ menu, items, onClose }: { menu: MenuState; item
     <div
       className={styles.menu}
       role="menu"
-      style={{ left: Math.min(menu.x, window.innerWidth - 250), top: Math.min(menu.y, window.innerHeight - 200) }}
+      style={{
+        "--menu-x": `${Math.max(8, Math.min(menu.x, window.innerWidth - 250))}px`,
+        "--menu-y": `${Math.max(8, Math.min(menu.y, window.innerHeight - 200))}px`,
+      } as React.CSSProperties}
       onClick={(e) => e.stopPropagation()}
     >
       <p className={styles.menuAddress}>{menu.loading ? "주소를 찾는 중..." : label}</p>

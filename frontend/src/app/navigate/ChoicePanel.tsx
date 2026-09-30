@@ -12,7 +12,14 @@ function scoreTone(score: number): string {
   return styles.toneWarning;
 }
 
-type Choice = { options: GuideOption[]; safetyWeighted: boolean; period: RoutePeriod };
+export type Choice = { options: GuideOption[]; safetyWeighted: boolean; period: RoutePeriod };
+
+// 경로 이름. 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
+export function choiceTitle(option: GuideOption, choice: Choice, safeOption: GuideOption | undefined): string {
+  if (option.kind === "safe") return choice.safetyWeighted ? "안전 경로" : "도보 경로";
+  const reallyShortest = !safeOption || option.distanceM < safeOption.distanceM;
+  return reallyShortest ? "최단 경로" : "일반 도보 경로";
+}
 
 type Props = {
   destination: Place | null;
@@ -41,7 +48,7 @@ export function ChoicePanel({
   onCancel,
 }: Props) {
   return (
-    <section className={styles.choicePanel} aria-label="안내 경로 선택">
+    <div className={styles.choicePanelContent}>
       <div className={styles.choiceHeader}>
         <div>
           <h1 className={styles.choiceTitle}>
@@ -76,11 +83,7 @@ export function ChoicePanel({
             {choice.options.map((option) => {
               const summary = zoneSummary(option.zones);
               const isSafe = option.kind === "safe";
-              // 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
-              const reallyShortest = !isSafe && (!safeOption || option.distanceM < safeOption.distanceM);
-              const title = isSafe
-                ? choice.safetyWeighted ? "안전 경로" : "도보 경로"
-                : reallyShortest ? "최단 경로" : "일반 도보 경로";
+              const title = choiceTitle(option, choice, safeOption);
               const selected = option === previewOption;
               return (
                 <div key={option.kind} className={`${styles.choiceCard} ${selected ? styles.choiceCardSelected : ""}`}>
@@ -124,6 +127,6 @@ export function ChoicePanel({
           )}
         </>
       )}
-    </section>
+    </div>
   );
 }

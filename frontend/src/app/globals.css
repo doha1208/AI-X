@@ -22,6 +22,17 @@
   --radius-md: 14px;
   --radius-sm: 10px;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --app-header-height: 64px;
+  --mobile-navigation-height: 0px;
+  --map-control-gap: 12px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    /* 모바일은 상단 헤더 없이 지도를 쓴다 — 노치(상태 표시줄) 영역만 남긴다. */
+    --app-header-height: env(safe-area-inset-top, 0px);
+    --mobile-navigation-height: calc(64px + env(safe-area-inset-bottom));
+  }
 }
 
 @media (prefers-color-scheme: dark) {

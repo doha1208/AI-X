@@ -9,12 +9,16 @@ import {
   type KakaoOverlay,
   type LatLng,
 } from "@/lib/kakao";
+import { LONG_PRESS_DELAY_MS, movedPastLongPressTolerance, supportsMapLongPress, type ScreenPoint } from "@/lib/longPress";
+import { parsePx, visibleMapInsets } from "@/lib/mapInsets";
 
 const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 // 기본값을 매번 새 배열로 만들면 오버레이 effect가 렌더마다 다시 돈다.
 const EMPTY: never[] = [];
 const DEFAULT_CENTER = { lat: 37.5665, lng: 126.978 };
 const FOLLOW_LEVEL = 3;
+// 하단 시트가 지도를 덮는 폭(globals.css의 모바일 기준과 같다).
+const MOBILE_QUERY = "(max-width: 767px)";
 
 type ContextMenuInfo = LatLng & { x: number; y: number };
 
@@ -147,6 +151,8 @@ export function SafetyMap({
   const onZoneSelectRef = useRef(onZoneSelect);
   const onContextMenuRef = useRef(onContextMenu);
   const lastContextPos = useRef<{ x: number; y: number } | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const suppressClickTimerRef = useRef<number | null>(null);
   // 지도 생성 시 한 번만 쓰는 초기 중심. effect 의존성에 center를 넣으면 내 위치가
   // 잡힐 때 cleanup이 우클릭·resize 리스너를 떼고, mapRef 가드 때문에 다시 붙지 않는다.
   const initialCenterRef = useRef(center);
@@ -199,6 +205,7 @@ export function SafetyMap({
       level: 6,
     });
     mapRef.current = map;
+    const container = containerRef.current;
 
     // 브라우저 창 크기가 바뀌면 컨테이너 크기도 바뀌므로 Kakao 지도에 재계산을 알려준다.
     const relayoutMap = () => map.relayout();
@@ -209,6 +216,12 @@ export function SafetyMap({
     });
 
     kakao.maps.event.addListener(map, "click", (mouseEvent: KakaoMouseEvent) => {
+      if (suppressNextClickRef.current) {
+        suppressNextClickRef.current = false;
+        if (suppressClickTimerRef.current !== null) window.clearTimeout(suppressClickTimerRef.current);
+        suppressClickTimerRef.current = null;
+        return;
+      }
       onSelectRef.current?.({
         lat: mouseEvent.latLng.getLat(),
         lng: mouseEvent.latLng.getLng(),
@@ -221,8 +234,54 @@ export function SafetyMap({
       e.preventDefault();
       lastContextPos.current = { x: e.clientX, y: e.clientY };
     }
-    const container = containerRef.current;
     container.addEventListener("contextmenu", handleNativeContextMenu, true);
+
+    let longPressTimer: number | null = null;
+    let longPressStart: ScreenPoint | null = null;
+
+    function clearLongPress() {
+      if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+      longPressStart = null;
+    }
+
+    function handlePointerDown(e: PointerEvent) {
+      if (!supportsMapLongPress(e.pointerType, e.isPrimary) || !onContextMenuRef.current) return;
+      clearLongPress();
+      const start = { x: e.clientX, y: e.clientY };
+      longPressStart = start;
+      longPressTimer = window.setTimeout(() => {
+        if (!longPressStart) return;
+        const rect = container.getBoundingClientRect();
+        const coords = map
+          .getProjection()
+          .coordsFromContainerPoint(new kakao.maps.Point(start.x - rect.left, start.y - rect.top));
+        suppressNextClickRef.current = true;
+        if (suppressClickTimerRef.current !== null) window.clearTimeout(suppressClickTimerRef.current);
+        suppressClickTimerRef.current = window.setTimeout(() => {
+          suppressNextClickRef.current = false;
+          suppressClickTimerRef.current = null;
+        }, 800);
+        onContextMenuRef.current?.({
+          lat: coords.getLat(),
+          lng: coords.getLng(),
+          x: start.x,
+          y: start.y,
+        });
+        clearLongPress();
+      }, LONG_PRESS_DELAY_MS);
+    }
+
+    function handlePointerMove(e: PointerEvent) {
+      if (longPressStart && movedPastLongPressTolerance(longPressStart, { x: e.clientX, y: e.clientY })) {
+        clearLongPress();
+      }
+    }
+
+    container.addEventListener("pointerdown", handlePointerDown, true);
+    container.addEventListener("pointermove", handlePointerMove, true);
+    container.addEventListener("pointerup", clearLongPress, true);
+    container.addEventListener("pointercancel", clearLongPress, true);
 
     kakao.maps.event.addListener(map, "rightclick", (mouseEvent: KakaoMouseEvent) => {
       const pos = lastContextPos.current;
@@ -237,6 +296,14 @@ export function SafetyMap({
 
     return () => {
       container.removeEventListener("contextmenu", handleNativeContextMenu, true);
+      container.removeEventListener("pointerdown", handlePointerDown, true);
+      container.removeEventListener("pointermove", handlePointerMove, true);
+      container.removeEventListener("pointerup", clearLongPress, true);
+      container.removeEventListener("pointercancel", clearLongPress, true);
+      clearLongPress();
+      if (suppressClickTimerRef.current !== null) window.clearTimeout(suppressClickTimerRef.current);
+      suppressClickTimerRef.current = null;
+      suppressNextClickRef.current = false;
       window.removeEventListener("resize", relayoutMap);
     };
   }, [loaded]);
@@ -268,7 +335,12 @@ export function SafetyMap({
     const { kakao } = window;
     const bounds = new kakao.maps.LatLngBounds();
     [...routePath, ...(comparePath ?? [])].forEach((p) => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
-    map.setBounds(bounds);
+    // 모바일에서는 하단 시트와 상단 카드가 지도를 덮는다 — 경로가 그 뒤에 숨지 않도록 보이는 영역 기준으로 맞춘다.
+    const sheetHeight = parsePx(
+      containerRef.current ? getComputedStyle(containerRef.current).getPropertyValue("--adaptive-sheet-height") : ""
+    );
+    const insets = visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
+    map.setBounds(bounds, insets.top, insets.right, insets.bottom, insets.left);
     viewTakenRef.current = true;
   }, [loaded, routePath, comparePath, followLocation]);
 

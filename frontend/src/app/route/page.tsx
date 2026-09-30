@@ -12,6 +12,8 @@ import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
+import { RoutePeek, type RoutePeekItem } from "@/components/RoutePeek";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import {
   MapContextMenu,
@@ -25,8 +27,12 @@ import {
 import { withSearch } from "@/components/WithSearch";
 import { AlertIcon, InfoIcon, MapPinIcon, NavigationIcon, SwapIcon } from "@/components/icons";
 import styles from "./route.module.css";
+import type { SheetSnap } from "@/lib/bottomSheet";
 
 type Field = "start" | "end";
+
+// 경로 칩 + 안내 시작 버튼이 접힌 시트 안에 들어가는 높이(손잡이 44 + 칩 약 87 + 버튼 44 + 여백, 실측 기준).
+const PEEK_SHEET_HEIGHT = 204;
 
 // 고른 경로는 초록 실선, 비교하는 다른 경로는 회색 점선.
 function routeLegend(compareSelected: boolean, compareName: string): LegendItem[] {
@@ -51,6 +57,7 @@ function RoutePage({ search }: { search: string }) {
   const user = useSessionUser();
   const { location, request: requestLocation } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
   const menu = useMapContextMenu();
   const [settings] = useState(loadSettings);
   const [places, setPlaces] = useState<Record<Field, Place | null>>(() => ({
@@ -67,6 +74,8 @@ function RoutePage({ search }: { search: string }) {
   const [selected, setSelected] = useState<number | "shortest">(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
+  const [searchExpanded, setSearchExpanded] = useState(true);
   const requestRef = useRef<AbortController | null>(null);
   const mapPick = usePendingPick();
 
@@ -85,6 +94,31 @@ function RoutePage({ search }: { search: string }) {
   // 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
   const safeM = route?.alternatives[0]?.distance_m;
   const compareName = shortestM !== null && (safeM === undefined || shortestM < safeM) ? "최단 경로" : "일반 도보 경로";
+  // 접힌 시트의 경로 칩: 추천·대안·비교(최단) 경로를 시간·거리·점수만으로 한 줄에 보여준다.
+  const peekItems: RoutePeekItem[] = route
+    ? [
+        ...route.alternatives.map((alt, i) => ({
+          key: String(i),
+          label: i === 0 ? "추천" : `대안 ${i}`,
+          minutes: walkingMinutes(alt.distance_m),
+          distance: formatDistance(alt.distance_m),
+          score: `${alt.safety_score.toFixed(0)}점`,
+          active: alt === activeAlt,
+        })),
+        ...(shortestOption && shortestM !== null
+          ? [
+              {
+                key: "shortest",
+                label: compareName,
+                minutes: walkingMinutes(shortestM),
+                distance: formatDistance(shortestM),
+                score: shortestSummary?.average != null ? `평균 ${shortestSummary.average.toFixed(0)}점` : undefined,
+                active: selected === "shortest",
+              },
+            ]
+          : []),
+      ]
+    : [];
   const pendingPick = picking ? mapPick.pending : null;
   const labels = useMemo<MapLabel[]>(() => {
     const points = activePoints;
@@ -100,6 +134,7 @@ function RoutePage({ search }: { search: string }) {
   function setPlace(field: Field, place: Place) {
     setPlaces((p) => ({ ...p, [field]: place }));
     setTexts((t) => ({ ...t, [field]: place.label }));
+    setSearchExpanded(true);
   }
 
   function editText(field: Field, value: string) {
@@ -161,6 +196,9 @@ function RoutePage({ search }: { search: string }) {
       addRecent("destinations", end);
       setRoute(result);
       setSelected(0);
+      setSearchExpanded(false);
+      // 지도앱처럼 시트는 접어 두고(경로 칩만 보임) 지도를 넓게 보여준다 — 자세한 카드는 시트를 펼치면 나온다.
+      setSheetSnap("collapsed");
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "경로를 찾지 못했어요");
@@ -189,58 +227,90 @@ function RoutePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div className={styles.layout}>
+      <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap}>
         <aside className={styles.sidebar}>
-          <div className={styles.sidebarHeader}>
-            <h1 className={styles.title}>길찾기</h1>
-            <button type="button" className={styles.linkButton} onClick={setStartToCurrentLocation}>
-              현재 위치를 출발지로
+          {route && !searchExpanded ? (
+            <button type="button" className={styles.compactSearch} onClick={() => setSearchExpanded(true)}>
+              <span><small>출발</small>{places.start?.label ?? texts.start}</span>
+              <SwapIcon size={16} />
+              <span><small>도착</small>{places.end?.label ?? texts.end}</span>
             </button>
-          </div>
+          ) : (
+            <div className={styles.searchPanel}>
+              <div className={styles.sidebarHeader}>
+                <h1 className={styles.title}>길찾기</h1>
+                <button type="button" className={styles.linkButton} onClick={setStartToCurrentLocation}>
+                  현재 위치를 출발지로
+                </button>
+              </div>
 
-          <form onSubmit={handleSearch} className={styles.form}>
-            <div className={styles.fields}>
-              {fields.map(({ key, placeholder, dot }) => (
-                <div key={key} className={styles.field}>
-                  <span className={`${styles.dot} ${dot}`} aria-hidden />
-                  <input
-                    className={styles.input}
-                    value={texts[key]}
-                    onChange={(e) => editText(key, e.target.value)}
-                    placeholder={placeholder}
-                    aria-label={placeholder}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className={`${styles.pickButton} ${picking === key ? styles.pickButtonActive : ""}`}
-                    onClick={() => togglePicking(key)}
-                    aria-label={`${key === "start" ? "출발지" : "도착지"}를 지도에서 선택`}
-                    aria-pressed={picking === key}
-                  >
-                    <MapPinIcon size={16} />
+              <form onSubmit={handleSearch} className={styles.form}>
+                <div className={styles.fields}>
+                  {fields.map(({ key, placeholder, dot }) => (
+                    <div key={key} className={styles.field}>
+                      <span className={`${styles.dot} ${dot}`} aria-hidden />
+                      <input
+                        className={styles.input}
+                        value={texts[key]}
+                        onChange={(e) => editText(key, e.target.value)}
+                        placeholder={placeholder}
+                        aria-label={placeholder}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className={`${styles.pickButton} ${picking === key ? styles.pickButtonActive : ""}`}
+                        onClick={() => togglePicking(key)}
+                        aria-label={`${key === "start" ? "출발지" : "도착지"}를 지도에서 선택`}
+                        aria-pressed={picking === key}
+                      >
+                        <MapPinIcon size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" className={styles.swapButton} onClick={swap} aria-label="출발지와 도착지 바꾸기">
+                    <SwapIcon size={16} />
                   </button>
                 </div>
-              ))}
-              <button type="button" className={styles.swapButton} onClick={swap} aria-label="출발지와 도착지 바꾸기">
-                <SwapIcon size={16} />
-              </button>
+                <button type="submit" className={styles.primaryButton} disabled={loading}>
+                  {loading ? "경로 찾는 중..." : "안전 경로 찾기"}
+                </button>
+              </form>
+
+              {route && (
+                <button type="button" className={styles.collapseSearch} onClick={() => setSearchExpanded(false)}>
+                  검색 조건 접기
+                </button>
+              )}
+              {picking && (
+                <p className={styles.hint}>지도를 클릭해서 {picking === "start" ? "출발지" : "도착지"}를 선택하세요</p>
+              )}
+              {error && (
+                <p className={styles.error} role="alert">
+                  <AlertIcon size={16} />
+                  {error}
+                </p>
+              )}
             </div>
-            <button type="submit" className={styles.primaryButton} disabled={loading}>
-              {loading ? "경로 찾는 중..." : "안전 경로 찾기"}
-            </button>
-          </form>
-
-          {picking && (
-            <p className={styles.hint}>지도를 클릭해서 {picking === "start" ? "출발지" : "도착지"}를 선택하세요</p>
-          )}
-          {error && (
-            <p className={styles.error} role="alert">
-              <AlertIcon size={16} />
-              {error}
-            </p>
           )}
 
+          <AdaptiveBottomSheet
+            className={styles.resultsSheet}
+            label="경로 결과"
+            snap={sheetSnap}
+            onSnapChange={setSheetSnap}
+            workspaceRef={layoutRef}
+            collapsedHeight={route ? PEEK_SHEET_HEIGHT : undefined}
+            summary={route && activeOption ? (
+              <RoutePeek
+                items={peekItems}
+                onSelect={(key) => setSelected(key === "shortest" ? "shortest" : Number(key))}
+                onStart={() => startGuidance(activeOption)}
+              />
+            ) : (
+              <div className={styles.sheetSummary}><strong>경로 검색</strong><span>출발지와 도착지를 입력하세요</span></div>
+            )}
+          >
           {route ? (
             <section className={styles.results} aria-label="경로 검색 결과">
               <p className={styles.resultsLabel}>
@@ -353,6 +423,12 @@ function RoutePage({ search }: { search: string }) {
           ) : (
             <p className={styles.empty}>출발지와 도착지를 입력하거나, 지도를 우클릭해서 선택해보세요.</p>
           )}
+            <MapLegend
+              className={styles.mobileLegend}
+              title="지도 범례"
+              items={routeLegend(selected === "shortest", compareName)}
+            />
+          </AdaptiveBottomSheet>
         </aside>
 
         <div className={styles.mapArea}>

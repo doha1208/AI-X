@@ -8,7 +8,7 @@
 
 .stage {
   position: relative;
-  height: calc(100dvh - 64px);
+  height: calc(100dvh - var(--app-header-height));
   min-height: 520px;
   overflow: hidden;
 }
@@ -135,21 +135,32 @@
 .switch {
   position: relative;
   width: 44px;
-  height: 26px;
+  height: 44px;
   border: none;
+  border-radius: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.switch::before {
+  position: absolute;
+  top: 9px;
+  right: 0;
+  left: 0;
+  height: 26px;
   border-radius: 13px;
   background: var(--border);
-  cursor: pointer;
+  content: "";
   transition: background 0.15s;
 }
 
-.switchOn {
+.switchOn::before {
   background: var(--brand);
 }
 
 .switchKnob {
   position: absolute;
-  top: 3px;
+  top: 12px;
   left: 3px;
   width: 20px;
   height: 20px;
@@ -363,8 +374,18 @@
   bottom: 16px;
   left: 16px;
   z-index: 20;
-  padding: 16px 20px;
+  padding: 0;
   border-radius: var(--radius-lg);
+}
+
+.bottomPanelContent {
+  padding: 16px 20px;
+}
+
+.mobileStats,
+.mobileZoneDetail,
+.mobileGuidanceActions {
+  display: none;
 }
 
 .stats {
@@ -448,13 +469,39 @@
   bottom: 16px;
   left: 50%;
   z-index: 22;
+  width: min(640px, calc(100% - 32px));
+  padding: 0;
+  border-radius: var(--radius-lg);
+  transform: translateX(-50%);
+}
+
+.choicePanelContent {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(640px, calc(100% - 32px));
   padding: 20px;
-  border-radius: var(--radius-lg);
-  transform: translateX(-50%);
+}
+
+.choiceSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.choiceSummary span {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.choiceSummary strong {
+  flex-shrink: 0;
+  font-size: 17px;
 }
 
 .choiceHeader {
@@ -807,11 +854,37 @@
   border-top: 1px solid var(--border);
 }
 
-.recentTitle {
-  margin-bottom: 6px;
-  font-size: 12.5px;
-  font-weight: 700;
+.recentToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
   color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.recentToggle:hover {
+  background: var(--surface-muted);
+}
+
+.recentToggle svg {
+  transition: transform 150ms ease;
+}
+
+.recentToggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.recentToggle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .recentList {
@@ -874,13 +947,23 @@
   outline-offset: 2px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
+  .page {
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
   .stage {
-    height: calc(100dvh - 64px - 56px - env(safe-area-inset-bottom));
+    height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height));
+    min-height: 0;
   }
 
   .turnCard {
     top: 12px;
+    gap: 10px;
+    width: calc(100% - 24px);
+    min-height: 72px;
+    padding: 10px 12px;
   }
 
   .pickHint {
@@ -893,32 +976,111 @@
   }
 
   .turnTitle {
-    font-size: 22px;
+    font-size: 19px;
+  }
+
+  .turnAction {
+    font-size: 14px;
+  }
+
+  .turnIcon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .voicePanel {
+    right: -1px;
+    width: min(280px, calc(100vw - 24px));
+    max-height: calc(100dvh - 120px - var(--mobile-navigation-height));
+    overflow-y: auto;
   }
 
   .zoneCard {
-    top: 104px;
-    left: 12px;
-    width: 150px;
-    padding: 12px;
-  }
-
-  .zoneScore {
-    font-size: 26px;
+    display: none;
   }
 
   .controls {
     top: auto;
     right: 12px;
-    bottom: 190px;
+    bottom: calc(var(--adaptive-sheet-height, 0px) + 12px);
+    transform: none;
+    transition: bottom 220ms ease;
+  }
+
+  .bottomPanel,
+  .choicePanel {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    padding: 0;
+    border-radius: 24px 24px 0 0;
     transform: none;
   }
 
-  .bottomPanel {
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
-    padding: 14px 16px;
+  .bottomPanelContent,
+  .choicePanelContent {
+    padding: 0 0 8px;
+  }
+
+  .desktopStats {
+    display: none;
+  }
+
+  .mobileStats {
+    display: flex;
+    gap: 14px;
+  }
+
+  .mobileStats .statValue {
+    font-size: 21px;
+  }
+
+  .mobileZoneDetail {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 16px;
+    padding: 14px;
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .mobileGuidanceActions {
+    display: flex;
+    margin-top: 16px;
+  }
+
+  .mobileGuidanceActions .endButton {
+    justify-content: center;
+    width: 100%;
+    min-height: 48px;
+    margin-left: 0;
+  }
+
+  .choiceHeader {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 4px 0 12px;
+    background: var(--surface);
+  }
+
+  .choiceList {
+    grid-template-columns: 1fr;
+  }
+
+  .choiceSelect,
+  .choiceStart,
+  .ghostButton,
+  .startButton,
+  .pickChip,
+  .pickCancel,
+  .recentItem {
+    min-height: 44px;
+    touch-action: manipulation;
   }
 
   .statValue {
@@ -927,5 +1089,49 @@
 
   .endButton {
     padding: 12px 14px;
+  }
+
+  .centerCard {
+    top: 12px;
+    width: calc(100% - 24px);
+    max-height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height) - 24px);
+    padding: 18px 16px;
+    overflow-y: auto;
+    transform: translateX(-50%);
+  }
+
+  .centerTitle {
+    font-size: 19px;
+  }
+
+  .centerSub {
+    line-height: 1.4;
+  }
+
+  .searchRow {
+    padding-left: 12px;
+  }
+
+  .searchInput {
+    font-size: 16px;
+  }
+
+  .pickConfirm {
+    bottom: 12px;
+    width: min(360px, calc(100% - 24px));
+  }
+
+  .toast {
+    bottom: calc(var(--adaptive-sheet-height, 0px) + 16px);
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .choicePanel {
+    width: min(600px, calc(100% - 48px));
+  }
+
+  .turnCard {
+    width: min(480px, calc(100% - 48px));
   }
 }

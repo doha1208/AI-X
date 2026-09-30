@@ -1,0 +1,82 @@
+.peek {
+  display: grid;
+  gap: 10px;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin: 0 -18px;
+  padding: 2px 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.chips::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+  min-width: 104px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  scroll-snap-align: start;
+  cursor: pointer;
+}
+
+.chipActive {
+  border-color: var(--brand);
+  background: var(--brand-light);
+  box-shadow: 0 0 0 1px var(--brand);
+}
+
+.chipLabel {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chipActive .chipLabel {
+  color: var(--brand);
+}
+
+.chipTime {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.chipMeta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.start {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.chip:focus-visible,
+.start:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}

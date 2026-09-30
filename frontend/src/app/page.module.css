@@ -8,7 +8,7 @@
 
 .stage {
   position: relative;
-  height: calc(100dvh - 64px);
+  height: calc(100dvh - var(--app-header-height));
   min-height: 480px;
   overflow: hidden;
 }
@@ -49,6 +49,10 @@
 
 .chip,
 .primaryChip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   flex-shrink: 0;
   padding: 8px 14px;
   border-radius: var(--radius-sm);
@@ -56,6 +60,10 @@
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.chipIcon {
+  display: none;
 }
 
 .chip {
@@ -101,6 +109,11 @@
   border-color: var(--danger);
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* 오류·위치 선택 안내(top 80px) 아래에 겹치지 않게 놓는다. */
+.noticeScore {
+  top: 132px;
 }
 
 .noticeClose {
@@ -307,6 +320,41 @@
   z-index: 10;
 }
 
+.mobileLegend {
+  display: none;
+}
+
+.mobileSelectedDetail {
+  display: none;
+}
+
+.sheetSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheetSummaryText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sheetSummaryText span {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.sheetSummaryText strong {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chip:focus-visible,
 .primaryChip:focus-visible,
 .rankItem:focus-visible,
@@ -322,36 +370,152 @@
 
 /* ---- 휴대폰: 순위 패널을 하단 시트로 ---- */
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
+  .page {
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
   .stage {
-    height: calc(100dvh - 64px - 56px - env(safe-area-inset-bottom));
+    height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height));
+    min-height: 0;
   }
 
   .searchBar {
+    top: 12px;
     right: 12px;
     left: 12px;
-    flex-wrap: wrap;
+    padding: 6px 6px 6px 12px;
+  }
+
+  /* 시트를 맨 위까지 올리면 검색창이 시트의 손잡이를 덮어 다시 내릴 수 없다 — 그동안은 검색창을 숨긴다. */
+  .stage[data-sheet-snap="full"] .searchBar {
+    display: none;
   }
 
   .searchInput {
-    flex-basis: calc(100% - 40px);
+    padding: 8px 0;
+    font-size: 14px;
+  }
+
+  .chip,
+  .primaryChip {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .chipIcon {
+    display: block;
+  }
+
+  .chipLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .panel {
     top: auto;
-    right: 12px;
-    bottom: 12px;
-    left: 12px;
+    right: 0;
+    bottom: 0;
+    left: 0;
     width: auto;
-    max-height: 42%;
+    max-height: none;
+    border-radius: 24px 24px 0 0;
   }
 
   .controls {
-    top: 140px;
+    top: auto;
     right: 12px;
+    bottom: calc(var(--adaptive-sheet-height, 104px) + var(--map-control-gap));
+    transition: bottom 220ms ease;
   }
 
   .legend {
     display: none;
+  }
+
+  .mobileLegend {
+    display: block;
+    margin: 12px 0 4px;
+    box-shadow: none;
+  }
+
+  .mobileSelectedDetail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 2px 0 10px;
+    padding: 14px;
+    border-radius: var(--radius-md);
+    background: var(--surface-muted);
+  }
+
+  .mobileSelectedDetail > div:first-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .mobileSelectedDetail > div:first-child span {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .mobileSelectedDetail strong {
+    overflow: hidden;
+    font-size: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .selectedDetailStats {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .panelHeader {
+    padding: 10px 4px 12px;
+  }
+
+  .rankList {
+    flex: none;
+    padding: 4px 0 8px;
+    overflow: visible;
+  }
+
+  .panelFooter {
+    padding: 12px 0;
+  }
+
+  .rankItem,
+  .footerButton {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .panel {
+    width: 300px;
+  }
+
+  .searchBar {
+    right: 72px;
   }
 }

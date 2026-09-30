@@ -9,7 +9,7 @@
 .layout {
   display: grid;
   grid-template-columns: 380px 1fr;
-  height: calc(100dvh - 64px);
+  height: calc(100dvh - var(--app-header-height));
   min-height: 520px;
 }
 
@@ -23,6 +23,23 @@
   border-right: 1px solid var(--border);
   background: var(--surface);
   overflow-y: auto;
+}
+
+.searchPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.resultsSheet {
+  flex: 1;
+  min-height: 0;
+}
+
+.compactSearch,
+.collapseSearch,
+.mobileLegend {
+  display: none;
 }
 
 .sidebarHeader {
@@ -194,6 +211,7 @@
   gap: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+  overflow-y: auto;
 }
 
 .resultsLabel {
@@ -381,6 +399,28 @@ div.routeCardMain {
   z-index: 10;
 }
 
+.sheetSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheetSummary span {
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheetSummary strong {
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
 .linkButton:focus-visible,
 .pickButton:focus-visible,
 .swapButton:focus-visible,
@@ -390,23 +430,179 @@ div.routeCardMain {
   outline-offset: 2px;
 }
 
-/* ---- 휴대폰: 입력·결과 위, 지도 아래 ---- */
+/* ---- 휴대폰: compact search + map + adaptive bottom sheet ---- */
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
+  .page {
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+
   .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 60vh;
-    height: auto;
-    padding-bottom: calc(56px + env(safe-area-inset-bottom));
+    position: relative;
+    display: block;
+    height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height));
+    min-height: 0;
+    overflow: hidden;
   }
 
   .sidebar {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: block;
+    padding: 0;
     border-right: none;
-    border-bottom: 1px solid var(--border);
+    overflow: visible;
+    background: transparent;
+    pointer-events: none;
+  }
+
+  .searchPanel,
+  .compactSearch,
+  .resultsSheet {
+    pointer-events: auto;
+  }
+
+  .searchPanel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    z-index: 40;
+    max-height: min(62dvh, 520px);
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    box-shadow: var(--shadow-card);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .compactSearch {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    z-index: 40;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
+    align-items: center;
+    min-height: 60px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    color: var(--text);
+    box-shadow: var(--shadow-card);
+    cursor: pointer;
+  }
+
+  /* 시트를 맨 위까지 올리면 검색 카드가 시트의 손잡이를 덮어 다시 내릴 수 없다 — 그동안은 카드를 숨긴다. */
+  .layout[data-sheet-snap="full"] .searchPanel,
+  .layout[data-sheet-snap="full"] .compactSearch {
+    display: none;
+  }
+
+  .compactSearch > span {
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .compactSearch small {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    font-size: 10px;
+  }
+
+  .compactSearch svg {
+    justify-self: center;
+    color: var(--brand);
+  }
+
+  .collapseSearch {
+    display: block;
+    align-self: center;
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 0;
+    background: none;
+    color: var(--brand);
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .sidebarHeader {
+    align-items: center;
+  }
+
+  .linkButton,
+  .pickButton,
+  .swapButton {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .primaryButton {
+    min-height: 48px;
+  }
+
+  .mapArea {
+    position: absolute;
+    inset: 0;
+  }
+
+  .resultsSheet {
+    position: absolute;
+  }
+
+  .results {
+    flex: 1;
+    padding-top: 0;
+    border-top: 0;
     overflow: visible;
   }
 
   .legend {
     display: none;
+  }
+
+  .mobileLegend {
+    display: block;
+    position: static;
+    margin: 12px 0 4px;
+  }
+
+  .controls {
+    bottom: calc(var(--adaptive-sheet-height, 104px) + 12px);
+    transition: bottom 220ms ease;
+  }
+
+  .pickConfirm {
+    bottom: calc(var(--adaptive-sheet-height, 104px) + 12px);
+    width: min(360px, calc(100% - 104px));
+  }
+
+  .routeCardMain,
+  .linkButton,
+  .compactSearch,
+  .collapseSearch {
+    touch-action: manipulation;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .layout {
+    grid-template-columns: 340px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    padding: 18px 14px;
   }
 }
