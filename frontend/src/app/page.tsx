@@ -10,10 +10,12 @@ import { addRecent, loadSettings } from "@/lib/preferences";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { SafetyMap, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapContextMenu, MapControls, MapLegend, useMapContextMenu } from "@/components/MapOverlays";
 import { withSearch } from "@/components/WithSearch";
-import { AlertIcon, CloseIcon, SearchIcon } from "@/components/icons";
+import { AlertIcon, CloseIcon, LocateIcon, MapPinIcon, SearchIcon } from "@/components/icons";
+import type { SheetSnap } from "@/lib/bottomSheet";
 import styles from "./page.module.css";
 
 const NEARBY_RADIUS_KM = 5;
@@ -32,6 +34,12 @@ function scoreTone(score: number): string {
   return styles.scoreWarning;
 }
 
+function scoreLabel(score: number): string {
+  if (score >= 70) return "안전";
+  if (score >= 40) return "보통";
+  return "주의";
+}
+
 type Nearby = { place: Place; zones: SafetyZone[] };
 
 export default withSearch(ResidencePage);
@@ -41,6 +49,7 @@ function ResidencePage({ search }: { search: string }) {
   const user = useSessionUser();
   const { location, request: requestLocation } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
   const menu = useMapContextMenu();
   const [settings] = useState(loadSettings);
   const [initialNear] = useState(() => placeFromQuery(search, "near"));
@@ -53,6 +62,7 @@ function ResidencePage({ search }: { search: string }) {
   const [picking, setPicking] = useState(false);
   const [searching, setSearching] = useState(initialNear !== null);
   const [error, setError] = useState<string | null>(null);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
 
   function searchAt(place: Place) {
     setSearching(true);
@@ -67,6 +77,7 @@ function ResidencePage({ search }: { search: string }) {
       setNearby({ place, zones });
       setScope("nearby");
       setSelectedZone(null);
+      setSheetSnap("half");
       mapRef.current?.panTo(place);
       const closest = zones.reduce<SafetyZone | null>(
         (best, z) => (!best || haversineMeters(place, z) < haversineMeters(place, best) ? z : best),
@@ -136,12 +147,13 @@ function ResidencePage({ search }: { search: string }) {
 
   if (!user) return null;
   const loadingList = showingNearby ? searching : allRanking === null;
+  const selectedRank = selectedZone ? ranking.findIndex((zone) => zone.dong_code === selectedZone.dong_code) + 1 : 0;
 
   return (
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div className={styles.stage}>
+      <div ref={stageRef} className={styles.stage}>
         <SafetyMap
           ref={mapRef}
           zones={showingNearby ? nearby.zones : ranking}
@@ -151,7 +163,10 @@ function ResidencePage({ search }: { search: string }) {
           myLocation={location ?? undefined}
           focusZone={selectedZone}
           onSelect={handleMapPick}
-          onZoneSelect={setSelectedZone}
+          onZoneSelect={(zone) => {
+            setSelectedZone(zone);
+            setSheetSnap("half");
+          }}
           onContextMenu={menu.open}
           height="100%"
         />
@@ -170,11 +185,14 @@ function ResidencePage({ search }: { search: string }) {
             className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
             onClick={() => setPicking((p) => !p)}
             aria-pressed={picking}
+            aria-label="지도에서 선택"
           >
-            지도에서 선택
+            <MapPinIcon size={17} className={styles.chipIcon} />
+            <span className={styles.chipLabel}>지도에서 선택</span>
           </button>
-          <button type="button" className={styles.primaryChip} onClick={searchMyLocation}>
-            현재 위치
+          <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
+            <LocateIcon size={17} className={styles.chipIcon} />
+            <span className={styles.chipLabel}>현재 위치</span>
           </button>
         </form>
 
@@ -193,13 +211,47 @@ function ResidencePage({ search }: { search: string }) {
           </div>
         )}
 
-        <section className={styles.panel} aria-label="안심 거주지 순위">
+        <AdaptiveBottomSheet
+          className={styles.panel}
+          label="안심 순위"
+          snap={sheetSnap}
+          onSnapChange={setSheetSnap}
+          workspaceRef={stageRef}
+          summary={
+            <div className={styles.sheetSummary}>
+              <div className={styles.sheetSummaryText}>
+                <span>{showingNearby ? "내 주변 안심 순위" : "전체 지역 안심 순위"}</span>
+                <strong>{(selectedZone ?? ranking[0])?.dong_name ?? "안전 구역을 불러오는 중"}</strong>
+              </div>
+              {(selectedZone ?? ranking[0]) && (
+                <span className={`${styles.scoreBadge} ${scoreTone((selectedZone ?? ranking[0]).safety_score)}`}>
+                  {(selectedZone ?? ranking[0]).safety_score.toFixed(0)}점
+                </span>
+              )}
+            </div>
+          }
+        >
           <header className={styles.panelHeader}>
             <h1 className={styles.panelTitle}>{showingNearby ? "안심 거주지 추천 Top 5" : "전체 지역 안심 순위"}</h1>
             <p className={styles.panelSub}>
               {showingNearby ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km 기준` : `안전지수 상위 ${TOP_ALL}곳`}
             </p>
           </header>
+
+          {selectedZone && (
+            <section className={styles.mobileSelectedDetail} aria-label="선택 안전구역 상세">
+              <div>
+                <span>선택 안전구역</span>
+                <strong>{selectedZone.dong_name}</strong>
+              </div>
+              <div className={styles.selectedDetailStats}>
+                <span className={`${styles.scoreBadge} ${scoreTone(selectedZone.safety_score)}`}>
+                  {scoreLabel(selectedZone.safety_score)} · {selectedZone.safety_score.toFixed(0)}점
+                </span>
+                {selectedRank > 0 && <span>{showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
+              </div>
+            </section>
+          )}
 
           {loadingList ? (
             <p className={styles.panelEmpty}>불러오는 중...</p>
@@ -212,7 +264,10 @@ function ResidencePage({ search }: { search: string }) {
                   <button
                     type="button"
                     className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
-                    onClick={() => setSelectedZone(zone)}
+                    onClick={() => {
+                      setSelectedZone(zone);
+                      setSheetSnap("half");
+                    }}
                   >
                     <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
                     <span className={styles.rankName}>{zone.dong_name}</span>
@@ -240,7 +295,8 @@ function ResidencePage({ search }: { search: string }) {
               </button>
             )}
           </footer>
-        </section>
+          <MapLegend className={styles.mobileLegend} title="안전도" items={SAFETY_LEGEND} />
+        </AdaptiveBottomSheet>
 
         <MapControls
           className={styles.controls}
