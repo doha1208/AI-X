@@ -43,6 +43,9 @@ export type RouteAlternative = {
 };
 
 export type User = { id: number; email: string };
+export type RouteHistoryPlace = { label: string; lat: number; lng: number };
+export type RouteHistoryItem = { start: RouteHistoryPlace; end: RouteHistoryPlace; lastUsedAt: string };
+export type RouteHistorySnapshot = { rememberRouteHistory: boolean; items: RouteHistoryItem[] };
 
 export type ScoreWeights = Record<"day" | "night", Record<string, number>>;
 
@@ -146,6 +149,26 @@ export function me() {
 
 export function logout() {
   return request<void>("/auth/logout", { method: "POST" });
+}
+
+function routeHistorySnapshot(value: { remember_route_history: boolean; items: { start: RouteHistoryPlace; end: RouteHistoryPlace; last_used_at: string }[] }): RouteHistorySnapshot {
+  return { rememberRouteHistory: value.remember_route_history, items: value.items.map((item) => ({ start: item.start, end: item.end, lastUsedAt: item.last_used_at })) };
+}
+
+export async function getRouteHistory(): Promise<RouteHistorySnapshot> {
+  return routeHistorySnapshot(await request("/me/route-history"));
+}
+
+export async function saveRouteHistory(start: RouteHistoryPlace, end: RouteHistoryPlace): Promise<RouteHistorySnapshot> {
+  return routeHistorySnapshot(await request("/me/route-history", { method: "POST", body: JSON.stringify({ start, end }) }));
+}
+
+export async function setRouteHistoryRemember(remember_route_history: boolean): Promise<RouteHistorySnapshot> {
+  return routeHistorySnapshot(await request("/me/route-history/settings", { method: "PATCH", body: JSON.stringify({ remember_route_history }) }));
+}
+
+export function clearRouteHistory(): Promise<void> {
+  return request("/me/route-history", { method: "DELETE" });
 }
 
 export function residenceRecommend(limit = 5) {
