@@ -109,14 +109,15 @@ type PickConfirmProps = {
   onConfirm: (place: MapPlace) => void;
   onCancel: () => void;
   className?: string;
+  title?: string;
 };
 
-export function PickConfirm({ pending, confirmLabel, onConfirm, onCancel, className = "" }: PickConfirmProps) {
+export function PickConfirm({ pending, confirmLabel, onConfirm, onCancel, className = "", title = "선택한 위치" }: PickConfirmProps) {
   if (!pending) return null;
   const { label } = pending;
   return (
     <section className={`${styles.pickConfirm} ${className}`} aria-label="지도에서 고른 위치" aria-live="polite">
-      <p className={styles.pickTitle}>선택한 위치</p>
+      <p className={styles.pickTitle}>{title}</p>
       <p className={styles.pickAddress}>{label ?? "주소를 찾는 중..."}</p>
       <p className={styles.pickSub}>다른 곳을 누르면 위치를 바꿀 수 있어요</p>
       <div className={styles.pickActions}>

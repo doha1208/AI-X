@@ -464,6 +464,8 @@ div.routeCardMain {
   .mobileFlowHidden { display: none; }
   .layout { display: none; }
   .layout[data-has-route="true"] { display: block; }
+  .layout[data-picking] .sidebar { display: none; }
+  .layout[data-picking] .pickConfirm { bottom: max(20px, env(safe-area-inset-bottom)); width: min(360px, calc(100% - 32px)); }
 
   .sidebar {
     position: absolute;

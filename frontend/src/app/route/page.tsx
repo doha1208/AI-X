@@ -178,9 +178,11 @@ function RoutePage({ search }: { search: string }) {
   }
 
   function confirmPick(place: Place) {
-    if (picking) setPlace(picking, place);
+    const field = picking;
+    if (field) setPlace(field, place);
     setPicking(null);
     mapPick.clear();
+    if (field) setMobileEditing(field);
   }
 
   async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
@@ -239,7 +241,7 @@ function RoutePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <section className={`${styles.mobileFlow} ${route ? styles.mobileFlowHidden : ""}`} aria-label="길찾기">
+      <section className={`${styles.mobileFlow} ${route || picking ? styles.mobileFlowHidden : ""}`} aria-label="길찾기">
         {mobileEditing ? (
           <div className={styles.mobileEditor}>
             <button type="button" className={styles.mobileBack} onClick={() => setMobileEditing(null)}>← 취소</button>
@@ -258,14 +260,14 @@ function RoutePage({ search }: { search: string }) {
             <button type="button" className={styles.primaryButton} disabled={!places.start || !places.end || loading} onClick={() => void handleSearch({ preventDefault: () => undefined } as React.FormEvent<HTMLFormElement>)}>{loading ? "경로 찾는 중..." : "경로 검색"}</button>
             <div className={styles.historyControls}>
               <label><input type="checkbox" checked={history?.rememberRouteHistory ?? true} onChange={(e) => void setRouteHistoryRemember(e.target.checked).then(setHistory)} /> 경로 기억</label>
-              <button type="button" onClick={() => { if (window.confirm("최근 경로를 모두 삭제할까요?")) void clearRouteHistory().then(() => setHistory((value) => value ? { ...value, items: [] } : value); }}>전체 기록 삭제</button>
+              <button type="button" onClick={() => { if (window.confirm("최근 경로를 모두 삭제할까요?")) void clearRouteHistory().then(() => setHistory((value) => value ? { ...value, items: [] } : value)); }}>전체 기록 삭제</button>
             </div>
             {history?.items.map((item) => <button key={`${item.start.lat}-${item.end.lat}`} type="button" className={styles.historyItem} onClick={() => { setPlace("start", item.start); setPlace("end", item.end); }}>{item.start.label} → {item.end.label}</button>)}
           </div>
         )}
       </section>
 
-      <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap} data-has-route={Boolean(route)}>
+      <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap} data-has-route={Boolean(route || picking)} data-picking={picking ?? undefined}>
         <aside className={styles.sidebar}>
           {route && !searchExpanded ? (
             <button type="button" className={styles.compactSearch} onClick={() => setSearchExpanded(true)}>
@@ -496,6 +498,7 @@ function RoutePage({ search }: { search: string }) {
           <PickConfirm
             className={styles.pickConfirm}
             pending={pendingPick}
+            title={picking ? "경로" : undefined}
             confirmLabel={picking === "start" ? "출발지로 설정" : "도착지로 설정"}
             onConfirm={confirmPick}
             onCancel={mapPick.clear}
