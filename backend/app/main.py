@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.admin_scoring import router as admin_scoring_router
+from app.api.route_history import router as route_history_router
 from app.api.safety import router as safety_router
 from app.core.config import settings, validate_runtime_settings
 from app.db.session import Base, engine
@@ -40,6 +41,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(admin_scoring_router)
+app.include_router(route_history_router)
 app.include_router(safety_router)
 
 

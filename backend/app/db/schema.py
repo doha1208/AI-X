@@ -4,7 +4,13 @@ from sqlalchemy import Engine, inspect, text
 def ensure_database_schema(engine: Engine) -> None:
     """Extend legacy SQLite tables that ``create_all`` cannot alter."""
 
-    if "score_builds" not in inspect(engine).get_table_names():
+    tables = inspect(engine).get_table_names()
+    if "users" in tables:
+        columns = {column["name"] for column in inspect(engine).get_columns("users")}
+        if "remember_route_history" not in columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE users ADD COLUMN remember_route_history BOOLEAN NOT NULL DEFAULT 1"))
+    if "score_builds" not in tables:
         return
 
     existing_columns = {column["name"] for column in inspect(engine).get_columns("score_builds")}
