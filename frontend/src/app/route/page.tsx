@@ -197,6 +197,10 @@ function RoutePage({ search }: { search: string }) {
     }
     setPlaces({ start, end });
     requestRef.current?.abort();
+    // 새 검색은 이전 경로와 독립적이다. 요청이 실패해도 이전 경로가 새 입력값과
+    // 함께 남아 지도를 엉뚱한 위치로 이동시키지 않도록 즉시 비운다.
+    setRoute(null);
+    setSelected(0);
     const controller = new AbortController();
     requestRef.current = controller;
     setLoading(true);

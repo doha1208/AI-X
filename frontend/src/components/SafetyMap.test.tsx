@@ -44,6 +44,7 @@ describe("SafetyMap container resize", () => {
   beforeEach(() => {
     state.loadKakaoSdk.mockClear();
     state.map.relayout.mockClear();
+    state.map.setBounds.mockClear();
     state.resizeCallback = null;
     installKakao();
     vi.stubGlobal("ResizeObserver", class {
@@ -52,6 +53,7 @@ describe("SafetyMap container resize", () => {
       disconnect() {}
       unobserve() {}
     });
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
   });
 
   it("relayouts Kakao tiles when the map container height changes", async () => {
@@ -63,5 +65,14 @@ describe("SafetyMap container resize", () => {
     state.resizeCallback?.([], {} as ResizeObserver);
 
     expect(state.map.relayout).toHaveBeenCalledTimes(1);
+  });
+
+  it("fits the active route again after the map container changes size", async () => {
+    render(<SafetyMap height="100%" routePath={[{ lat: 37.532, lng: 126.99 }, { lat: 37.548, lng: 127.01 }]} />);
+
+    await waitFor(() => expect(state.map.setBounds).toHaveBeenCalledTimes(1));
+    state.resizeCallback?.([], {} as ResizeObserver);
+
+    await waitFor(() => expect(state.map.setBounds).toHaveBeenCalledTimes(2));
   });
 });

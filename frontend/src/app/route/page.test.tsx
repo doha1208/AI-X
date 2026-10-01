@@ -1,6 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import RoutePage from "./page";
+
+const routeSafety = vi.fn();
+
+vi.mock("@/lib/api", () => ({
+  routeSafety: (...args: unknown[]) => routeSafety(...args),
+  getRouteHistory: vi.fn().mockResolvedValue({ rememberRouteHistory: true, items: [] }),
+  saveRouteHistory: vi.fn().mockResolvedValue(undefined),
+  setRouteHistoryRemember: vi.fn(),
+  clearRouteHistory: vi.fn(),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -35,5 +45,41 @@ describe("RoutePage responsive presentation", () => {
     expect(screen.getAllByTestId("safety-map")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "경로 결과 펼치기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "출발지와 도착지 바꾸기" })).toBeInTheDocument();
+  });
+
+  it("clears the previous route when a replacement search fails", async () => {
+    routeSafety
+      .mockResolvedValueOnce({
+        safety_score: 55,
+        zones_passed: [],
+        route_points: [{ lat: 37.532, lng: 126.99 }, { lat: 37.548, lng: 127.01 }],
+        mode: "straight_line",
+        period: "day",
+        alternatives: [{
+          route_points: [{ lat: 37.532, lng: 126.99 }, { lat: 37.548, lng: 127.01 }],
+          safety_score: 55,
+          distance_m: 2500,
+          zones_passed: [],
+        }],
+        shortest_route_points: null,
+        shortest_zones_passed: null,
+      })
+      .mockRejectedValueOnce(new Error("직선거리 10km를 초과하는 보행 경로는 지원하지 않습니다"));
+
+    render(<RoutePage />);
+    const start = screen.getByLabelText("출발지 주소");
+    const end = screen.getByLabelText("도착지 주소");
+    const search = screen.getByRole("button", { name: "안전 경로 찾기" });
+
+    fireEvent.change(start, { target: { value: "37.532, 126.990" } });
+    fireEvent.change(end, { target: { value: "37.548, 127.010" } });
+    fireEvent.click(search);
+    expect(await screen.findByLabelText("경로 검색 결과")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "검색 조건 수정" }));
+    fireEvent.change(screen.getByLabelText("도착지 주소"), { target: { value: "29.44895, 132.25367" } });
+    fireEvent.click(screen.getByRole("button", { name: "안전 경로 찾기" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("경로 검색 결과")).not.toBeInTheDocument());
   });
 });

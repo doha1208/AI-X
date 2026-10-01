@@ -147,6 +147,7 @@ export function SafetyMap({
   const lastFocusDongCodeRef = useRef<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [layoutVersion, setLayoutVersion] = useState(0);
   const onSelectRef = useRef(onSelect);
   const onZoneSelectRef = useRef(onZoneSelect);
   const onContextMenuRef = useRef(onContextMenu);
@@ -209,7 +210,13 @@ export function SafetyMap({
 
     // 주소창·safe area·하단 시트처럼 컨테이너만 변하는 모바일 레이아웃에도
     // 카카오 지도 타일을 재배치한다.
-    const relayoutMap = () => map.relayout();
+    const relayoutMap = () => {
+      map.relayout();
+      // 검색 결과·하단 시트로 지도 컨테이너가 변하면 기존 setBounds 결과는
+      // 이전 크기를 기준으로 남는다. 경로 bounds effect가 새 가용 영역에서
+      // 다시 실행되도록 버전을 올린다.
+      setLayoutVersion((version) => version + 1);
+    };
     window.addEventListener("resize", relayoutMap);
     const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(relayoutMap);
     resizeObserver?.observe(container);
@@ -346,7 +353,7 @@ export function SafetyMap({
     const insets = visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
     map.setBounds(bounds, insets.top, insets.right, insets.bottom, insets.left);
     viewTakenRef.current = true;
-  }, [loaded, routePath, comparePath, followLocation]);
+  }, [loaded, routePath, comparePath, followLocation, layoutVersion]);
 
   // 구역 표시/내 위치/경로선은 지도 시점을 건드리지 않고 오버레이만 갱신한다.
   useEffect(() => {
