@@ -270,10 +270,11 @@ function RoutePage({ search }: { search: string }) {
       <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap} data-has-route={Boolean(route || picking)} data-picking={picking ?? undefined}>
         <aside className={styles.sidebar}>
           {route && !searchExpanded ? (
-            <button type="button" className={styles.compactSearch} onClick={() => setSearchExpanded(true)}>
+            <button type="button" className={styles.compactSearch} onClick={() => setSearchExpanded(true)} aria-label="검색 조건 수정">
               <span><small>출발</small>{places.start?.label ?? texts.start}</span>
               <SwapIcon size={16} />
               <span><small>도착</small>{places.end?.label ?? texts.end}</span>
+              <b className={styles.editRoute}>조건 수정</b>
             </button>
           ) : (
             <div className={styles.searchPanel}>
@@ -316,6 +317,14 @@ function RoutePage({ search }: { search: string }) {
                   {loading ? "경로 찾는 중..." : "안전 경로 찾기"}
                 </button>
               </form>
+
+              <section className={styles.desktopHistory} aria-label="최근 경로">
+                <div className={styles.historyControls}>
+                  <label><input type="checkbox" checked={history?.rememberRouteHistory ?? true} onChange={(e) => void setRouteHistoryRemember(e.target.checked).then(setHistory)} /> 경로 기억</label>
+                  <button type="button" onClick={() => { if (window.confirm("최근 경로를 모두 삭제할까요?")) void clearRouteHistory().then(() => setHistory((value) => value ? { ...value, items: [] } : value)); }}>전체 기록 삭제</button>
+                </div>
+                {history?.items.map((item) => <button key={`${item.start.lat}-${item.start.lng}-${item.end.lat}-${item.end.lng}`} type="button" className={styles.historyItem} onClick={() => { setPlace("start", item.start); setPlace("end", item.end); }}>{item.start.label} → {item.end.label}</button>)}
+              </section>
 
               {route && (
                 <button type="button" className={styles.collapseSearch} onClick={() => setSearchExpanded(false)}>

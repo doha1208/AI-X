@@ -44,6 +44,10 @@
   display: none;
 }
 
+.sidebar .compactSearch { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 6px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-muted); color: var(--text); text-align: left; cursor: pointer; }
+.sidebar .compactSearch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
+.sidebar .compactSearch small { display: block; color: var(--text-muted); font-size: 10px; }
+
 .sidebarHeader {
   display: flex;
   align-items: baseline;
@@ -70,6 +74,12 @@
   flex-direction: column;
   gap: 14px;
 }
+
+.desktopHistory { display: flex; flex-direction: column; gap: 8px; }
+.historyControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-muted); }
+.historyControls label { display: flex; align-items: center; gap: 6px; }
+.historyControls button { border: 0; background: none; color: var(--brand); font-weight: 700; cursor: pointer; }
+.historyItem { min-height: 40px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--text); text-align: left; cursor: pointer; }
 
 .fields {
   position: relative;
@@ -457,10 +467,9 @@ div.routeCardMain {
   .mobileActions { display: flex; gap: 8px; }
   .mobileActions button, .mobileBack { min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: var(--brand-light); color: var(--brand); font-weight: 700; }
   .mobileBack { align-self: flex-start; background: transparent; padding-left: 0; }
-  .historyControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--text-muted); }
-  .historyControls label { display: flex; align-items: center; gap: 6px; }
-  .historyControls button { border: 0; background: none; color: var(--brand); font-weight: 700; }
-  .historyItem { min-height: 44px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-align: left; }
+  .desktopHistory { display: none; }
+  .historyControls { margin-top: 8px; }
+  .historyItem { min-height: 44px; padding: 10px 12px; background: var(--surface); }
   .mobileFlowHidden { display: none; }
   .layout { display: none; }
   .layout[data-has-route="true"] { display: block; }
@@ -501,7 +510,7 @@ div.routeCardMain {
     overscroll-behavior: contain;
   }
 
-  .compactSearch {
+  .sidebar .compactSearch {
     position: absolute;
     top: 12px;
     right: 12px;
@@ -542,7 +551,7 @@ div.routeCardMain {
     font-size: 10px;
   }
 
-  .compactSearch svg {
+.compactSearch svg {
     justify-self: center;
     color: var(--brand);
   }
@@ -617,6 +626,7 @@ div.routeCardMain {
     touch-action: manipulation;
   }
 }
+.editRoute { grid-column: 1 / -1; color: var(--brand); font-size: 12px; }
 
 @media (min-width: 768px) and (max-width: 1023px) {
   .layout {
