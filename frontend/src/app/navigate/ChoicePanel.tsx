@@ -16,7 +16,7 @@ export type Choice = { options: GuideOption[]; safetyWeighted: boolean; period: 
 
 // 경로 이름. 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
 export function choiceTitle(option: GuideOption, choice: Choice, safeOption: GuideOption | undefined): string {
-  if (option.kind === "safe") return choice.safetyWeighted ? "안전 경로" : "도보 경로";
+  if (option.kind === "safe") return choice.safetyWeighted ? "데이터 기반 추천 경로" : "도보 경로";
   const reallyShortest = !safeOption || option.distanceM < safeOption.distanceM;
   return reallyShortest ? "최단 경로" : "일반 도보 경로";
 }
@@ -75,7 +75,7 @@ export function ChoicePanel({
         </div>
       ) : !choice ? (
         <p className={styles.choiceStatus} role="status">
-          {myLocation ? "안전 경로와 최단 경로를 비교하는 중..." : "현재 위치를 찾는 중..."}
+          {myLocation ? "데이터 기반 추천 경로와 최단 경로를 비교하는 중..." : "현재 위치를 찾는 중..."}
         </p>
       ) : (
         <>
@@ -119,12 +119,13 @@ export function ChoicePanel({
             })}
           </div>
           {!choice.safetyWeighted ? (
-            <p className={styles.choiceNote}>안전 경로를 찾지 못해 일반 도보 경로로만 안내할 수 있어요.</p>
+            <p className={styles.choiceNote}>데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로만 안내할 수 있어요.</p>
           ) : (
             choice.options.length === 1 && (
-              <p className={styles.choiceNote}>최단 경로를 가져오지 못해 안전 경로로만 안내할 수 있어요.</p>
+              <p className={styles.choiceNote}>최단 경로를 가져오지 못해 데이터 기반 추천 경로로만 안내할 수 있어요.</p>
             )
           )}
+          <p className={styles.choiceNote}>공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.</p>
         </>
       )}
     </div>

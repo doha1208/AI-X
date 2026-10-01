@@ -193,7 +193,7 @@ function NavigatePage({ search }: { search: string }) {
         const next = found.find((option) => option.kind === mode) ?? found[0];
         if (mode === "shortest" && next.kind !== "shortest") {
           setMode("safe");
-          showToast("최단 경로를 가져오지 못해 안전 경로로 안내해요");
+          showToast("최단 경로를 가져오지 못해 데이터 기반 추천 경로로 안내해요");
         }
         setGuided(next);
       }
@@ -592,7 +592,7 @@ function NavigatePage({ search }: { search: string }) {
                     <NavigationIcon size={24} />
                   </span>
                   <div className={styles.turnText} aria-live="polite">
-                    <p className={styles.turnTitle}>{position ? "안전 경로를 찾는 중..." : "현재 위치를 찾는 중..."}</p>
+                    <p className={styles.turnTitle}>{position ? "데이터 기반 추천 경로를 찾는 중..." : "현재 위치를 찾는 중..."}</p>
                     <p className={styles.turnSub}>목적지 · {destination?.label}</p>
                   </div>
                 </>
@@ -762,7 +762,7 @@ function NavigatePage({ search }: { search: string }) {
         {phase === "choose" && !picking && (
           <section className={styles.centerCard} aria-label="목적지 선택">
             <h1 className={styles.centerTitle}>어디로 안내할까요?</h1>
-            <p className={styles.centerSub}>현재 위치에서 출발하는 안전 경로와 최단 경로를 비교해서 고를 수 있어요.</p>
+            <p className={styles.centerSub}>현재 위치에서 출발하는 데이터 기반 추천 경로와 최단 경로를 비교해서 고를 수 있어요.</p>
             <form
               className={styles.searchRow}
               onSubmit={(e) => {

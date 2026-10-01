@@ -49,7 +49,7 @@ describe("ResidencePage responsive presentation", () => {
     expect(screen.getByRole("button", { name: "안심 순위 펼치기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "지도에서 선택" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "현재 위치" })).toBeInTheDocument();
-    expect(screen.getAllByText("안전 (70~100)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("참고 점수 높음 (70~100)").length).toBeGreaterThan(0);
     await waitFor(() => expect(residenceRecommend).toHaveBeenCalledWith(10));
 
     // 순위 항목만 고른다 — 같은 줄의 "관심 동네 저장" 버튼 이름에도 동 이름이 들어 있다.

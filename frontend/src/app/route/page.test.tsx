@@ -69,16 +69,17 @@ describe("RoutePage responsive presentation", () => {
     render(<RoutePage />);
     const start = screen.getByLabelText("출발지 주소");
     const end = screen.getByLabelText("도착지 주소");
-    const search = screen.getByRole("button", { name: "안전 경로 찾기" });
+    const search = screen.getByRole("button", { name: "추천 경로 찾기" });
 
     fireEvent.change(start, { target: { value: "37.532, 126.990" } });
     fireEvent.change(end, { target: { value: "37.548, 127.010" } });
     fireEvent.click(search);
     expect(await screen.findByLabelText("경로 검색 결과")).toBeInTheDocument();
+    expect(screen.getByText("공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "검색 조건 수정" }));
     fireEvent.change(screen.getByLabelText("도착지 주소"), { target: { value: "29.44895, 132.25367" } });
-    fireEvent.click(screen.getByRole("button", { name: "안전 경로 찾기" }));
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
 
     await waitFor(() => expect(screen.queryByLabelText("경로 검색 결과")).not.toBeInTheDocument());
   });

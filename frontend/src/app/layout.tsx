@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "안심 거주지 · 귀갓길 추천",
-  description: "안전 지수 기반 거주지/귀갓길 추천 서비스",
+  description: "공개 데이터 기반 거주지·귀갓길 참고 정보 서비스",
 };
 
 export const viewport: Viewport = {

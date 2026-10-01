@@ -254,6 +254,9 @@ export default function MyInfoPage() {
             상점 밀도, 교통사고 다발지역과의 거리</strong>를 종합해 계산해요. 밤에는 보안등과 비상벨의 비중을 더 높여
             계산합니다.
           </p>
+          <p className={styles.infoText}>
+            이 점수와 추천 경로는 공개 데이터를 바탕으로 한 참고 정보이며, 실제 안전을 보장하지 않아요.
+          </p>
         </section>
 
         <button type="button" className={styles.logoutButton} onClick={handleLogout}>

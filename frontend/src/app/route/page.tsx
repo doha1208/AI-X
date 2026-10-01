@@ -36,7 +36,7 @@ const PEEK_SHEET_HEIGHT = 204;
 
 // 고른 경로는 초록 실선, 비교하는 다른 경로는 회색 점선.
 function routeLegend(compareSelected: boolean, compareName: string): LegendItem[] {
-  const [solid, dashed] = compareSelected ? [compareName, "추천 안전 경로"] : ["추천 안전 경로", compareName];
+  const [solid, dashed] = compareSelected ? [compareName, "데이터 기반 추천 경로"] : ["데이터 기반 추천 경로", compareName];
   return [
     { label: solid, swatch: "line", color: "#2e7d32" },
     { label: `${dashed} (비교용)`, swatch: "dash", color: "#9aa0a6" },
@@ -318,7 +318,7 @@ function RoutePage({ search }: { search: string }) {
                   </button>
                 </div>
                 <button type="submit" className={styles.primaryButton} disabled={loading}>
-                  {loading ? "경로 찾는 중..." : "안전 경로 찾기"}
+                  {loading ? "경로 찾는 중..." : "추천 경로 찾기"}
                 </button>
               </form>
 
@@ -372,11 +372,15 @@ function RoutePage({ search }: { search: string }) {
                   {route.period === "night" ? "야간 기준" : "주간 기준"}
                 </span>
               </p>
+              <p className={styles.note}>
+                <InfoIcon size={14} />
+                공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.
+              </p>
               {route.mode !== "safety_weighted" && (
                 <p className={styles.fallback}>
                   <InfoIcon size={14} />
                   {route.mode === "tmap"
-                    ? "안전 경로를 찾지 못해 일반 도보 경로로 안내해요"
+                    ? "데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로 안내해요"
                     : "도보 경로를 가져오지 못해 직선 거리로 추정했어요"}
                 </p>
               )}
@@ -392,14 +396,14 @@ function RoutePage({ search }: { search: string }) {
                   >
                     <button type="button" className={styles.routeCardMain} onClick={() => setSelected(i)}>
                       <span className={`${styles.tag} ${i === 0 ? styles.tagBest : ""}`}>
-                        {i === 0 ? "추천: 가장 안전" : `대안 ${i}`}
+                        {i === 0 ? "추천 1순위" : `대안 ${i}`}
                       </span>
                       <span className={styles.routeTime}>
                         {walkingMinutes(alt.distance_m)}분 <small>{formatDistance(alt.distance_m)}</small>
                       </span>
                       <span className={styles.routeMeta}>
                         <span className={`${styles.scoreBadge} ${scoreTone(alt.safety_score)}`}>
-                          안전지수 {alt.safety_score.toFixed(0)}점
+                          참고 안전지수 {alt.safety_score.toFixed(0)}점
                         </span>
                         {passed && <span className={styles.passed}>지나가는 동: {passed}</span>}
                       </span>
@@ -410,9 +414,9 @@ function RoutePage({ search }: { search: string }) {
                           <p className={styles.note}>
                             <InfoIcon size={14} />
                             {extraM > 20
-                              ? `${compareName}보다 ${formatDistance(extraM)} 더 걷는 대신 안전도를 반영해 고른 길이에요`
+                              ? `${compareName}보다 ${formatDistance(extraM)} 더 걷는 대신 공개 데이터 안전지표를 반영한 길이에요`
                               : extraM < -20
-                                ? `${compareName}보다 ${formatDistance(-extraM)} 짧으면서 안전도도 반영한 길이에요`
+                                ? `${compareName}보다 ${formatDistance(-extraM)} 짧으면서 공개 데이터 안전지표도 반영한 길이에요`
                                 : `${compareName}와 거의 같은 거리예요`}
                           </p>
                         )}

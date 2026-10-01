@@ -83,9 +83,9 @@ export default function SignupPage() {
         </div>
         <h1 className={styles.title}>회원가입</h1>
         <p className={styles.subtitle}>
-          안심 거주지와 함께 더 안전한
+          안심 거주지와 함께 공개 데이터 기반
           <br />
-          일상을 시작해보세요
+          생활 정보를 살펴보세요
         </p>
 
         <form onSubmit={handleSubmit} className={styles.form}>

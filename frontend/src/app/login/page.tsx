@@ -49,9 +49,9 @@ export default function LoginPage() {
         </div>
         <h1 className={styles.title}>안심 거주지</h1>
         <p className={styles.subtitle}>
-          우리 동네 안전지수를 확인하고
+          공개 데이터 기반 참고 점수를 확인하고
           <br />
-          든든한 귀갓길을 찾아보세요
+          귀갓길 정보를 살펴보세요
         </p>
 
         <form onSubmit={handleSubmit} className={styles.form}>

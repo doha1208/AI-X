@@ -33,9 +33,9 @@ const TOP_ALL = 10;
 const WATCH_LOOKUP_KM = 1;
 
 const SAFETY_LEGEND = [
-  { label: "안전 (70~100)", swatch: "dot" as const, color: "var(--safe)" },
-  { label: "보통 (40~69)", swatch: "dot" as const, color: "var(--caution)" },
-  { label: "주의 (0~39)", swatch: "dot" as const, color: "var(--warning)" },
+  { label: "참고 점수 높음 (70~100)", swatch: "dot" as const, color: "var(--safe)" },
+  { label: "참고 점수 중간 (40~69)", swatch: "dot" as const, color: "var(--caution)" },
+  { label: "참고 점수 낮음 (0~39)", swatch: "dot" as const, color: "var(--warning)" },
 ];
 
 function scoreTone(score: number): string {
@@ -45,9 +45,9 @@ function scoreTone(score: number): string {
 }
 
 function scoreLabel(score: number): string {
-  if (score >= 70) return "안전";
-  if (score >= 40) return "보통";
-  return "주의";
+  if (score >= 70) return "참고 점수 높음";
+  if (score >= 40) return "참고 점수 중간";
+  return "참고 점수 낮음";
 }
 
 type Nearby = { place: Place; zones: SafetyZone[] };
@@ -280,7 +280,9 @@ function ResidencePage({ search }: { search: string }) {
           <header className={styles.panelHeader}>
             <h1 className={styles.panelTitle}>{showingNearby ? "안심 거주지 추천 Top 5" : "전체 지역 안심 순위"}</h1>
             <p className={styles.panelSub}>
-              {showingNearby ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km 기준` : `안전지수 상위 ${TOP_ALL}곳`}
+              {showingNearby
+                ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
+                : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
             </p>
           </header>
 
