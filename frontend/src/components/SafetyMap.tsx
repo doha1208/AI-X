@@ -207,9 +207,12 @@ export function SafetyMap({
     mapRef.current = map;
     const container = containerRef.current;
 
-    // 브라우저 창 크기가 바뀌면 컨테이너 크기도 바뀌므로 Kakao 지도에 재계산을 알려준다.
+    // 주소창·safe area·하단 시트처럼 컨테이너만 변하는 모바일 레이아웃에도
+    // 카카오 지도 타일을 재배치한다.
     const relayoutMap = () => map.relayout();
     window.addEventListener("resize", relayoutMap);
+    const resizeObserver = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(relayoutMap);
+    resizeObserver?.observe(container);
 
     kakao.maps.event.addListener(map, "dragstart", () => {
       viewTakenRef.current = true;
@@ -305,6 +308,7 @@ export function SafetyMap({
       suppressClickTimerRef.current = null;
       suppressNextClickRef.current = false;
       window.removeEventListener("resize", relayoutMap);
+      resizeObserver?.disconnect();
     };
   }, [loaded]);
 
