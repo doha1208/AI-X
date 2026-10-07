@@ -11,6 +11,8 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
+  /* 스냅이 좌우 여백을 건너뛰어 첫 카드가 화면 끝에 붙지 않게 한다. */
+  scroll-padding-inline: 18px;
   scrollbar-width: none;
   touch-action: pan-x;
 }
