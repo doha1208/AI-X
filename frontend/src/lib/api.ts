@@ -6,6 +6,11 @@ let refreshRequest: Promise<boolean> | null = null;
 
 function errorMessage(detail: unknown, fallback: string): string {
   if (typeof detail === "string") return detail;
+  // FastAPI 입력 검증 오류: [{ msg: "Value error, 직선거리 10km를 ..." }] — 사람이 읽을 문구만 꺼낸다.
+  const first: unknown = Array.isArray(detail) ? detail[0] : undefined;
+  if (first && typeof first === "object" && "msg" in first && typeof first.msg === "string") {
+    return first.msg.replace(/^Value error, /, "");
+  }
   if (detail && typeof detail === "object" && "action" in detail && typeof detail.action === "string") {
     return detail.action;
   }
@@ -136,7 +141,9 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
     headers,
   });
   if (unsafe) csrfToken = null;
-  if (res.status === 401 && !retried && !path.startsWith("/auth/")) {
+  // 로그인·갱신 요청 자체는 다시 갱신하지 않는다. /auth/me는 새로고침마다 부르므로 만료된 access token을 여기서 갱신해야 한다.
+  const canRefresh = path === "/auth/me" || !path.startsWith("/auth/");
+  if (res.status === 401 && !retried && canRefresh) {
     if (await refreshAccess()) return request<T>(path, options, true);
   }
   if (!res.ok) {
