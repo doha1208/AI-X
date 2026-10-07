@@ -37,7 +37,16 @@ vi.mock("@/components/SafetyMap", () => ({
 describe("ResidencePage responsive presentation", () => {
   beforeEach(() => {
     residenceRecommend.mockResolvedValue([
-      { dong_code: "1168064000", dong_name: "강남구 역삼동", lat: 37.5, lng: 127.03, safety_score: 82 },
+      {
+        dong_code: "1168064000",
+        dong_name: "강남구 역삼동",
+        lat: 37.5,
+        lng: 127.03,
+        safety_score: 82,
+        day_safety_score: 74,
+        night_safety_score: 82,
+        period: "night",
+      },
     ]);
   });
 
@@ -50,6 +59,7 @@ describe("ResidencePage responsive presentation", () => {
     expect(screen.getByRole("button", { name: "지도에서 선택" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "현재 위치" })).toBeInTheDocument();
     expect(screen.getAllByText("참고 점수 높음 (70~100)").length).toBeGreaterThan(0);
+    expect(screen.getByText("현재 시간 기준: 야간")).toBeInTheDocument();
     await waitFor(() => expect(residenceRecommend).toHaveBeenCalledWith(10));
 
     // 순위 항목만 고른다 — 같은 줄의 "관심 동네 저장" 버튼 이름에도 동 이름이 들어 있다.

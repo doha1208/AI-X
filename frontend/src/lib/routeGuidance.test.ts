@@ -10,12 +10,27 @@ import {
   zoneSummary,
 } from "./routeGuidance";
 
-const zone = (code: string, score: number) => ({ dong_code: code, dong_name: code, lat: 37.5, lng: 127, safety_score: score });
+const zone = (code: string, score: number) => ({
+  dong_code: code,
+  dong_name: code,
+  lat: 37.5,
+  lng: 127,
+  safety_score: score,
+  day_safety_score: score,
+  night_safety_score: score,
+  period: "day" as const,
+});
 
 // 위도 0.001도 ≈ 111m. 북쪽으로 두 칸 간 뒤 동쪽/서쪽으로 꺾는 경로.
 const start = { lat: 37.5, lng: 127.0 };
 const north1 = { lat: 37.501, lng: 127.0 };
 const corner = { lat: 37.502, lng: 127.0 };
+const dataDisclosure: RouteResult["data_disclosure"] = {
+  data_basis: ["zone_safety_indicators"],
+  updated_at: null,
+  missing_data: [],
+  fallback: { applied: false, mode: "safety_weighted" as const, reason: "none" as const },
+};
 
 describe("routeGuidance", () => {
   it("announces a right turn at the corner with the distance to it", () => {
@@ -55,6 +70,7 @@ describe("routeGuidance", () => {
       route_points: safePoints,
       mode: "safety_weighted",
       period: "day",
+      data_disclosure: dataDisclosure,
       alternatives: [{ route_points: safePoints, safety_score: 70, distance_m: 222, zones_passed: [zone("A", 80)] }],
       shortest_route_points: [start, corner],
       shortest_zones_passed: [zone("A", 80), zone("B", 30)],
@@ -74,6 +90,10 @@ describe("routeGuidance", () => {
       route_points: [start, corner],
       mode: "tmap",
       period: "day",
+      data_disclosure: {
+        ...dataDisclosure,
+        fallback: { applied: true, mode: "tmap", reason: "safety_weighted_unavailable" },
+      },
       alternatives: [],
       shortest_route_points: null,
     };

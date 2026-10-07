@@ -180,6 +180,7 @@ function ResidencePage({ search }: { search: string }) {
   if (!user) return null;
   const loadingList = showingNearby ? searching : allRanking === null;
   const selectedRank = selectedZone ? ranking.findIndex((zone) => zone.dong_code === selectedZone.dong_code) + 1 : 0;
+  const currentPeriod = (selectedZone ?? ranking[0])?.period;
 
   return (
     <main className={styles.page}>
@@ -284,6 +285,9 @@ function ResidencePage({ search }: { search: string }) {
                 ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
                 : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
             </p>
+            {currentPeriod && (
+              <p className={styles.panelSub}>현재 시간 기준: {currentPeriod === "night" ? "야간" : "주간"}</p>
+            )}
           </header>
 
           {selectedZone && (

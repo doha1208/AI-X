@@ -18,10 +18,24 @@ export type SafetyZone = {
   lat: number;
   lng: number;
   safety_score: number;
+  day_safety_score: number;
+  night_safety_score: number;
+  period: RoutePeriod;
 };
 
 export type RouteMode = "safety_weighted" | "tmap" | "straight_line";
 export type RoutePeriod = "day" | "night";
+export type RouteDataBasis = "zone_safety_indicators" | "osm_walking_network" | "facility_density" | "tmap_pedestrian_route" | "straight_line_estimate";
+export type RouteMissingDataFactor = "streetlight_data" | "crime_rate" | "police_distance" | "emergency_bell_distance" | "accident_hotspot_distance";
+export type RouteFallbackReason = "none" | "safety_weighted_unavailable" | "tmap_unavailable";
+
+export type RouteDataDisclosure = {
+  data_basis: RouteDataBasis[];
+  // 원본 공공데이터의 날짜가 아니라 검증된 경로 산출물이 게시된 시각이다.
+  updated_at: string | null;
+  missing_data: { factor: RouteMissingDataFactor; affected_zone_count: number }[];
+  fallback: { applied: boolean; mode: RouteMode; reason: RouteFallbackReason };
+};
 
 export type RouteResult = {
   safety_score: number;
@@ -30,6 +44,7 @@ export type RouteResult = {
   mode: RouteMode;
   // timeMode가 자동일 때 실제로 어느 시간대 가중치가 쓰였는지 — "야간 기준" 배지에 쓴다.
   period: RoutePeriod;
+  data_disclosure: RouteDataDisclosure;
   alternatives: RouteAlternative[];
   shortest_route_points: { lat: number; lng: number }[] | null;
   shortest_zones_passed?: SafetyZone[] | null;

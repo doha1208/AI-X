@@ -6,6 +6,7 @@ import pickle
 import socket
 import threading
 import time
+from datetime import UTC, datetime
 from collections import OrderedDict
 from functools import lru_cache
 from pathlib import Path
@@ -338,6 +339,9 @@ def _prebuild_route_indexes(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> 
 # 위도 37.5도(서울·경기) 부근에서 경도 1도는 위도 1도의 약 0.79배 길이라, 위경도를
 # 그대로 평면 좌표로 쓰면 최근접 판정이 틀어진다 — 경도에 이 값을 곱해 보정한다.
 _LNG_SCALE = math.cos(math.radians(37.5))
+# 행정동 안에서도 도로망이 드문 가장자리를 허용하되, 다른 도시의 좌표가 서울·경기
+# 그래프 끝점에 붙는 일은 막는다.
+MAX_ROUTE_NODE_SNAP_KM = 1.0
 
 # graph 객체 id -> (graph, KD-tree, KD-tree 인덱스에 대응하는 노드 id 목록).
 # 노드가 수십만~백만 개라 요청마다 파이썬으로 전부 훑으면(서울+경기 75만 노드에서
@@ -569,6 +573,7 @@ class RouteArtifactRuntime:
 
     def __init__(self, cache_size: int | None = None) -> None:
         self._artifact: RouteArtifact | None = None
+        self._artifact_published_at: datetime | None = None
         self._tree: cKDTree | None = None
         self._lock = threading.Lock()
         self._cache_size = max(1, cache_size or settings.route_result_cache_size)
@@ -576,18 +581,20 @@ class RouteArtifactRuntime:
         self._manifest_mtime_ns: int | None = None
         self._last_reload_check = float("-inf")
 
-    def install(self, artifact: RouteArtifact) -> None:
+    def install(self, artifact: RouteArtifact, *, published_at: datetime | None = None) -> None:
         """완성된 산출물과 그 노드 색인을 한 번에 교체한다."""
 
         tree = cKDTree(artifact.node_points)
         with self._lock:
             self._artifact = artifact
+            self._artifact_published_at = published_at
             self._tree = tree
             self._result_cache.clear()
 
     def clear(self) -> None:
         with self._lock:
             self._artifact = None
+            self._artifact_published_at = None
             self._tree = None
             self._result_cache.clear()
             self._manifest_mtime_ns = None
@@ -597,7 +604,12 @@ class RouteArtifactRuntime:
             return {
                 "available": self._artifact is not None,
                 "version": self._artifact.version if self._artifact is not None else None,
+                "published_at": self._artifact_published_at.isoformat() if self._artifact_published_at else None,
             }
+
+    def published_at(self) -> datetime | None:
+        with self._lock:
+            return self._artifact_published_at
 
     def score_map(self, period: Period) -> dict[str, float] | None:
         with self._lock:
@@ -610,11 +622,14 @@ class RouteArtifactRuntime:
         artifact = load_current_artifact(directory)
         if artifact is None:
             return False
-        self.install(artifact)
         try:
-            manifest_mtime_ns = (directory / "current.json").stat().st_mtime_ns
+            manifest_stat = (directory / "current.json").stat()
+            manifest_mtime_ns = manifest_stat.st_mtime_ns
+            published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
         except OSError:
             manifest_mtime_ns = None
+            published_at = None
+        self.install(artifact, published_at=published_at)
         with self._lock:
             self._manifest_mtime_ns = manifest_mtime_ns
         return True
@@ -628,7 +643,9 @@ class RouteArtifactRuntime:
             self._last_reload_check = now
             current_mtime_ns = self._manifest_mtime_ns
         try:
-            manifest_mtime_ns = (directory / "current.json").stat().st_mtime_ns
+            manifest_stat = (directory / "current.json").stat()
+            manifest_mtime_ns = manifest_stat.st_mtime_ns
+            published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
         except OSError:
             return False
         if manifest_mtime_ns == current_mtime_ns:
@@ -637,7 +654,7 @@ class RouteArtifactRuntime:
         artifact = load_current_artifact(directory)
         if artifact is None:
             return False
-        self.install(artifact)
+        self.install(artifact, published_at=published_at)
         with self._lock:
             self._manifest_mtime_ns = manifest_mtime_ns
         return True
@@ -666,6 +683,15 @@ class RouteArtifactRuntime:
             _, destination_idx = tree.query((end_lat, end_lng * _LNG_SCALE))
             origin = artifact.node_ids[int(origin_idx)]
             destination = artifact.node_ids[int(destination_idx)]
+            origin_data = graph.nodes[origin]
+            destination_data = graph.nodes[destination]
+            if (
+                haversine_km(start_lat, start_lng, origin_data["y"], origin_data["x"])
+                > MAX_ROUTE_NODE_SNAP_KM
+                or haversine_km(end_lat, end_lng, destination_data["y"], destination_data["x"])
+                > MAX_ROUTE_NODE_SNAP_KM
+            ):
+                return None
             cache_key = (artifact.version, period, origin, destination, k)
             with self._lock:
                 cached = self._result_cache.get(cache_key)

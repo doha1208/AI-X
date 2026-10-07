@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearRouteHistory, getRouteHistory, routeSafety, saveRouteHistory, setRouteHistoryRemember, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
+import { clearRouteHistory, getRouteHistory, routeSafety, saveRouteHistory, setRouteHistoryRemember, type RouteDataBasis, type RouteMissingDataFactor, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { loadSettings, routeTimeFor } from "@/lib/preferences";
@@ -48,6 +48,35 @@ function scoreTone(score: number): string {
   if (score >= 70) return styles.scoreSafe;
   if (score >= 40) return styles.scoreCaution;
   return styles.scoreWarning;
+}
+
+const DATA_BASIS_LABEL: Record<RouteDataBasis, string> = {
+  zone_safety_indicators: "행정동 공개 안전지표",
+  osm_walking_network: "OSM 보행로 특성",
+  facility_density: "경로 주변 CCTV·보안등 밀도",
+  tmap_pedestrian_route: "Tmap 보행 경로",
+  straight_line_estimate: "직선 연결 추정",
+};
+
+const MISSING_DATA_LABEL: Record<RouteMissingDataFactor, string> = {
+  streetlight_data: "보안등",
+  crime_rate: "범죄율",
+  police_distance: "경찰서 거리",
+  emergency_bell_distance: "안전비상벨 거리",
+  accident_hotspot_distance: "사고다발지역 거리",
+};
+
+function formatArtifactUpdatedAt(value: string | null): string {
+  if (!value) return "확인할 수 없음";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "확인할 수 없음";
+  return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function fallbackLabel(mode: RouteResult["mode"]): string {
+  if (mode === "tmap") return "일반 도보 경로로 대체됨";
+  if (mode === "straight_line") return "직선 거리 추정으로 대체됨";
+  return "대체 경로 없음";
 }
 
 export default withSearch(RoutePage);
@@ -376,10 +405,37 @@ function RoutePage({ search }: { search: string }) {
                 <InfoIcon size={14} />
                 공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.
               </p>
+              <details className={styles.dataDisclosure}>
+                <summary>경로 데이터 안내</summary>
+                <dl>
+                  <div>
+                    <dt>데이터 기준</dt>
+                    <dd>{route.data_disclosure.data_basis.map((basis) => DATA_BASIS_LABEL[basis]).join(" · ")}</dd>
+                  </div>
+                  <div>
+                    <dt>경로 산출물 게시 시각</dt>
+                    <dd>{formatArtifactUpdatedAt(route.data_disclosure.updated_at)}</dd>
+                  </div>
+                  <div>
+                    <dt>폴백 여부</dt>
+                    <dd>{fallbackLabel(route.data_disclosure.fallback.mode)}</dd>
+                  </div>
+                </dl>
+                {route.data_disclosure.missing_data.length > 0 ? (
+                  <ul className={styles.missingData}>
+                    {route.data_disclosure.missing_data.map(({ factor, affected_zone_count }) => (
+                      <li key={factor}>{MISSING_DATA_LABEL[factor]} 데이터: {affected_zone_count}개 경유 동에서 확인할 수 없음</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className={styles.disclosureNote}>경유 동 기준으로 확인된 누락 데이터가 없어요.</p>
+                )}
+                <p className={styles.disclosureNote}>확인할 수 없는 지표는 점수 계산에서 중립값으로 처리됩니다.</p>
+              </details>
               {route.mode !== "safety_weighted" && (
                 <p className={styles.fallback}>
                   <InfoIcon size={14} />
-                  {route.mode === "tmap"
+                  {route.data_disclosure.fallback.mode === "tmap"
                     ? "데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로 안내해요"
                     : "도보 경로를 가져오지 못해 직선 거리로 추정했어요"}
                 </p>

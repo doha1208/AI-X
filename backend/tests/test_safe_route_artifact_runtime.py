@@ -33,6 +33,15 @@ def test_runtime_finds_route_in_loaded_artifact_without_graph_fetch(monkeypatch)
     assert routes == [{"points": [(37.5, 127.0), (37.501, 127.001)], "score": 70.0, "distance_m": 140.0}]
 
 
+def test_runtime_does_not_snap_a_distant_coordinate_to_the_artifact_graph():
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(_artifact())
+
+    routes = runtime.find_routes(37.5, 127.0, 35.1796, 129.0756, period="day", k=1)
+
+    assert routes is None
+
+
 def test_route_points_follow_the_road_shape_not_a_straight_line():
     artifact = _artifact()
     # osmnx가 합친 간선은 모양(geometry)을 따로 가진다 — 역방향 간선은 좌표 순서가 반대일 수 있다.
@@ -61,6 +70,7 @@ def test_runtime_loads_the_current_published_artifact(tmp_path):
     runtime = sr.RouteArtifactRuntime()
 
     assert runtime.load(tmp_path) is True
+    assert runtime.published_at() is not None
     assert runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="night", k=1) is not None
 
 

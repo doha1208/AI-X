@@ -11,6 +11,10 @@ from app.core.config import settings
 from app.core.security import decode_token
 from app.schemas.safety import (
     RouteAlternative,
+    RouteDataDisclosure,
+    RouteFallback,
+    RouteFallbackReason,
+    RouteMissingData,
     RouteMode,
     RouteRequest,
     RoutePoint,
@@ -21,6 +25,7 @@ from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
 from app.services.safe_route import find_safe_routes, route_artifact_runtime
 from app.services.safety_score import compute_zone_period_scores
+from app.services.service_area import is_in_service_area
 from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
@@ -102,13 +107,32 @@ def _zones_passed(points: list[Point], zones: list[SafetyZone]) -> list[SafetyZo
     return passed
 
 
-def _zone_out(zone: SafetyZone, score_map: dict[str, float]) -> SafetyZoneOut:
+def _period_score_maps(
+    zones: list[SafetyZone],
+) -> tuple[dict[str, dict[str, float]], dict[str, bool]]:
+    score_maps: dict[str, dict[str, float]] = {}
+    artifact_used: dict[str, bool] = {}
+    for period in ("day", "night"):
+        scores = _artifact_score_map_for_zones(zones, period)
+        artifact_used[period] = scores is not None
+        score_maps[period] = scores if scores is not None else compute_zone_period_scores(zones, period)
+    return score_maps, artifact_used
+
+
+def _zone_out(
+    zone: SafetyZone,
+    score_maps: dict[str, dict[str, float]],
+    period: str,
+) -> SafetyZoneOut:
     return SafetyZoneOut(
         dong_code=zone.dong_code,
         dong_name=zone.dong_name,
         lat=zone.lat,
         lng=zone.lng,
-        safety_score=score_map[zone.dong_code],
+        safety_score=score_maps[period][zone.dong_code],
+        day_safety_score=score_maps["day"][zone.dong_code],
+        night_safety_score=score_maps["night"][zone.dong_code],
+        period=period,
     )
 
 
@@ -128,6 +152,49 @@ def _artifact_score_map_for_zones(
     return scores
 
 
+def _missing_route_data(zones: list[SafetyZone]) -> list[RouteMissingData]:
+    checks = {
+        "streetlight_data": lambda zone: not zone.lights_known,
+        "crime_rate": lambda zone: zone.crime_rate is None,
+        "police_distance": lambda zone: zone.police_dist_m is None,
+        "emergency_bell_distance": lambda zone: zone.bell_dist_m is None,
+        "accident_hotspot_distance": lambda zone: zone.accident_dist_m is None,
+    }
+    return [
+        RouteMissingData(factor=factor, affected_zone_count=sum(check(zone) for zone in zones))
+        for factor, check in checks.items()
+        if any(check(zone) for zone in zones)
+    ]
+
+
+def _route_data_disclosure(
+    *,
+    mode: RouteMode,
+    zones_passed: list[SafetyZone],
+    artifact_used: bool,
+) -> RouteDataDisclosure:
+    data_basis = ["zone_safety_indicators"]
+    if mode == "safety_weighted":
+        data_basis.extend(["osm_walking_network", "facility_density"])
+    elif mode == "tmap":
+        data_basis.insert(0, "tmap_pedestrian_route")
+    else:
+        data_basis.insert(0, "straight_line_estimate")
+
+    reason: RouteFallbackReason = "none"
+    if mode == "tmap":
+        reason = "safety_weighted_unavailable"
+    elif mode == "straight_line":
+        reason = "tmap_unavailable"
+
+    return RouteDataDisclosure(
+        data_basis=data_basis,
+        updated_at=route_artifact_runtime.published_at() if artifact_used else None,
+        missing_data=_missing_route_data(zones_passed),
+        fallback=RouteFallback(applied=mode != "safety_weighted", mode=mode, reason=reason),
+    )
+
+
 @router.get("/zones", response_model=list[SafetyZoneOut])
 def nearby_zones(
     lat: float,
@@ -142,9 +209,10 @@ def nearby_zones(
     경기도만 보여줄 때 그 컬럼을 그대로 쓰면 경기도 안에서의 상대 순위와 어긋날 수 있다.
     """
     zones = scoped_zones_query(db).all()
-    score_map = compute_zone_period_scores(zones, "day")
+    period = period_for()
+    score_maps, _ = _period_score_maps(zones)
     nearby = [z for z in zones if haversine_km(lat, lng, z.lat, z.lng) <= radius_km]
-    return [_zone_out(z, score_map) for z in nearby]
+    return [_zone_out(z, score_maps, period) for z in nearby]
 
 
 @router.get("/bells", response_model=list[RoutePoint])
@@ -165,11 +233,10 @@ def nearby_bells_endpoint(
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])
 def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depends(get_db)):
     zones = scoped_zones_query(db).all()
-    scores = _artifact_score_map_for_zones(zones, "day")
-    if scores is None:
-        scores = compute_zone_period_scores(zones, "day")
-    top = sorted(zones, key=lambda zone: scores[zone.dong_code], reverse=True)[:limit]
-    return [_zone_out(zone, scores) for zone in top]
+    period = period_for()
+    score_maps, _ = _period_score_maps(zones)
+    top = sorted(zones, key=lambda zone: score_maps[period][zone.dong_code], reverse=True)[:limit]
+    return [_zone_out(zone, score_maps, period) for zone in top]
 
 
 @router.post("/route", response_model=RouteResponse)
@@ -188,6 +255,34 @@ async def route_safety(
     3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
     """
     started_at = time.perf_counter()
+    points = {
+        "start": (payload.start_lat, payload.start_lng),
+        "end": (payload.end_lat, payload.end_lng),
+    }
+    unsupported_points = [
+        name
+        for name, (lat, lng) in points.items()
+        if not is_in_service_area(
+            lat,
+            lng,
+            region_scope_prefix=settings.region_scope_prefix,
+        )
+    ]
+    if unsupported_points:
+        metrics.record_route(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            duration_seconds=time.perf_counter() - started_at,
+            mode="failed",
+            fallback_reason="outside_service_area",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "reason": "outside_service_area",
+                "action": "현재 길찾기는 서울·경기 지역에서만 지원합니다.",
+                "points": unsupported_points,
+            },
+        )
     zones = scoped_zones_query(db).all()
     if not zones:
         metrics.record_route(
@@ -204,9 +299,8 @@ async def route_safety(
             },
         )
     period = period_for(payload.at)
-    score_map = _artifact_score_map_for_zones(zones, period)
-    if score_map is None:
-        score_map = compute_zone_period_scores(zones, period)
+    score_maps, artifact_scores_used = _period_score_maps(zones)
+    score_map = score_maps[period]
 
     safe_route_task = asyncio.to_thread(
         find_safe_routes,
@@ -241,7 +335,9 @@ async def route_safety(
         # 안전 가중 경로가 실제 최단경로와 다르다는 걸 지도에서 비교해 보여주는 참고선.
         if tmap_points:
             shortest_route_points = [RoutePoint(lat=lat, lng=lng) for lat, lng in tmap_points]
-            shortest_zones_passed = [_zone_out(z, score_map) for z in _zones_passed(tmap_points, zones)]
+            shortest_zones_passed = [
+                _zone_out(z, score_maps, period) for z in _zones_passed(tmap_points, zones)
+            ]
     else:
         if tmap_points:
             mode = "tmap"
@@ -264,20 +360,14 @@ async def route_safety(
         ]
 
     best = candidates[0]
-    passed = [_zone_out(z, score_map) for z in _zones_passed(best["points"], zones)]
+    passed = [_zone_out(z, score_maps, period) for z in _zones_passed(best["points"], zones)]
     alternatives = [
         RouteAlternative(
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
             safety_score=c["score"],
             distance_m=c["distance_m"],
             zones_passed=[
-                SafetyZoneOut(
-                    dong_code=z.dong_code,
-                    dong_name=z.dong_name,
-                    lat=z.lat,
-                    lng=z.lng,
-                    safety_score=score_map[z.dong_code],
-                )
+                _zone_out(z, score_maps, period)
                 for z in _zones_passed(c["points"], zones)
             ],
         )
@@ -290,6 +380,11 @@ async def route_safety(
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
         mode=mode,
         period=period,
+        data_disclosure=_route_data_disclosure(
+            mode=mode,
+            zones_passed=_zones_passed(best["points"], zones),
+            artifact_used=mode == "safety_weighted" or artifact_scores_used[period],
+        ),
         alternatives=alternatives,
         shortest_route_points=shortest_route_points,
         shortest_zones_passed=shortest_zones_passed,

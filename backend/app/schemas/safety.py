@@ -7,6 +7,21 @@ from pydantic import BaseModel, Field, model_validator
 from app.services.time_period import Period
 
 RouteMode = Literal["safety_weighted", "tmap", "straight_line"]
+RouteDataBasis = Literal[
+    "zone_safety_indicators",
+    "osm_walking_network",
+    "facility_density",
+    "tmap_pedestrian_route",
+    "straight_line_estimate",
+]
+RouteMissingDataFactor = Literal[
+    "streetlight_data",
+    "crime_rate",
+    "police_distance",
+    "emergency_bell_distance",
+    "accident_hotspot_distance",
+]
+RouteFallbackReason = Literal["none", "safety_weighted_unavailable", "tmap_unavailable"]
 MAX_WALKING_DISTANCE_KM = 10.0
 
 
@@ -23,6 +38,9 @@ class SafetyZoneOut(BaseModel):
     lat: float
     lng: float
     safety_score: float
+    day_safety_score: float
+    night_safety_score: float
+    period: Period
 
     class Config:
         from_attributes = True
@@ -56,6 +74,26 @@ class RouteAlternative(BaseModel):
     zones_passed: list[SafetyZoneOut]
 
 
+class RouteMissingData(BaseModel):
+    factor: RouteMissingDataFactor
+    affected_zone_count: int
+
+
+class RouteFallback(BaseModel):
+    applied: bool
+    mode: RouteMode
+    reason: RouteFallbackReason
+
+
+class RouteDataDisclosure(BaseModel):
+    # 데이터 원본의 갱신일이 아니라, 검증된 경로 산출물이 게시된 시각이다.
+    # 산출물을 쓰지 않은 런타임 점수 계산에서는 None으로 보존한다.
+    data_basis: list[RouteDataBasis]
+    updated_at: datetime | None
+    missing_data: list[RouteMissingData]
+    fallback: RouteFallback
+
+
 class RouteResponse(BaseModel):
     safety_score: float
     zones_passed: list[SafetyZoneOut]
@@ -63,6 +101,7 @@ class RouteResponse(BaseModel):
     mode: RouteMode
     # timeMode가 "자동"일 때도 프론트가 실제로 어느 시간대 가중치가 쓰였는지 배지로 보여줄 수 있게.
     period: Period
+    data_disclosure: RouteDataDisclosure
     alternatives: list[RouteAlternative]
     # mode가 safety_weighted일 때만 비교용으로 채워짐 — 안전 가중 경로가
     # 실제 최단경로와 다르다는 걸 지도에서 눈으로 확인할 수 있게 한다.

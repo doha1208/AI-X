@@ -10,6 +10,9 @@ const zone = (code: string, score: number): SafetyZone => ({
   lat: 37.5,
   lng: 127.0,
   safety_score: score,
+  day_safety_score: score,
+  night_safety_score: score,
+  period: "day",
 });
 
 describe("watchedZones", () => {
