@@ -13,6 +13,8 @@ export type KakaoPoint = { x: number; y: number };
 
 export type KakaoMapProjection = {
   coordsFromContainerPoint(point: KakaoPoint): KakaoLatLng;
+  pointFromCoords(position: KakaoLatLng): KakaoPoint;
+  coordsFromPoint(point: KakaoPoint): KakaoLatLng;
 };
 
 export type KakaoMap = {

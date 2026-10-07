@@ -10,7 +10,7 @@ import {
   type LatLng,
 } from "@/lib/kakao";
 import { LONG_PRESS_DELAY_MS, movedPastLongPressTolerance, supportsMapLongPress, type ScreenPoint } from "@/lib/longPress";
-import { parsePx, visibleMapInsets } from "@/lib/mapInsets";
+import { parsePx, visibleMapInsets, type MapInsets } from "@/lib/mapInsets";
 
 const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_MAP_KEY;
 // 기본값을 매번 새 배열로 만들면 오버레이 effect가 렌더마다 다시 돈다.
@@ -44,6 +44,12 @@ type Props = {
   onContextMenu?: (info: ContextMenuInfo) => void;
   height?: number | string;
 };
+
+// 지금 지도를 덮고 있는 모바일 시트·카드 여백. 데스크톱은 0이다.
+function currentInsets(container: HTMLElement | null): MapInsets {
+  const sheetHeight = parsePx(container ? getComputedStyle(container).getPropertyValue("--adaptive-sheet-height") : "");
+  return visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
+}
 
 function scoreColor(score: number): string {
   if (score >= 70) return "#2e7d32"; // 안전
@@ -347,10 +353,7 @@ export function SafetyMap({
     const bounds = new kakao.maps.LatLngBounds();
     [...routePath, ...(comparePath ?? [])].forEach((p) => bounds.extend(new kakao.maps.LatLng(p.lat, p.lng)));
     // 모바일에서는 하단 시트와 상단 카드가 지도를 덮는다 — 경로가 그 뒤에 숨지 않도록 보이는 영역 기준으로 맞춘다.
-    const sheetHeight = parsePx(
-      containerRef.current ? getComputedStyle(containerRef.current).getPropertyValue("--adaptive-sheet-height") : ""
-    );
-    const insets = visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
+    const insets = currentInsets(containerRef.current);
     map.setBounds(bounds, insets.top, insets.right, insets.bottom, insets.left);
     viewTakenRef.current = true;
   }, [loaded, routePath, comparePath, followLocation, layoutVersion]);
@@ -504,8 +507,14 @@ export function SafetyMap({
     lastFocusDongCodeRef.current = focusZone.dong_code;
     viewTakenRef.current = true;
     const { kakao } = window;
-    mapRef.current.setLevel(4);
-    mapRef.current.panTo(new kakao.maps.LatLng(focusZone.lat, focusZone.lng));
+    const map = mapRef.current;
+    map.setLevel(4);
+    // 모바일 하단 시트·상단 검색창에 가리지 않게, 지도 정중앙이 아닌 보이는 영역 가운데로 옮긴다.
+    const insets = currentInsets(containerRef.current);
+    const projection = map.getProjection();
+    const point = projection.pointFromCoords(new kakao.maps.LatLng(focusZone.lat, focusZone.lng));
+    const shiftY = (insets.bottom - insets.top) / 2;
+    map.panTo(projection.coordsFromPoint(new kakao.maps.Point(point.x, point.y + shiftY)));
   }, [focusZone]);
 
   if (!KAKAO_KEY) {
