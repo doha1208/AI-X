@@ -80,13 +80,13 @@ async def limit_route_requests(request: Request):
         admission.release()
 
 
-def _path_distance_m(points: list[Point]) -> float:
+def _route_distance_m(points: list[Point]) -> float:
     return sum(
         haversine_km(a[0], a[1], b[0], b[1]) * 1000 for a, b in zip(points[:-1], points[1:])
     )
 
 
-def _point_sample_score(
+def _sample_route_score(
     points: list[Point], zones: list[SafetyZone], score_map: dict[str, float]
 ) -> float:
     scores = [
@@ -179,13 +179,11 @@ def _route_data_disclosure(
     elif mode == "tmap":
         data_basis.insert(0, "tmap_pedestrian_route")
     else:
-        data_basis.insert(0, "straight_line_estimate")
+        raise ValueError(f"Unsupported route mode for disclosure: {mode}")
 
     reason: RouteFallbackReason = "none"
     if mode == "tmap":
         reason = "safety_weighted_unavailable"
-    elif mode == "straight_line":
-        reason = "tmap_unavailable"
 
     return RouteDataDisclosure(
         data_basis=data_basis,
@@ -252,7 +250,7 @@ async def route_safety(
        안전점수 순으로 함께 반환한다.
     2) tmap: 위 그래프 탐색이 실패(지역 미지원/네트워크 오류)하면 Tmap
        보행자 최단경로를 받아 그 위에 안전점수만 표시(대안 없음).
-    3) straight_line: 그마저 실패하면 직선 5구간 샘플링으로 대략 추정(대안 없음).
+    둘 다 실패하면 직선을 보행 경로처럼 반환하지 않고 503 오류를 반환한다.
     """
     started_at = time.perf_counter()
     points = {
@@ -343,19 +341,31 @@ async def route_safety(
             mode = "tmap"
             sample_points = tmap_points
         else:
-            mode = "straight_line"
-            sample_points = [
-                (
-                    payload.start_lat + (payload.end_lat - payload.start_lat) * (i / 4),
-                    payload.start_lng + (payload.end_lng - payload.start_lng) * (i / 4),
-                )
-                for i in range(5)
-            ]
+            duration_seconds = time.perf_counter() - started_at
+            metrics.record_route(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                duration_seconds=duration_seconds,
+                mode="failed",
+                fallback_reason="tmap_unavailable",
+            )
+            log_route(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                duration_seconds=duration_seconds,
+                mode="failed",
+                fallback_reason="tmap_unavailable",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "reason": "pedestrian_route_unavailable",
+                    "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.",
+                },
+            )
         candidates = [
             {
                 "points": sample_points,
-                "score": _point_sample_score(sample_points, zones, score_map),
-                "distance_m": _path_distance_m(sample_points),
+                "score": _sample_route_score(sample_points, zones, score_map),
+                "distance_m": _route_distance_m(sample_points),
             }
         ]
 
@@ -390,8 +400,6 @@ async def route_safety(
         shortest_zones_passed=shortest_zones_passed,
     )
     fallback_reason = "none" if mode == "safety_weighted" else "safe_route_unavailable"
-    if mode == "straight_line":
-        fallback_reason = "tmap_unavailable"
     metrics.record_route(
         status_code=status.HTTP_200_OK,
         duration_seconds=time.perf_counter() - started_at,

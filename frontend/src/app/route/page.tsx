@@ -55,7 +55,6 @@ const DATA_BASIS_LABEL: Record<RouteDataBasis, string> = {
   osm_walking_network: "OSM 보행로 특성",
   facility_density: "경로 주변 CCTV·보안등 밀도",
   tmap_pedestrian_route: "Tmap 보행 경로",
-  straight_line_estimate: "직선 연결 추정",
 };
 
 const MISSING_DATA_LABEL: Record<RouteMissingDataFactor, string> = {
@@ -75,7 +74,6 @@ function formatArtifactUpdatedAt(value: string | null): string {
 
 function fallbackLabel(mode: RouteResult["mode"]): string {
   if (mode === "tmap") return "일반 도보 경로로 대체됨";
-  if (mode === "straight_line") return "직선 거리 추정으로 대체됨";
   return "대체 경로 없음";
 }
 
@@ -435,9 +433,7 @@ function RoutePage({ search }: { search: string }) {
               {route.mode !== "safety_weighted" && (
                 <p className={styles.fallback}>
                   <InfoIcon size={14} />
-                  {route.data_disclosure.fallback.mode === "tmap"
-                    ? "데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로 안내해요"
-                    : "도보 경로를 가져오지 못해 직선 거리로 추정했어요"}
+                  데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로 안내해요
                 </p>
               )}
 

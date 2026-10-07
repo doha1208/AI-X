@@ -222,6 +222,33 @@ def test_a_single_outlier_does_not_crush_everyone_else_near_zero():
     assert scores["N19"] > scores["N0"] + 10
 
 
+def test_facility_counts_are_compared_as_density_when_area_is_available():
+    rows = [
+        {
+            "dong_code": "LARGE",
+            "cctv_count": 100,
+            "streetlight_count": 100,
+            "store_count": 100,
+        },
+        {
+            "dong_code": "SMALL",
+            "cctv_count": 10,
+            "streetlight_count": 10,
+            "store_count": 10,
+        },
+    ]
+
+    scores = {
+        row["dong_code"]: row["safety_score"]
+        for row in compute_safety_scores(
+            rows,
+            area_by_dong={"LARGE": 100.0, "SMALL": 1.0},
+        )
+    }
+
+    assert scores["SMALL"] > scores["LARGE"]
+
+
 def test_explicit_profile_changes_the_score_weights():
     weights = {
         **DEFAULT_SCORING_PROFILE.weights,

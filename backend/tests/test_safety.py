@@ -165,7 +165,16 @@ def test_route_rejects_coordinates_outside_the_seoul_gyeonggi_service_area():
     }
 
 
-def test_route_safety_returns_score():
+def test_route_safety_returns_score(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
     res = client.post(
         "/safety/route",
         json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
@@ -176,7 +185,16 @@ def test_route_safety_returns_score():
     assert len(body["zones_passed"]) >= 1
 
 
-def test_route_safety_accepts_night_timestamp():
+def test_route_safety_accepts_night_timestamp(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
     res = client.post(
         "/safety/route",
         json={
@@ -280,6 +298,27 @@ def test_route_response_discloses_fallback_and_missing_route_data(monkeypatch):
     }
 
 
+def test_route_returns_an_error_instead_of_a_straight_line_when_no_pedestrian_route_exists(monkeypatch):
+    from app.api import safety as safety_api
+
+    async def no_tmap_route(*_):
+        return None
+
+    monkeypatch.setattr(safety_api, "find_safe_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", no_tmap_route)
+
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "reason": "pedestrian_route_unavailable",
+        "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    }
+
+
 def test_nearby_bells_limit_query_param_is_honored():
     from app.services import bells as bells_module
 
@@ -292,7 +331,16 @@ def test_nearby_bells_limit_query_param_is_honored():
         bells_module._cached_points = None
 
 
-def test_route_safety_includes_shortest_route_field():
+def test_route_safety_includes_shortest_route_field(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
     res = client.post(
         "/safety/route",
         json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},

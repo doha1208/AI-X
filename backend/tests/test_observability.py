@@ -5,12 +5,12 @@ def test_route_metrics_use_only_fixed_labels():
     metrics.record_route(
         status_code=200,
         duration_seconds=0.25,
-        mode="straight_line",
+        mode="failed",
         fallback_reason="tmap_unavailable",
     )
     rendered = metrics.render().decode()
 
-    assert 'route_requests_total{fallback_reason="tmap_unavailable",mode="straight_line"} 1.0' in rendered
+    assert 'route_requests_total{fallback_reason="tmap_unavailable",mode="failed"} 1.0' in rendered
     assert "37.50000" not in rendered
     assert "secret-token" not in rendered
 

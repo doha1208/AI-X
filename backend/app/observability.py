@@ -11,7 +11,7 @@ from fastapi import Response
 from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
 from prometheus_client.exposition import CONTENT_TYPE_LATEST
 
-RouteMode = Literal["safety_weighted", "tmap", "straight_line", "failed"]
+RouteMode = Literal["safety_weighted", "tmap", "failed"]
 FallbackReason = Literal[
     "none", "artifact_unavailable", "safe_route_unavailable", "tmap_unavailable", "safety_zones_unavailable"
 ]

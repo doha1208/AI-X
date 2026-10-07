@@ -6,13 +6,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.services.time_period import Period
 
-RouteMode = Literal["safety_weighted", "tmap", "straight_line"]
+RouteMode = Literal["safety_weighted", "tmap"]
 RouteDataBasis = Literal[
     "zone_safety_indicators",
     "osm_walking_network",
     "facility_density",
     "tmap_pedestrian_route",
-    "straight_line_estimate",
 ]
 RouteMissingDataFactor = Literal[
     "streetlight_data",
@@ -21,7 +20,7 @@ RouteMissingDataFactor = Literal[
     "emergency_bell_distance",
     "accident_hotspot_distance",
 ]
-RouteFallbackReason = Literal["none", "safety_weighted_unavailable", "tmap_unavailable"]
+RouteFallbackReason = Literal["none", "safety_weighted_unavailable"]
 MAX_WALKING_DISTANCE_KM = 10.0
 
 

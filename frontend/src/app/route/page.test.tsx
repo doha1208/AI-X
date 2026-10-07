@@ -53,13 +53,13 @@ describe("RoutePage responsive presentation", () => {
         safety_score: 55,
         zones_passed: [],
         route_points: [{ lat: 37.532, lng: 126.99 }, { lat: 37.548, lng: 127.01 }],
-        mode: "straight_line",
+        mode: "tmap",
         period: "day",
         data_disclosure: {
-          data_basis: ["straight_line_estimate", "zone_safety_indicators"],
+          data_basis: ["tmap_pedestrian_route", "zone_safety_indicators"],
           updated_at: null,
           missing_data: [{ factor: "crime_rate", affected_zone_count: 1 }],
-          fallback: { applied: true, mode: "straight_line", reason: "tmap_unavailable" },
+          fallback: { applied: true, mode: "tmap", reason: "safety_weighted_unavailable" },
         },
         alternatives: [{
           route_points: [{ lat: 37.532, lng: 126.99 }, { lat: 37.548, lng: 127.01 }],
@@ -83,10 +83,10 @@ describe("RoutePage responsive presentation", () => {
     expect(await screen.findByLabelText("경로 검색 결과")).toBeInTheDocument();
     expect(screen.getByText("공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.")).toBeInTheDocument();
     expect(screen.getByText("경로 데이터 안내")).toBeInTheDocument();
-    expect(screen.getByText(/직선 연결 추정/)).toBeInTheDocument();
+    expect(screen.getByText(/Tmap 보행 경로/)).toBeInTheDocument();
     expect(screen.getByText("경로 산출물 게시 시각")).toBeInTheDocument();
     expect(screen.getByText("범죄율 데이터: 1개 경유 동에서 확인할 수 없음")).toBeInTheDocument();
-    expect(screen.getByText("직선 거리 추정으로 대체됨")).toBeInTheDocument();
+    expect(screen.getByText("일반 도보 경로로 대체됨")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "검색 조건 수정" }));
     fireEvent.change(screen.getByLabelText("도착지 주소"), { target: { value: "29.44895, 132.25367" } });

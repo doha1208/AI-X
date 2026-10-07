@@ -21,16 +21,16 @@ def test_longitude_degrees_are_shorter_than_latitude_degrees():
     assert lng_dist < lat_dist
 
 
-def test_far_or_missing_stations_are_capped():
+def test_far_stations_are_capped_but_missing_data_stays_unknown():
     assert nearest_police_distances_m([(37.5, 127.0)], [(38.5, 127.0)]) == [POLICE_DIST_CAP_M]
-    assert nearest_police_distances_m([(37.5, 127.0)], []) == [POLICE_DIST_CAP_M]
+    assert nearest_police_distances_m([(37.5, 127.0)], []) == [None]
 
 
 def test_bell_distance_uses_its_own_shorter_cap():
     # 비상벨은 경찰서보다 훨씬 촘촘해서 캡이 더 짧다.
     assert BELL_DIST_CAP_M < POLICE_DIST_CAP_M
     assert nearest_bell_distances_m([(37.5, 127.0)], [(38.5, 127.0)]) == [BELL_DIST_CAP_M]
-    assert nearest_bell_distances_m([(37.5, 127.0)], []) == [BELL_DIST_CAP_M]
+    assert nearest_bell_distances_m([(37.5, 127.0)], []) == [None]
 
 
 def test_bell_distance_matches_the_generic_nearest_neighbor_math():
@@ -41,7 +41,7 @@ def test_bell_distance_matches_the_generic_nearest_neighbor_math():
 def test_accident_distance_uses_its_own_cap_between_bell_and_police():
     assert BELL_DIST_CAP_M < ACCIDENT_DIST_CAP_M < POLICE_DIST_CAP_M
     assert nearest_accident_distances_m([(37.5, 127.0)], [(38.5, 127.0)]) == [ACCIDENT_DIST_CAP_M]
-    assert nearest_accident_distances_m([(37.5, 127.0)], []) == [ACCIDENT_DIST_CAP_M]
+    assert nearest_accident_distances_m([(37.5, 127.0)], []) == [None]
 
 
 def test_accident_distance_matches_the_generic_nearest_neighbor_math():

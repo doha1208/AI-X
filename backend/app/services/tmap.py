@@ -18,7 +18,7 @@ async def get_pedestrian_route(
 ) -> list[tuple[float, float]] | None:
     """Tmap 보행자 경로안내 API로 실제 도보 경로 좌표를 가져온다.
 
-    ponytail: 키 미설정/API 실패 시 None 반환 → 호출부에서 직선 샘플링으로 폴백.
+    ponytail: 키 미설정/API 실패 시 None 반환 → 호출부가 보행 경로 없음으로 처리.
     """
     if not settings.tmap_app_key:
         return None

@@ -23,11 +23,11 @@ export type SafetyZone = {
   period: RoutePeriod;
 };
 
-export type RouteMode = "safety_weighted" | "tmap" | "straight_line";
+export type RouteMode = "safety_weighted" | "tmap";
 export type RoutePeriod = "day" | "night";
-export type RouteDataBasis = "zone_safety_indicators" | "osm_walking_network" | "facility_density" | "tmap_pedestrian_route" | "straight_line_estimate";
+export type RouteDataBasis = "zone_safety_indicators" | "osm_walking_network" | "facility_density" | "tmap_pedestrian_route";
 export type RouteMissingDataFactor = "streetlight_data" | "crime_rate" | "police_distance" | "emergency_bell_distance" | "accident_hotspot_distance";
-export type RouteFallbackReason = "none" | "safety_weighted_unavailable" | "tmap_unavailable";
+export type RouteFallbackReason = "none" | "safety_weighted_unavailable";
 
 export type RouteDataDisclosure = {
   data_basis: RouteDataBasis[];

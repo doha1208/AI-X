@@ -18,6 +18,8 @@ class _Response:
 
 class _Client:
     calls = 0
+    last_url = None
+    last_payload = None
 
     def __init__(self, **kwargs):
         pass
@@ -28,8 +30,10 @@ class _Client:
     async def __aexit__(self, *args):
         return None
 
-    async def post(self, *args, **kwargs):
+    async def post(self, url, *args, **kwargs):
         self.__class__.calls += 1
+        self.__class__.last_url = url
+        self.__class__.last_payload = kwargs.get("json")
         return _Response()
 
 
@@ -45,3 +49,6 @@ def test_successful_tmap_route_is_reused_within_ttl(monkeypatch):
     assert first == [(37.5, 127.0), (37.51, 127.01)]
     assert second == first
     assert _Client.calls == 1
+    assert _Client.last_url == tmap.TMAP_PEDESTRIAN_URL
+    assert "/routes/pedestrian" in _Client.last_url
+    assert _Client.last_payload["searchOption"] == "0"

@@ -78,6 +78,17 @@ def test_route_input_data_version_changes_when_facility_points_change(tmp_path):
     assert first != second
 
 
+def test_route_input_data_version_changes_when_scoring_semantics_change(monkeypatch, tmp_path):
+    facility_points = tmp_path / "facility_points.json"
+    facility_points.write_text('{"cctv": []}', encoding="utf-8")
+    first = sr.route_input_data_version(_zones(), facility_points_path=facility_points)
+
+    monkeypatch.setattr(sr, "SCORING_SEMANTICS_VERSION", "facility-density-v2")
+    second = sr.route_input_data_version(_zones(), facility_points_path=facility_points)
+
+    assert first != second
+
+
 def test_build_route_artifact_reloads_facility_index_for_each_build(monkeypatch):
     monkeypatch.setattr(sr, "_load_local_graph", _tiny_walk_graph)
     indexes = iter(

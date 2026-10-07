@@ -24,24 +24,26 @@ def to_meters(points) -> np.ndarray:
     return np.column_stack((arr[:, 0] * _M_PER_DEG_LAT, arr[:, 1] * _M_PER_DEG_LAT * _LNG_SCALE))
 
 
-def _nearest_distances_m(centroids: list[Point], points: list[Point], cap_m: float) -> list[float]:
+def _nearest_distances_m(
+    centroids: list[Point], points: list[Point], cap_m: float
+) -> list[float | None]:
     if not points:
-        return [cap_m] * len(centroids)
+        return [None] * len(centroids)
     tree = cKDTree(to_meters(points))
     dists, _ = tree.query(to_meters(centroids))
     return [min(float(d), cap_m) for d in dists]
 
 
-def nearest_police_distances_m(centroids: list[Point], police_points: list[Point]) -> list[float]:
+def nearest_police_distances_m(centroids: list[Point], police_points: list[Point]) -> list[float | None]:
     """각 (lat, lng) 지점에서 가장 가까운 경찰서/파출소까지의 거리(m). CAP으로 상한."""
     return _nearest_distances_m(centroids, police_points, POLICE_DIST_CAP_M)
 
 
-def nearest_bell_distances_m(centroids: list[Point], bell_points: list[Point]) -> list[float]:
+def nearest_bell_distances_m(centroids: list[Point], bell_points: list[Point]) -> list[float | None]:
     """각 (lat, lng) 지점에서 가장 가까운 안전비상벨까지의 거리(m). CAP으로 상한."""
     return _nearest_distances_m(centroids, bell_points, BELL_DIST_CAP_M)
 
 
-def nearest_accident_distances_m(centroids: list[Point], accident_points: list[Point]) -> list[float]:
+def nearest_accident_distances_m(centroids: list[Point], accident_points: list[Point]) -> list[float | None]:
     """각 (lat, lng) 지점에서 가장 가까운 교통사고 다발지역까지의 거리(m). CAP으로 상한."""
     return _nearest_distances_m(centroids, accident_points, ACCIDENT_DIST_CAP_M)

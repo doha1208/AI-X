@@ -48,6 +48,7 @@ from app.services.poi_factors import (
     nearest_police_distances_m,
 )
 from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights
+from app.services.dong_area import estimate_dong_areas_km2
 
 HERE = Path(__file__).resolve().parent
 BACKEND_DIR = HERE.parent
@@ -153,6 +154,8 @@ def iter_cctv_points():
 
 def iter_bell_points():
     """서울+경기 안전비상벨의 (lat, lng). CCTV와 같은 표준데이터 컬럼(WGS84위도/경도)을 쓴다."""
+    if not BELL_CSV.exists():
+        return
     with BELL_CSV.open(encoding="cp949", errors="replace", newline="") as f:
         for row in csv.DictReader(f):
             addr = row.get("소재지도로명주소") or row.get("소재지지번주소") or ""
@@ -439,7 +442,7 @@ def refresh_derived_factors() -> None:
         add_crime_rate(records, cells, crime_by_gu)
         flagged = flag_unknown_streetlights(records)
         print(f"  보안등 데이터가 사실상 없어 '모름'으로 보는 시·군·구 {len(flagged)}곳: {flagged}")
-        compute_safety_scores(records)
+        compute_safety_scores(records, area_by_dong=estimate_dong_areas_km2(step, cells))
         by_code = {r["dong_code"]: r for r in records}
         for zone in zones:
             rec = by_code[zone.dong_code]
@@ -504,7 +507,7 @@ def ingest():
     add_crime_rate(records, cells, crime_by_gu)
     flagged = flag_unknown_streetlights(records)
     print(f"  보안등 데이터가 사실상 없어 '모름'으로 보는 시·군·구 {len(flagged)}곳: {flagged}")
-    compute_safety_scores(records)
+    compute_safety_scores(records, area_by_dong=estimate_dong_areas_km2(step, cells))
 
     db = SessionLocal()
     try:

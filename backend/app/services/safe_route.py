@@ -27,7 +27,11 @@ from app.services.facility_density import (
 from app.services.geo import haversine_km
 from app.services.road_score import is_car_only, road_safety_score
 from app.services.route_artifact import RouteArtifact, load_current_artifact
-from app.services.safety_score import Period, compute_zone_period_scores
+from app.services.safety_score import (
+    SCORING_SEMANTICS_VERSION,
+    Period,
+    compute_zone_period_scores,
+)
 from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
 from app.observability import metrics
 
@@ -806,6 +810,7 @@ def route_input_data_version(
     payload = {
         "zones": _zone_data_version(zones),
         "facility_points": _file_sha256(facility_points_path),
+        "scoring_semantics": SCORING_SEMANTICS_VERSION,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -823,7 +828,7 @@ def find_safe_routes(
     """로드된 안전 경로 산출물에서 안전 가중 경로를 최대 k개까지 찾는다.
 
     HTTP 요청에서는 OSM 다운로드·그래프 점수화·산출물 생성을 하지 않는다. 산출물이
-    없거나 경로가 없으면 None을 반환해 호출부가 Tmap/직선 폴백을 적용한다.
+    없거나 경로가 없으면 None을 반환해 호출부가 Tmap 보행 경로 폴백을 적용한다.
     """
     _ = zones  # 호출 계약 호환성을 위해 유지한다. 산출물에는 이미 점수가 반영돼 있다.
     route_artifact_runtime.reload_if_changed(

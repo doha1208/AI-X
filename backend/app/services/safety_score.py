@@ -4,10 +4,19 @@ from app.services.scoring_profile import (
     ScoringProfile,
     validate_profile,
 )
+from app.services.dong_area import load_dong_areas_km2
 
 # 값이 작을수록 안전한 요소(1만 명당 범죄율, 가장 가까운 경찰서·비상벨까지의 거리).
 # accident_dist_m은 반대다 — 사고다발지역은 가까울수록 위험하므로 멀수록(값이 클수록) 안전하다.
 _LOWER_IS_SAFER = {"crime_rate", "police_dist_m", "bell_dist_m"}
+
+# 이 값이 바뀌면 동일한 원시 데이터와 가중치라도 점수 의미가 달라진다. 경로 산출물
+# fingerprint에 포함해 이전 계산 방식의 그래프가 최신으로 오인되지 않게 한다.
+SCORING_SEMANTICS_VERSION = "facility-density-v1"
+
+# 행정동 크기에 따라 자연스럽게 커지는 원시 개수. 점수 계산에서는 km²당 밀도로
+# 변환하되 DB와 API 내부 원본 값은 그대로 보존한다.
+_AREA_DENSITY_FACTORS = {"cctv_count", "streetlight_count", "store_count"}
 
 
 # 시·군·구의 동당 평균 보안등 수가 이보다 적으면 그 지역은 데이터를 사실상 못 올린 곳으로 본다.
@@ -33,11 +42,17 @@ def flag_unknown_streetlights(records: list[dict]) -> list[str]:
     return sorted(flagged)
 
 
-def _factor_value(record: dict, factor: str):
+def _factor_value(record: dict, factor: str, area_by_dong: dict[str, float] | None = None):
     """요소 값. 보안등 데이터를 못 받은 지역(lights_known=False)의 보안등은 None(모름)이다."""
     if factor == "streetlight_count" and record.get("lights_known") is False:
         return None
-    return record.get(factor)
+    value = record.get(factor)
+    if value is None or factor not in _AREA_DENSITY_FACTORS or area_by_dong is None:
+        return value
+    area_km2 = area_by_dong.get(record.get("dong_code"))
+    if not area_km2 or area_km2 <= 0:
+        return None
+    return value / area_km2
 
 
 def _normalize(value: float, lo: float, hi: float) -> float:
@@ -58,13 +73,17 @@ _OUTLIER_CLIP_PERCENTILE = 5
 
 
 def compute_safety_scores(
-    records: list[dict], period: Period = "day", profile: ScoringProfile | None = None
+    records: list[dict],
+    period: Period = "day",
+    profile: ScoringProfile | None = None,
+    area_by_dong: dict[str, float] | None = None,
 ) -> list[dict]:
     """요소별 수치(cctv_count/streetlight_count/crime_rate/police_dist_m/store_count)를
     가진 레코드 목록을 받아 0~100 안전 지수(safety_score)를 채워 반환한다. 높을수록 안전.
 
     같은 동 집합(예: 서울 전체) 안에서의 상대 비교용 min-max 정규화.
-    CCTV/보안등/상점은 많을수록, 범죄율(1만 명당)·경찰서 거리는 작을수록 점수가 높다.
+    CCTV/보안등/상점은 area_by_dong이 주어지면 km²당 밀도로 비교하며 많을수록,
+    범죄율(1만 명당)·경찰서 거리는 작을수록 점수가 높다.
     period(day/night)에 따라 요소별 가중치 배분이 달라진다.
     키가 없는 요소와 값이 None인 요소는 "모름"으로 보고 중립 점수를 준다.
     값이 None인 요소는 "모름"이라 정규화 범위에서 빼고 UNKNOWN_SCORE(50점)를 준다.
@@ -77,7 +96,9 @@ def compute_safety_scores(
     weights = profile.weights[period]
     bounds = {}
     for factor in weights:
-        known = sorted(v for v in (_factor_value(r, factor) for r in records) if v is not None)
+        known = sorted(
+            v for v in (_factor_value(r, factor, area_by_dong) for r in records) if v is not None
+        )
         if not known:
             bounds[factor] = (0, 0)
             continue
@@ -88,7 +109,7 @@ def compute_safety_scores(
     for record in records:
         total = 0.0
         for factor, weight in weights.items():
-            value = _factor_value(record, factor)
+            value = _factor_value(record, factor, area_by_dong)
             if value is None:
                 score = profile.unknown_score  # 데이터를 못 받은 요소는 좋지도 나쁘지도 않게 본다
             else:
@@ -123,5 +144,10 @@ def compute_zone_period_scores(
         }
         for z in zones
     ]
-    scored = compute_safety_scores(records, period=period, profile=profile)
+    scored = compute_safety_scores(
+        records,
+        period=period,
+        profile=profile,
+        area_by_dong=load_dong_areas_km2(),
+    )
     return {r["dong_code"]: r["safety_score"] for r in scored}
