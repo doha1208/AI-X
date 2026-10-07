@@ -372,7 +372,6 @@ function ResidencePage({ search }: { search: string }) {
           className={styles.controls}
           onZoomIn={() => mapRef.current?.zoomIn()}
           onZoomOut={() => mapRef.current?.zoomOut()}
-          onLocate={location ? () => mapRef.current?.panTo(location) : undefined}
         />
         <MapLegend className={styles.legend} title="안전도" items={SAFETY_LEGEND} />
       </div>
