@@ -9,6 +9,10 @@ describe("acceptFix", () => {
     expect(acceptFix(null, fix(37.5, 1500, 0))).toBe(true);
   });
 
+  it("rejects fixes outside Korea such as the 0,0 a sensorless browser reports", () => {
+    expect(acceptFix(null, { lat: 0, lng: 0, accuracy: 0, time: 0 })).toBe(false);
+  });
+
   it("accepts normal walking movement", () => {
     expect(acceptFix(fix(37.5, 10, 0), fix(37.5001, 10, 5000))).toBe(true); // 11m / 5s
   });

@@ -17,8 +17,14 @@ export function toFix(pos: GeolocationPosition): Fix {
   return { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, time: pos.timestamp };
 }
 
-// 새 위치를 받아들일지 정한다: 정확도가 크게 나빠진 값과, 순간이동처럼 튄 값을 걸러낸다.
+// 한반도 바깥 값(위치 센서 없는 브라우저가 주는 0,0 등)은 지도를 바다로 보내 타일이 안 뜨게 한다.
+function inKorea({ lat, lng }: LatLng): boolean {
+  return lat >= 33 && lat <= 39 && lng >= 124 && lng <= 132;
+}
+
+// 새 위치를 받아들일지 정한다: 한국 밖 값, 정확도가 크게 나빠진 값, 순간이동처럼 튄 값을 걸러낸다.
 export function acceptFix(prev: Fix | null, next: Fix): boolean {
+  if (!inKorea(next)) return false;
   if (!prev) return true;
   if (next.accuracy > MAX_ACCURACY_M && next.accuracy > prev.accuracy) return false;
   if (next.time - prev.time > STALE_MS) return true;
