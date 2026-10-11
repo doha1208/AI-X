@@ -1,0 +1,19 @@
+name: Quality
+on: [pull_request, push]
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements.txt && python -m pytest tests -q
+        working-directory: backend
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci && npm run lint && npx tsc --noEmit && npm run test -- --run
+        working-directory: frontend
+      # 합친 뒤에만 드러나는 오류(서버/클라이언트 컴포넌트 경계, 빌드 전용 검사)를 잡는다.
+      - run: npm run build
+        working-directory: frontend

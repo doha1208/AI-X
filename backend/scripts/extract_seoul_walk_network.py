@@ -20,11 +20,12 @@ import osmium
 HERE = Path(__file__).resolve().parent
 DATA_DIR = HERE.parent / "data" / "osm"
 SOURCE_PBF = DATA_DIR / "south-korea-latest.osm.pbf"
-OUTPUT_XML = DATA_DIR / "seoul-walk.osm"
+OUTPUT_XML = DATA_DIR / "seoul-gyeonggi-walk.osm"
 
-# 서울 대략적 경계 + 여유 (west, south, east, north). 안전구역 데이터가
-# 다른 도시로 늘어나면 이 값을 넓혀서 다시 실행하면 된다.
-BBOX = (126.76, 37.42, 127.18, 37.70)
+# 서울+경기도 전역 + 여유 (west, south, east, north). build_dong_grid.py의
+# BBOX와 같아야 하고, app/services/safe_route.py의 LOCAL_WALK_NETWORK_BBOX와도
+# 같아야 한다. 안전구역 데이터가 더 넓어지면 이 값을 넓혀서 다시 실행하면 된다.
+BBOX = (126.30, 36.85, 127.90, 38.30)
 
 # osmnx의 network_type="walk" 필터(app/services/safe_route.py가 기대하는 것과
 # 동일한 도로망이 나오도록)를 그대로 재현한 것. osmnx/_overpass.py 참고.

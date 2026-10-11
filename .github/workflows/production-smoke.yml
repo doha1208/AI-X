@@ -1,0 +1,22 @@
+name: Production smoke
+on:
+  workflow_dispatch:
+  schedule: [{ cron: '0 18 * * *' }]
+permissions: { contents: read }
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node scripts/production-smoke.mjs
+        env:
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+          SMOKE_USER_EMAIL: ${{ secrets.SMOKE_USER_EMAIL }}
+          SMOKE_USER_PASSWORD: ${{ secrets.SMOKE_USER_PASSWORD }}
+          SMOKE_START_LAT: ${{ vars.SMOKE_START_LAT }}
+          SMOKE_START_LNG: ${{ vars.SMOKE_START_LNG }}
+          SMOKE_END_LAT: ${{ vars.SMOKE_END_LAT }}
+          SMOKE_END_LNG: ${{ vars.SMOKE_END_LNG }}

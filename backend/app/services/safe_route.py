@@ -1,32 +1,100 @@
 import logging
+import hashlib
+import json
+import math
+import pickle
 import socket
 import threading
+import time
+from datetime import UTC, datetime
+from collections import OrderedDict
+from functools import lru_cache
 from pathlib import Path
 
 import networkx as nx
+import numpy as np
 import osmnx as ox
 from scipy.spatial import cKDTree
 
+from app.core.config import settings
 from app.models.safety_zone import SafetyZone
+from app.services.facility_density import (
+    ACCIDENT_POINTS_PATH,
+    FACILITY_POINTS_PATH,
+    POIS_PATH,
+    FacilityIndex,
+    edge_local_scores,
+    load_facility_index,
+)
 from app.services.geo import haversine_km
-from app.services.safety_score import Period, compute_zone_period_scores
+from app.services.road_score import is_car_only, road_safety_score
+from app.services.route_artifact import RouteArtifact, load_current_artifact
+from app.services.safety_score import (
+    SCORING_SEMANTICS_VERSION,
+    Period,
+    compute_zone_period_scores,
+)
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile, route_zone_profile
+from app.observability import metrics
 
 logger = logging.getLogger(__name__)
 
-# scripts/extract_seoul_walk_network.py로 미리 추출해둔 서울 권역 보행자
+# osmnx 기본 useful_tags_way에는 가로등(lit)/인도(sidewalk)가 없어 그래프에서 버려진다.
+# 도로 특성 점수(road_score)에 필요하므로 그래프를 읽기 전에 추가해둔다.
+ox.settings.useful_tags_way = list(dict.fromkeys([*ox.settings.useful_tags_way, "lit", "sidewalk"]))
+
+# scripts/extract_seoul_walk_network.py로 미리 추출해둔 서울+경기 권역 보행자
 # 도로망. 있으면 이 파일만으로 그래프를 만들어 Overpass 호출 자체를 건너뛴다
 # (독일 서버 왕복 없이 완전히 로컬/오프라인으로 동작). BBOX는 그 스크립트의
 # BBOX와 반드시 같아야 한다.
-LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-walk.osm"
-LOCAL_WALK_NETWORK_BBOX = (126.76, 37.42, 127.18, 37.70)
+LOCAL_WALK_NETWORK_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "osm" / "seoul-gyeonggi-walk.osm"
+LOCAL_WALK_NETWORK_BBOX = (126.30, 36.85, 127.90, 38.30)
+
+# OSM XML 파싱은 서울+경기 기준 약 5분이 걸린다. 한 번 파싱한 그래프를 pickle로
+# 저장해두고 다음 시작부터는 그걸 읽는다(XML이 더 최신이면 다시 파싱).
+# ponytail: 캐시 유효성은 XML 수정 시각만 본다 — 보존할 간선 태그(위 useful_tags_way)를
+# 바꿨다면 이 .pickle을 지워서 다시 파싱시켜야 한다. 서울+경기 파싱은 약 5분, 피크
+# 커밋 메모리 약 19GB(페이지 파일이 없으면 커밋 한도에 걸려 MemoryError가 날 수 있음).
+LOCAL_WALK_GRAPH_CACHE_PATH = LOCAL_WALK_NETWORK_PATH.with_suffix(".graph.pickle")
 
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
 _local_graph_lock = threading.Lock()
 
 
+def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
+    # 저장 도중 죽어도 기존 캐시가 깨지지 않게 임시 파일에 쓴 뒤 교체한다.
+    # 캐시 저장 실패는 치명적이지 않다 — 다음 시작에 XML을 다시 파싱하면 된다.
+    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+    try:
+        with tmp.open("wb") as f:
+            pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
+        tmp.replace(cache_path)
+    except Exception:
+        logger.warning("Failed to write graph cache %s", cache_path, exc_info=True)
+        tmp.unlink(missing_ok=True)
+
+
+def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiDiGraph:
+    """cache_path가 xml_path보다 새로우면 pickle을 읽고, 아니면(없음/오래됨/손상)
+    parse_xml로 다시 파싱해 캐시를 갱신한다.
+
+    ponytail: 이 프로젝트가 직접 만든 로컬 파일만 읽는다(pickle은 신뢰할 수 없는
+    파일을 열면 위험) — 사용자 업로드 경로에는 절대 쓰지 말 것.
+    """
+    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime:
+        try:
+            with cache_path.open("rb") as f:
+                return pickle.load(f)
+        except Exception:
+            logger.warning("Graph cache unreadable, re-parsing XML: %s", cache_path, exc_info=True)
+    graph = parse_xml(xml_path)
+    _write_graph_cache(graph, cache_path)
+    return graph
+
+
 def _load_local_graph() -> nx.MultiDiGraph | None:
-    """서울 보행자 도로망(94MB XML) 파싱에 수십 초가 걸린다. 플래그만으로
+    """서울+경기 보행자 도로망(약 400MB XML) 파싱에 수 분이 걸린다. 플래그만으로
     가드하면 로딩 중 들어온 동시 요청이 아직 None인 _local_graph를 받아
     Overpass 실시간 폴백으로 새 지연을 겪는다 — 락으로 대기시켜 막는다."""
     global _local_graph, _local_graph_attempted
@@ -39,7 +107,11 @@ def _load_local_graph() -> nx.MultiDiGraph | None:
         if not LOCAL_WALK_NETWORK_PATH.exists():
             return None
         try:
-            _local_graph = ox.graph_from_xml(LOCAL_WALK_NETWORK_PATH, bidirectional=True)
+            _local_graph = _read_graph_cached(
+                LOCAL_WALK_NETWORK_PATH,
+                LOCAL_WALK_GRAPH_CACHE_PATH,
+                lambda path: ox.graph_from_xml(path, bidirectional=True),
+            )
             logger.info(
                 "Loaded local OSM walk network: %d nodes, %d edges",
                 _local_graph.number_of_nodes(),
@@ -120,6 +192,66 @@ WARM_MARGIN_DEG = 0.02
 # 안전가중치 경로 후보를 최대 몇 개까지 보여줄지.
 K_ALTERNATIVES = 3
 
+# 대안경로(Yen's k-shortest)는 경로가 길어질수록 급격히 느려진다 — 서울+경기 그래프
+# 실측: 4.6km 약 0.9초, 수원→성남 20km 약 65초. 도보 귀갓길 범위(이 값)를 넘는
+# 요청은 대안 없이 최단(안전 가중) 1개만 찾는다.
+MAX_ALTERNATIVES_KM = 6.0
+
+
+def _alternatives_for(straight_km: float, k: int) -> int:
+    return k if straight_km <= MAX_ALTERNATIVES_KM else 1
+
+
+# 대안 경로가 서로 거의 같은 골목 변형이 되지 않도록, 필요한 대안 수보다 더 많은 후보를
+# 살펴보고 겹치지 않는 것들을 고른다. k=1일 때는 다양성이 의미 없으니 넓히지 않는다
+# (긴 경로는 Yen's 알고리즘 자체가 느려서 후보를 늘리면 응답 시간이 커진다).
+ALT_SEARCH_MULTIPLIER = 4
+ALT_SEARCH_MAX = 12
+# ponytail: 체감 기반 값 — 실제 지도에서 "이건 사실상 같은 길"로 보이는 비율 확인 후 조정.
+ROUTE_OVERLAP_MAX = 0.6
+
+
+def _search_budget(k: int) -> int:
+    return k if k <= 1 else min(k * ALT_SEARCH_MULTIPLIER, ALT_SEARCH_MAX)
+
+
+def _path_edges(path: list[int]) -> frozenset[tuple[int, int]]:
+    return frozenset(zip(path[:-1], path[1:]))
+
+
+def _overlap_fraction(graph: nx.DiGraph, edges: frozenset, selected_edges: set) -> float:
+    if not edges:
+        return 0.0
+    total = 0.0
+    overlap = 0.0
+    for u, v in edges:
+        length = graph[u][v].get("length", 0.0)
+        total += length
+        if (u, v) in selected_edges or (v, u) in selected_edges:
+            overlap += length
+    return overlap / total if total else 0.0
+
+
+def _diverse_routes(graph: nx.DiGraph, candidates: list[tuple[list[int], dict]], k: int) -> list[dict]:
+    """candidates는 비용 오름차순(가장 안전한 순)이라고 가정한다. 이미 고른 경로들과 많이
+    겹치는 후보는 일단 미루고, 그래도 k개를 못 채우면 미뤄둔 것부터 순서대로 채운다 —
+    다양성이 없는 것보다 대안이 아예 없는 게 더 나쁘다."""
+    selected: list[dict] = []
+    selected_edges: set[tuple[int, int]] = set()
+    leftover: list[dict] = []
+    for path, summary in candidates:
+        edges = _path_edges(path)
+        if selected and _overlap_fraction(graph, edges, selected_edges) > ROUTE_OVERLAP_MAX:
+            leftover.append(summary)
+            continue
+        selected.append(summary)
+        selected_edges |= edges
+    for summary in leftover:
+        if len(selected) >= k:
+            break
+        selected.append(summary)
+    return selected[:k]
+
 _graph_cache: dict[tuple[float, float, float, float], nx.MultiDiGraph] = {}
 
 
@@ -161,6 +293,10 @@ def _get_graph(bbox: tuple[float, float, float, float]) -> nx.MultiDiGraph | Non
     except Exception:
         logger.warning("OSM graph fetch failed for bbox=%s", bbox, exc_info=True)
         return None
+    # bbox 경계에서 잘린 노드는 실제로 길이 끝난 게 아니라 그래프가 거기서 잘린 것뿐이다 —
+    # _dead_end_nodes가 그 경계를 알아야 오탐(가짜 막다른 길)을 피할 수 있다. 로컬 전체망
+    # (_load_local_graph)은 이렇게 잘릴 일이 없어 이 속성을 아예 안 붙인다.
+    graph.graph["fetch_bbox"] = bbox
     _graph_cache[key] = graph
     return graph
 
@@ -188,17 +324,61 @@ def warm_cache(zones: list[SafetyZone]) -> None:
     )
 
     if _bbox_covers(LOCAL_WALK_NETWORK_BBOX, bbox):
-        _load_local_graph()
+        graph = _load_local_graph()
+        if graph is not None:
+            _prebuild_route_indexes(graph, zones)
         return
 
     _get_graph(bbox)
 
 
+def _prebuild_route_indexes(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> None:
+    """첫 사용자 요청이 노드 색인과 낮/밤 점수 그래프(서울+경기 기준 각 약 30초)를
+    기다리지 않도록 서버 기동 시 미리 만들어둔다."""
+    _node_index(graph)
+    zone_index = _build_zone_index(zones)
+    for period in ("day", "night"):
+        _get_scored_graph(graph, zones, route_zone_scores(zones, period), zone_index, period)
+
+
+# 위도 37.5도(서울·경기) 부근에서 경도 1도는 위도 1도의 약 0.79배 길이라, 위경도를
+# 그대로 평면 좌표로 쓰면 최근접 판정이 틀어진다 — 경도에 이 값을 곱해 보정한다.
+_LNG_SCALE = math.cos(math.radians(37.5))
+# 행정동 안에서도 도로망이 드문 가장자리를 허용하되, 다른 도시의 좌표가 서울·경기
+# 그래프 끝점에 붙는 일은 막는다.
+MAX_ROUTE_NODE_SNAP_KM = 1.0
+
+# graph 객체 id -> (graph, KD-tree, KD-tree 인덱스에 대응하는 노드 id 목록).
+# 노드가 수십만~백만 개라 요청마다 파이썬으로 전부 훑으면(서울+경기 75만 노드에서
+# 요청당 약 0.9초) 느리다 — 그래프당 한 번만 색인한다. graph를 함께 들고 있는 건
+# 임시 그래프가 사라진 뒤 같은 id가 재사용돼 엉뚱한 색인이 잡히는 걸 막기 위해서다.
+_node_index_cache: dict[int, tuple[nx.Graph, cKDTree, list[int]]] = {}
+_node_index_lock = threading.Lock()
+
+
+def _node_index(graph: nx.Graph) -> tuple[cKDTree, list[int]]:
+    key = id(graph)
+    cached = _node_index_cache.get(key)
+    if cached is not None and cached[0] is graph:
+        return cached[1], cached[2]
+    with _node_index_lock:
+        cached = _node_index_cache.get(key)
+        if cached is not None and cached[0] is graph:
+            return cached[1], cached[2]
+        node_ids = []
+        points = []
+        for node_id, data in graph.nodes(data=True):
+            node_ids.append(node_id)
+            points.append((data["y"], data["x"] * _LNG_SCALE))
+        tree = cKDTree(points)
+        _node_index_cache[key] = (graph, tree, node_ids)
+        return tree, node_ids
+
+
 def _nearest_node(graph: nx.Graph, lat: float, lng: float) -> int:
-    return min(
-        graph.nodes(data=True),
-        key=lambda item: haversine_km(lat, lng, item[1]["y"], item[1]["x"]),
-    )[0]
+    tree, node_ids = _node_index(graph)
+    _, idx = tree.query((lat, lng * _LNG_SCALE))
+    return node_ids[idx]
 
 
 def _build_zone_index(zones: list[SafetyZone]) -> cKDTree:
@@ -216,32 +396,133 @@ def _edge_cost(length_m: float, safety_score: float) -> float:
     return length_m * multiplier
 
 
+# 간선 점수 = 동 단위 점수(범죄율·경찰서·비상벨, route_zone_scores) + 도로 특성 점수(큰길/골목,
+# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 시설(CCTV·보안등·상점·사고다발, facility_density)의
+# 가중 평균. 도로 특성과 주변 시설은 같은 동 안에서도 구간마다 달라서 귀갓길 선택을 실제로 가른다.
+# ponytail: 실험(수원·안산·신림 90쌍) 기반 첫 값 — 비중은 실제 귀갓길 피드백으로 조정 필요.
+ZONE_SCORE_WEIGHT = 0.3
+ROAD_SCORE_WEIGHT = 0.3
+LOCAL_SCORE_WEIGHT = 0.4
+# 경로 점수 계산 방식이 바뀌면 올린다 — 이전 방식으로 만든 산출물이 최신으로 오인되지 않게.
+ROUTE_SCORING_VERSION = "segment-store-accident-v1"
+
+
+def route_zone_scores(
+    zones: list[SafetyZone], period: Period, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+) -> dict[str, float]:
+    """간선에 섞는 동 점수. 구간 단위로 따로 세는 요인을 뺀 프로필로 계산한다."""
+    return compute_zone_period_scores(zones, period, profile=route_zone_profile(profile))
+
+
+@lru_cache(maxsize=1)
+def _facility_index() -> FacilityIndex | None:
+    """구간별 밀도용 좌표(없으면 None → 동 점수로 대체). 서버가 떠 있는 동안 한 번만 읽는다."""
+    return load_facility_index()
+
+
+# bbox 경계로부터 이 거리(도 단위, 약 150m) 안의 노드는 막다른 길 판정에서 뺀다 — 그래프가
+# 거기서 잘려서 이웃이 적어 보이는 것일 수 있어서다. _route_bbox의 최소 여백(0.01도)보다
+# 훨씬 작게 잡아 실제 경로 구간을 막다른 길 판정에서 과하게 빼지 않는다.
+_BBOX_EDGE_MARGIN_DEG = 0.0015
+
+
+def _near_bbox_edge(x: float, y: float, bbox: tuple[float, float, float, float]) -> bool:
+    west, south, east, north = bbox
+    return (
+        x - west < _BBOX_EDGE_MARGIN_DEG
+        or east - x < _BBOX_EDGE_MARGIN_DEG
+        or y - south < _BBOX_EDGE_MARGIN_DEG
+        or north - y < _BBOX_EDGE_MARGIN_DEG
+    )
+
+
+def _dead_end_nodes(graph: nx.MultiDiGraph) -> set[int]:
+    """이웃이 하나 이하인(방향 무시) 노드 — 막다른 길의 끝.
+
+    graph가 bbox로 잘려 받아온 그래프(graph.graph["fetch_bbox"], _get_graph 참고)라면,
+    그 bbox 경계에 붙어있는 노드는 실제 막다른 길이 아니라 그래프가 거기서 잘려 이웃이
+    적어 보이는 것일 수 있어 제외한다. 로컬 전체망은 이 속성이 없어 전부 그대로 판정한다.
+    """
+    bbox = graph.graph.get("fetch_bbox")
+    dead_ends = set()
+    for n in graph.nodes:
+        if len(set(graph.successors(n)) | set(graph.predecessors(n))) > 1:
+            continue
+        if bbox is not None:
+            data = graph.nodes[n]
+            if _near_bbox_edge(data["x"], data["y"], bbox):
+                continue
+        dead_ends.add(n)
+    return dead_ends
+
+
+def _edge_score(zone_score: float, road_score: float, local_score: float) -> float:
+    return (
+        ZONE_SCORE_WEIGHT * zone_score
+        + ROAD_SCORE_WEIGHT * road_score
+        + LOCAL_SCORE_WEIGHT * local_score
+    )
+
+
 def _build_scored_graph(
     graph: nx.MultiDiGraph,
     zones: list[SafetyZone],
     score_map: dict[str, float],
     zone_index: cKDTree,
+    period: Period,
+    facilities: FacilityIndex | None = None,
 ) -> nx.DiGraph:
     """안전점수 배정(KD-tree 최근접 질의)과 평행 간선 단순화(대안 경로 탐색인
     `shortest_simple_paths`는 MultiDiGraph를 지원하지 않음)를 한 번에 한다.
+
+    간선 점수는 동 점수에 도로 특성 점수(road_score)와 구간 주변 시설 밀도를 섞어
+    구간별로 다르게 준다. facilities가 없으면 밀도 자리에 동 점수를 그대로 쓴다.
 
     원본 MultiDiGraph는 건드리지 않는다 — 이 그래프는 day/night 여러 period가
     공유하는 프로세스 전역 싱글턴이라, 제자리에서 mutate하면 동시에 들어온
     다른 period 요청과 서로의 안전점수를 덮어쓸 수 있다."""
     simple = nx.DiGraph()
     simple.add_nodes_from(graph.nodes(data=True))
-    for u, v, data in graph.edges(data=True):
-        mid_lat = (graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2
-        mid_lng = (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2
-        _, idx = zone_index.query((mid_lat, mid_lng))
-        score = score_map[zones[idx].dong_code]
+    edges = list(graph.edges(data=True))
+    if not edges:
+        return simple
+
+    # 간선 200만 개를 하나씩 질의하면 느려서 중간점을 모아 한 번에 묻는다.
+    midpoints = np.array(
+        [
+            ((graph.nodes[u]["y"] + graph.nodes[v]["y"]) / 2, (graph.nodes[u]["x"] + graph.nodes[v]["x"]) / 2)
+            for u, v, _ in edges
+        ]
+    )
+    _, zone_idx = zone_index.query(midpoints)
+    lights_known = np.array([z.lights_known is not False for z in zones])[zone_idx]
+    local_scores = edge_local_scores(facilities, midpoints, period, lights_known) if facilities else None
+    dead_ends = _dead_end_nodes(graph)
+
+    for i, (u, v, data) in enumerate(edges):
+        if is_car_only(data):
+            continue
+        zone_score = score_map[zones[zone_idx[i]].dong_code]
+        road_score = road_safety_score(data, period, dead_end=u in dead_ends or v in dead_ends)
+        local_score = local_scores[i] if local_scores is not None else zone_score
+        score = _edge_score(zone_score, road_score, local_score)
         cost = _edge_cost(data.get("length", 0.0), score)
         if simple.has_edge(u, v):
             if cost < simple[u][v]["safety_cost"]:
-                simple[u][v].update(data, zone_score=score, safety_cost=cost)
+                simple[u][v].update(data, edge_score=score, safety_cost=cost)
         else:
-            simple.add_edge(u, v, **data, zone_score=score, safety_cost=cost)
+            simple.add_edge(u, v, **data, edge_score=score, safety_cost=cost)
+    _keep_largest_walk_network(simple)
     return simple
+
+
+def _keep_largest_walk_network(graph: nx.DiGraph) -> None:
+    """차도 구간을 빼면 거기로만 닿던 노드가 고립된다. 출발·도착점이 그런 노드에 붙으면 경로가
+    없다고 나오므로, 서로 걸어서 이어지는 가장 큰 도로망만 남긴다(방금 만든 그래프라 제자리 수정)."""
+    if graph.number_of_nodes() == 0:
+        return
+    main = max(nx.weakly_connected_components(graph), key=len)
+    graph.remove_nodes_from([n for n in graph.nodes if n not in main])
 
 
 # (graph 객체 id, period) -> 이미 안전점수를 배정하고 단순화한 그래프.
@@ -269,21 +550,287 @@ def _get_scored_graph(
         cached = _scored_graph_cache.get(key)
         if cached is not None:
             return cached
-        simple = _build_scored_graph(graph, zones, score_map, zone_index)
+        simple = _build_scored_graph(graph, zones, score_map, zone_index, period, _facility_index())
         _scored_graph_cache[key] = simple
         return simple
 
 
+def _edge_points(graph: nx.DiGraph, u: int, v: int) -> list[tuple[float, float]]:
+    """u→v 구간의 실제 도로 모양. osmnx가 합친 간선은 geometry에 굽은 모양을 담고 있어서,
+    노드만 이으면 굽은 길을 가로질러(건물·차도 위로) 그리게 된다. 역방향 간선은 좌표가 반대일 수 있다."""
+    start = (graph.nodes[u]["y"], graph.nodes[u]["x"])
+    end = (graph.nodes[v]["y"], graph.nodes[v]["x"])
+    geometry = graph[u][v].get("geometry")
+    if geometry is None:
+        return [start, end]
+    coords = [(lat, lng) for lng, lat in geometry.coords]
+    if math.dist(coords[0], start) > math.dist(coords[-1], start):
+        coords.reverse()
+    return [start, *coords[1:-1], end]
+
+
 def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
-    points = [(graph.nodes[n]["y"], graph.nodes[n]["x"]) for n in path]
+    points = [(graph.nodes[path[0]]["y"], graph.nodes[path[0]]["x"])]
     total_length = 0.0
     weighted_score = 0.0
     for u, v in zip(path[:-1], path[1:]):
+        points.extend(_edge_points(graph, u, v)[1:])
         edge = graph[u][v]
         total_length += edge["length"]
-        weighted_score += edge["length"] * edge["zone_score"]
+        weighted_score += edge["length"] * edge["edge_score"]
     avg_score = weighted_score / total_length if total_length else 0.0
     return {"points": points, "score": avg_score, "distance_m": total_length}
+
+
+class RouteArtifactRuntime:
+    """HTTP 요청이 읽기 전용 경로 산출물만 조회하도록 하는 런타임 보관소."""
+
+    def __init__(self, cache_size: int | None = None) -> None:
+        self._artifact: RouteArtifact | None = None
+        self._artifact_published_at: datetime | None = None
+        self._tree: cKDTree | None = None
+        self._lock = threading.Lock()
+        self._cache_size = max(1, cache_size or settings.route_result_cache_size)
+        self._result_cache: OrderedDict[tuple[str, Period, int, int, int], list[dict]] = OrderedDict()
+        self._manifest_mtime_ns: int | None = None
+        self._last_reload_check = float("-inf")
+
+    def install(self, artifact: RouteArtifact, *, published_at: datetime | None = None) -> None:
+        """완성된 산출물과 그 노드 색인을 한 번에 교체한다."""
+
+        tree = cKDTree(artifact.node_points)
+        with self._lock:
+            self._artifact = artifact
+            self._artifact_published_at = published_at
+            self._tree = tree
+            self._result_cache.clear()
+
+    def clear(self) -> None:
+        with self._lock:
+            self._artifact = None
+            self._artifact_published_at = None
+            self._tree = None
+            self._result_cache.clear()
+            self._manifest_mtime_ns = None
+
+    def status(self) -> dict[str, bool | str | None]:
+        with self._lock:
+            return {
+                "available": self._artifact is not None,
+                "version": self._artifact.version if self._artifact is not None else None,
+                "published_at": self._artifact_published_at.isoformat() if self._artifact_published_at else None,
+            }
+
+    def published_at(self) -> datetime | None:
+        with self._lock:
+            return self._artifact_published_at
+
+    def score_map(self, period: Period) -> dict[str, float] | None:
+        with self._lock:
+            if self._artifact is None:
+                return None
+            scores = self._artifact.score_by_period.get(period)
+            return dict(scores) if scores is not None else None
+
+    def load(self, directory: Path) -> bool:
+        artifact = load_current_artifact(directory)
+        if artifact is None:
+            return False
+        try:
+            manifest_stat = (directory / "current.json").stat()
+            manifest_mtime_ns = manifest_stat.st_mtime_ns
+            published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
+        except OSError:
+            manifest_mtime_ns = None
+            published_at = None
+        self.install(artifact, published_at=published_at)
+        with self._lock:
+            self._manifest_mtime_ns = manifest_mtime_ns
+        return True
+
+    def reload_if_changed(self, directory: Path, *, now: float) -> bool:
+        """새 매니페스트가 완전히 검증된 경우에만 현재 산출물을 교체한다."""
+
+        with self._lock:
+            if now - self._last_reload_check < settings.route_artifact_reload_seconds:
+                return False
+            self._last_reload_check = now
+            current_mtime_ns = self._manifest_mtime_ns
+        try:
+            manifest_stat = (directory / "current.json").stat()
+            manifest_mtime_ns = manifest_stat.st_mtime_ns
+            published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
+        except OSError:
+            return False
+        if manifest_mtime_ns == current_mtime_ns:
+            return False
+
+        artifact = load_current_artifact(directory)
+        if artifact is None:
+            return False
+        self.install(artifact, published_at=published_at)
+        with self._lock:
+            self._manifest_mtime_ns = manifest_mtime_ns
+        return True
+
+    def find_routes(
+        self,
+        start_lat: float,
+        start_lng: float,
+        end_lat: float,
+        end_lng: float,
+        *,
+        period: Period,
+        k: int,
+    ) -> list[dict] | None:
+        with self._lock:
+            artifact = self._artifact
+            tree = self._tree
+        if artifact is None or tree is None:
+            return None
+
+        graph = artifact.graph_by_period.get(period)
+        if graph is None:
+            return None
+        try:
+            _, origin_idx = tree.query((start_lat, start_lng * _LNG_SCALE))
+            _, destination_idx = tree.query((end_lat, end_lng * _LNG_SCALE))
+            origin = artifact.node_ids[int(origin_idx)]
+            destination = artifact.node_ids[int(destination_idx)]
+            origin_data = graph.nodes[origin]
+            destination_data = graph.nodes[destination]
+            if (
+                haversine_km(start_lat, start_lng, origin_data["y"], origin_data["x"])
+                > MAX_ROUTE_NODE_SNAP_KM
+                or haversine_km(end_lat, end_lng, destination_data["y"], destination_data["x"])
+                > MAX_ROUTE_NODE_SNAP_KM
+            ):
+                return None
+            cache_key = (artifact.version, period, origin, destination, k)
+            with self._lock:
+                cached = self._result_cache.get(cache_key)
+                if cached is not None:
+                    self._result_cache.move_to_end(cache_key)
+                    metrics.record_route_cache("hit")
+                    return cached
+            metrics.record_route_cache("miss")
+            paths = nx.shortest_simple_paths(graph, origin, destination, weight="safety_cost")
+            search_budget = _search_budget(k)
+            candidates: list[tuple[list[int], dict]] = []
+            for path in paths:
+                candidates.append((path, _summarize_path(graph, path)))
+                if len(candidates) >= search_budget:
+                    break
+            routes = _diverse_routes(graph, candidates, k)
+            with self._lock:
+                if self._artifact is artifact:
+                    self._result_cache[cache_key] = routes
+                    self._result_cache.move_to_end(cache_key)
+                    while len(self._result_cache) > self._cache_size:
+                        self._result_cache.popitem(last=False)
+            return routes or None
+        except (IndexError, nx.NetworkXNoPath, nx.NodeNotFound, ValueError) as exc:
+            logger.warning("Artifact safety-route search failed: %s", exc)
+            return None
+
+
+route_artifact_runtime = RouteArtifactRuntime()
+
+
+def build_route_artifact(
+    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+) -> RouteArtifact:
+    """배치 실행에서만 호출하는 낮·밤 안전 가중 경로 그래프 생성기.
+
+    로컬 OSM 도로망이 없으면 HTTP 요청에서 다운로드로 보완하지 않고, 산출물 생성 자체를
+    실패시킨다. 성공한 이전 산출물은 게시 단계에서 그대로 유지된다.
+    """
+
+    if not zones:
+        raise ValueError("Safety zones are required to build a route artifact")
+    graph = _load_local_graph()
+    if graph is None or graph.number_of_nodes() == 0:
+        raise RuntimeError("Local walking graph is required to build a route artifact")
+
+    zone_index = _build_zone_index(zones)
+    # 산출물은 공공시설 좌표의 스냅샷이다. 장기 실행되는 빌더가 이전 KD-tree를
+    # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
+    # 빌드마다 파일에서 다시 읽는다.
+    facilities = load_facility_index()
+    graph_by_period: dict[Period, nx.DiGraph] = {}
+    score_by_period: dict[Period, dict[str, float]] = {}
+    for period in ("day", "night"):
+        # 화면에 보여줄 동 점수(전체 요인)와 간선에 섞을 동 점수(구간 단위 요인 제외)는 다르다.
+        score_by_period[period] = compute_zone_period_scores(zones, period, profile=profile)
+        graph_by_period[period] = _build_scored_graph(
+            graph, zones, route_zone_scores(zones, period, profile), zone_index, period, facilities
+        )
+
+    # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
+    walk_graph = graph_by_period["day"]
+    node_ids = list(walk_graph.nodes)
+    node_points = np.array(
+        [(walk_graph.nodes[node_id]["y"], walk_graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
+    )
+    return RouteArtifact(
+        version=version,
+        region=region,
+        graph_by_period=graph_by_period,
+        node_ids=node_ids,
+        node_points=node_points,
+        profile_version=profile.version,
+        data_version=route_input_data_version(zones),
+        score_by_period=score_by_period,
+    )
+
+
+def _zone_data_version(zones: list[SafetyZone]) -> str:
+    fields = (
+        "dong_code", "lat", "lng", "cctv_count", "streetlight_count", "lights_known",
+        "crime_rate", "police_dist_m", "store_count", "bell_dist_m", "accident_dist_m",
+    )
+    records = [
+        {field: getattr(zone, field) for field in fields}
+        for zone in sorted(zones, key=lambda zone: zone.dong_code)
+    ]
+    encoded = json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    """경로 산출물에 쓰는 신뢰된 입력 파일의 내용 지문.
+
+    파일이 없거나 읽을 수 없는 상태도 별도 값으로 남겨, 시설 좌표가 사라진 경우에도
+    이전 시설 점수 산출물이 최신으로 오인되지 않게 한다.
+    """
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return "missing"
+    return digest.hexdigest()
+
+
+def route_input_data_version(
+    zones: list[SafetyZone],
+    *,
+    facility_points_path: Path = FACILITY_POINTS_PATH,
+    pois_path: Path = POIS_PATH,
+    accident_points_path: Path = ACCIDENT_POINTS_PATH,
+) -> str:
+    """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
+    payload = {
+        "zones": _zone_data_version(zones),
+        "facility_points": _file_sha256(facility_points_path),
+        "pois": _file_sha256(pois_path),
+        "accident_points": _file_sha256(accident_points_path),
+        "scoring_semantics": SCORING_SEMANTICS_VERSION,
+        "route_scoring": ROUTE_SCORING_VERSION,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def find_safe_routes(
@@ -295,38 +842,16 @@ def find_safe_routes(
     k: int = K_ALTERNATIVES,
     period: Period = "day",
 ) -> list[dict] | None:
-    """도로망 그래프(OSM) + 안전구역 점수로 가중치를 준 경로를 최대 k개까지 찾는다.
+    """로드된 안전 경로 산출물에서 안전 가중 경로를 최대 k개까지 찾는다.
 
-    안전점수가 가장 높은(비용이 가장 낮은) 순서로 정렬되어 반환된다.
-    period(day/night)에 따라 안전점수 계산 가중치가 달라진다.
-
-    ponytail: bbox 단위 인메모리 캐시만 사용 — osmnx 자체 디스크 캐시가 있어
-    동일 지역 재요청은 이미 빠르다. 그래프 다운로드 실패/미커버 지역이면
-    None을 반환해 호출부가 Tmap/직선 샘플링으로 폴백하게 한다.
+    HTTP 요청에서는 OSM 다운로드·그래프 점수화·산출물 생성을 하지 않는다. 산출물이
+    없거나 경로가 없으면 None을 반환해 호출부가 Tmap 보행 경로 폴백을 적용한다.
     """
-    if not zones:
-        return None
-
-    score_map = compute_zone_period_scores(zones, period)
-    zone_index = _build_zone_index(zones)
-    bbox = _route_bbox(start_lat, start_lng, end_lat, end_lng)
-    graph = _get_graph(bbox)
-    if graph is None or graph.number_of_nodes() == 0:
-        return None
-
-    try:
-        orig = _nearest_node(graph, start_lat, start_lng)
-        dest = _nearest_node(graph, end_lat, end_lng)
-        simple = _get_scored_graph(graph, zones, score_map, zone_index, period)
-        path_iter = nx.shortest_simple_paths(simple, orig, dest, weight="safety_cost")
-
-        routes: list[dict] = []
-        for path in path_iter:
-            routes.append(_summarize_path(simple, path))
-            if len(routes) >= k:
-                break
-    except (nx.NetworkXNoPath, nx.NodeNotFound, ValueError) as exc:
-        logger.warning("Safety-weighted path search failed: %s", exc)
-        return None
-
-    return routes or None
+    _ = zones  # 호출 계약 호환성을 위해 유지한다. 산출물에는 이미 점수가 반영돼 있다.
+    route_artifact_runtime.reload_if_changed(
+        Path(settings.route_artifact_dir), now=time.monotonic()
+    )
+    k = _alternatives_for(haversine_km(start_lat, start_lng, end_lat, end_lng), k)
+    return route_artifact_runtime.find_routes(
+        start_lat, start_lng, end_lat, end_lng, period=period, k=k
+    )

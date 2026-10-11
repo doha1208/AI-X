@@ -3,20 +3,31 @@ backend/.venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/*.db
+backend/*.db.bak*
 backend/.pytest_cache/
+backend/.pytest-codex-temp/
 backend/.env
 backend/cache/
-backend/data/osm/
+# OSM 원본·그래프(약 1.8GB)와 경로 아티팩트(약 3GB) — 용량이 커서 git 대신 따로 전달한다(README 참고).
+backend/data/
 
 # 공공데이터 원본 다운로드 (대용량, data.go.kr에서 재다운로드 가능 — 출처는
 # backend/scripts/ingest_public_data.py 상단 주석 참고)
 /CCTV정보.csv
 /경찰청_범죄 발생 지역별 통계_*.csv
+/*주민등록인구및세대현황*.csv
+/안전비상벨위치정보.csv
+/전국교통사고다발지역표준데이터.csv
+/유동인구_행정동단위집계.csv
+/유입생활이동인구.csv
 
 # Node / Next.js
 frontend/node_modules/
 frontend/.next/
 frontend/.env.local
+
+# 개인 PC의 절대경로가 박혀 있는 컴파일 산출물 — run_app.cs에서 각자 컴파일해서 쓴다.
+/실행.exe
 
 # OS
 .DS_Store
@@ -24,3 +35,21 @@ Thumbs.db
 
 # Claude Code runtime state (not project content)
 .claude/scheduled_tasks.lock
+
+# Local Codex development instructions (DEVELOPMENT.md is intentionally tracked)
+/AGENTS.md
+/.agents/
+/DEVELOPMENT.md
+
+# pytest 캐시 (backend 밖에서 실행했을 때)
+.pytest_cache/
+
+# 루트에 받아둔 개인 자료(참고 PDF·스크린샷·영상, 양식 백업) — 프로젝트 산출물이 아니다.
+/*.pdf
+/*.png
+/*.mp4
+/양식_원본백업/
+
+# Codex planning and design notes are local working material, not project deliverables.
+/docs/superpowers/
+/.superpowers

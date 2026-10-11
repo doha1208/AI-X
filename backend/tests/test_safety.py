@@ -1,10 +1,6 @@
-import os
-
-if os.path.exists("test_safety.db"):
-    os.remove("test_safety.db")
-os.environ["DATABASE_URL"] = "sqlite:///./test_safety.db"
-
 from fastapi.testclient import TestClient  # noqa: E402
+from datetime import UTC, datetime
+import pytest
 
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app  # noqa: E402
@@ -13,8 +9,26 @@ from app.models.safety_zone import SafetyZone  # noqa: E402
 client = TestClient(app)
 
 
-def setup_module():
-    Base.metadata.create_all(bind=engine)
+@pytest.fixture(autouse=True)
+def isolated_route_request_gate(monkeypatch):
+    from app.api import safety as safety_api
+    from app.services.route_request_limit import RouteRequestGate
+
+    monkeypatch.setattr(
+        safety_api,
+        "route_request_gate",
+        RouteRequestGate(
+            max_concurrent=2,
+            ip_requests_per_minute=100,
+            ip_burst=100,
+            user_requests_per_minute=100,
+            user_burst=100,
+        ),
+    )
+
+
+@pytest.fixture(autouse=True)
+def safety_zones():
     db = SessionLocal()
     db.add_all(
         [
@@ -42,6 +56,7 @@ def setup_module():
     )
     db.commit()
     db.close()
+    yield
 
 
 def test_nearby_zones():
@@ -58,7 +73,108 @@ def test_residence_recommend_orders_by_score():
     assert scores == sorted(scores, reverse=True)
 
 
-def test_route_safety_returns_score():
+def test_residence_recommend_uses_active_artifact_day_scores(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(safety_api, "period_for", lambda: "day")
+    monkeypatch.setattr(
+        safety_api.route_artifact_runtime,
+        "score_map",
+        lambda period: {"TEST1": 12.0, "TEST2": 98.0},
+    )
+
+    body = client.get("/safety/residence-recommend", params={"limit": 2}).json()
+
+    assert [(zone["dong_code"], zone["safety_score"]) for zone in body] == [
+        ("TEST2", 98.0),
+        ("TEST1", 12.0),
+    ]
+
+
+def test_residence_recommend_uses_the_current_kst_period_and_returns_both_scores(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(safety_api, "period_for", lambda: "night")
+    monkeypatch.setattr(
+        safety_api.route_artifact_runtime,
+        "score_map",
+        lambda period: (
+            {"TEST1": 12.0, "TEST2": 98.0}
+            if period == "day"
+            else {"TEST1": 91.0, "TEST2": 23.0}
+        ),
+    )
+
+    body = client.get("/safety/residence-recommend", params={"limit": 2}).json()
+
+    assert [zone["dong_code"] for zone in body] == ["TEST1", "TEST2"]
+    assert body[0]["period"] == "night"
+    assert body[0]["safety_score"] == 91.0
+    assert body[0]["day_safety_score"] == 12.0
+    assert body[0]["night_safety_score"] == 91.0
+
+
+def test_nearby_zones_use_the_current_kst_period(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(safety_api, "period_for", lambda: "night")
+    monkeypatch.setattr(
+        safety_api.route_artifact_runtime,
+        "score_map",
+        lambda period: (
+            {"TEST1": 15.0, "TEST2": 85.0}
+            if period == "day"
+            else {"TEST1": 88.0, "TEST2": 22.0}
+        ),
+    )
+
+    body = client.get(
+        "/safety/zones",
+        params={"lat": 37.50, "lng": 127.00, "radius_km": 5},
+    ).json()
+
+    by_code = {zone["dong_code"]: zone for zone in body}
+    assert by_code["TEST1"] == {
+        "dong_code": "TEST1",
+        "dong_name": "테스트동1",
+        "lat": 37.5,
+        "lng": 127.0,
+        "safety_score": 88.0,
+        "day_safety_score": 15.0,
+        "night_safety_score": 88.0,
+        "period": "night",
+    }
+
+
+def test_route_rejects_coordinates_outside_the_seoul_gyeonggi_service_area():
+    response = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 35.1796,
+            "start_lng": 129.0756,
+            "end_lat": 35.1830,
+            "end_lng": 129.0810,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "reason": "outside_service_area",
+        "action": "현재 길찾기는 서울·경기 지역에서만 지원합니다.",
+        "points": ["start", "end"],
+    }
+
+
+def test_route_safety_returns_score(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
     res = client.post(
         "/safety/route",
         json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
@@ -69,7 +185,16 @@ def test_route_safety_returns_score():
     assert len(body["zones_passed"]) >= 1
 
 
-def test_route_safety_accepts_night_timestamp():
+def test_route_safety_accepts_night_timestamp(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
     res = client.post(
         "/safety/route",
         json={
@@ -84,3 +209,316 @@ def test_route_safety_accepts_night_timestamp():
     body = res.json()
     assert "safety_score" in body
     assert len(body["zones_passed"]) >= 1
+
+
+def test_route_safety_reports_a_recoverable_error_when_no_safety_zones_exist():
+    db = SessionLocal()
+    db.query(SafetyZone).delete()
+    db.commit()
+    db.close()
+
+    res = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert res.status_code == 422
+    assert res.json()["detail"] == {
+        "reason": "safety_zones_unavailable",
+        "action": "안전 데이터가 준비될 때까지 잠시 후 다시 시도해 주세요.",
+    }
+
+
+def test_route_fallback_ignores_incomplete_artifact_score_map(monkeypatch):
+    from app.api import safety as safety_api
+
+    async def tmap_points(*_):
+        return [(37.50, 127.00), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "find_safe_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", tmap_points)
+    monkeypatch.setattr(safety_api.route_artifact_runtime, "score_map", lambda period: {"TEST1": 99.0})
+    monkeypatch.setattr(
+        safety_api.route_artifact_runtime,
+        "published_at",
+        lambda: datetime(2026, 10, 1, 9, 30, tzinfo=UTC),
+    )
+    monkeypatch.setattr(
+        safety_api,
+        "compute_zone_period_scores",
+        lambda zones, period: {"TEST1": 31.0, "TEST2": 69.0},
+    )
+
+    response = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.50,
+            "start_lng": 127.00,
+            "end_lat": 37.51,
+            "end_lng": 127.01,
+            "at": "2026-01-01T23:30:00+09:00",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [zone["safety_score"] for zone in body["zones_passed"]] == [31.0, 69.0]
+    assert body["data_disclosure"]["updated_at"] is None
+    assert "tmap_pedestrian_route" in body["data_disclosure"]["data_basis"]
+
+
+def test_route_response_discloses_fallback_and_missing_route_data(monkeypatch):
+    """경로 산출물 대신 일반 도보 경로를 쓴 경우에도 근거와 한계를 보여 준다."""
+    from app.api import safety as safety_api
+
+    async def tmap_points(*_):
+        return [(37.50, 127.00), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "find_safe_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", tmap_points)
+
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert response.status_code == 200
+    disclosure = response.json()["data_disclosure"]
+    assert disclosure["fallback"] == {
+        "applied": True,
+        "mode": "tmap",
+        "reason": "safety_weighted_unavailable",
+    }
+    assert "updated_at" in disclosure
+    assert {item["factor"] for item in disclosure["missing_data"]} >= {
+        "crime_rate",
+        "police_distance",
+        "emergency_bell_distance",
+        "accident_hotspot_distance",
+    }
+
+
+def test_route_returns_an_error_instead_of_a_straight_line_when_no_pedestrian_route_exists(monkeypatch):
+    from app.api import safety as safety_api
+
+    async def no_tmap_route(*_):
+        return None
+
+    monkeypatch.setattr(safety_api, "find_safe_routes", lambda *args, **kwargs: None)
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", no_tmap_route)
+
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "reason": "pedestrian_route_unavailable",
+        "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    }
+
+
+def test_nearby_bells_limit_query_param_is_honored():
+    from app.services import bells as bells_module
+
+    bells_module._cached_points = [(37.5001 + 0.0001 * i, 127.0) for i in range(10)]
+    try:
+        res = client.get("/safety/bells", params={"lat": 37.5, "lng": 127.0, "radius_km": 5, "limit": 3})
+        assert res.status_code == 200
+        assert len(res.json()) == 3
+    finally:
+        bells_module._cached_points = None
+
+
+def test_route_safety_includes_shortest_route_field(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.50, 127.00), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
+    res = client.post(
+        "/safety/route",
+        json={"start_lat": 37.50, "start_lng": 127.00, "end_lat": 37.51, "end_lng": 127.01},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    # Tmap 키 미설정/실패 시 None으로 조용히 빠지므로 값 자체보단 필드 존재만 확인.
+    assert "shortest_route_points" in body
+
+
+def test_route_alternatives_include_the_zones_passed_by_each_route(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0},
+            {"points": [(37.5, 127.0), (37.52, 127.02)], "score": 65.0, "distance_m": 1900.0},
+        ],
+    )
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", lambda *args, **kwargs: None)
+
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01, "include_comparison": False},
+    )
+
+    assert response.status_code == 200
+    alternatives = response.json()["alternatives"]
+    assert len(alternatives) == 2
+    assert all(alternative["zones_passed"] for alternative in alternatives)
+
+
+def test_route_without_comparison_skips_tmap_when_safe_route_exists(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
+    called = False
+
+    async def fake_tmap(*args, **kwargs):
+        nonlocal called
+        called = True
+        return [(37.5, 127.0), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", fake_tmap)
+
+    res = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.5,
+            "start_lng": 127.0,
+            "end_lat": 37.51,
+            "end_lng": 127.01,
+            "include_comparison": False,
+        },
+    )
+
+    assert res.status_code == 200
+    assert called is False
+    assert res.json()["shortest_route_points"] is None
+
+
+def test_route_safety_returns_retry_after_when_request_limit_is_exhausted(monkeypatch):
+    from app.api import safety as safety_api
+    from app.services.route_request_limit import RouteRequestGate
+
+    monkeypatch.setattr(
+        safety_api,
+        "route_request_gate",
+        RouteRequestGate(
+            max_concurrent=2,
+            ip_requests_per_minute=1,
+            ip_burst=1,
+            user_requests_per_minute=1,
+            user_burst=1,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [
+            {"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}
+        ],
+    )
+
+    first = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01},
+    )
+    second = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"] == "60"
+
+
+def test_health_reports_route_artifact_status(monkeypatch):
+    from app import main
+
+    monkeypatch.setattr(main.route_artifact_runtime, "status", lambda: {"available": True, "version": "v1"})
+
+    assert client.get("/health").json()["route_artifact"] == {"available": True, "version": "v1"}
+
+
+def test_route_comparison_reports_the_dongs_the_shortest_route_passes(monkeypatch):
+    from app.api import safety as safety_api
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [{"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}],
+    )
+
+    async def shortest(*_):
+        return [(37.50, 127.00), (37.505, 127.005), (37.51, 127.01)]
+
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", shortest)
+
+    body = client.post(
+        "/safety/route",
+        json={"start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01},
+    ).json()
+
+    assert [z["dong_code"] for z in body["shortest_zones_passed"]] == ["TEST1", "TEST2"]
+    assert all(isinstance(z["safety_score"], (int, float)) for z in body["shortest_zones_passed"])
+
+
+def test_route_response_reports_which_day_night_period_was_used(monkeypatch):
+    """timeMode가 자동일 때도 프론트가 "야간 기준" 배지를 붙일 수 있도록, 실제로 어느
+    시간대 가중치를 썼는지 응답에 포함한다."""
+    from app.api import safety as safety_api
+    from app.services.route_request_limit import RouteRequestGate
+
+    # route_request_gate는 모듈 전역 싱글턴이라 앞선 테스트들의 요청이 버스트 한도를
+    # 이미 써버렸을 수 있다 — 이 테스트는 별도로 넉넉한 한도를 쓴다.
+    monkeypatch.setattr(
+        safety_api,
+        "route_request_gate",
+        RouteRequestGate(max_concurrent=2, ip_requests_per_minute=100, ip_burst=100, user_requests_per_minute=100, user_burst=100),
+        raising=False,
+    )
+
+    monkeypatch.setattr(
+        safety_api,
+        "find_safe_routes",
+        lambda *args, **kwargs: [{"points": [(37.5, 127.0), (37.51, 127.01)], "score": 70.0, "distance_m": 1400.0}],
+    )
+
+    async def no_comparison(*_):
+        return None
+
+    monkeypatch.setattr(safety_api, "get_pedestrian_route", no_comparison)
+
+    night = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01,
+            "at": "2026-01-01T23:00:00+09:00",
+        },
+    ).json()
+    day = client.post(
+        "/safety/route",
+        json={
+            "start_lat": 37.5, "start_lng": 127.0, "end_lat": 37.51, "end_lng": 127.01,
+            "at": "2026-01-01T12:00:00+09:00",
+        },
+    ).json()
+
+    assert night["period"] == "night"
+    assert day["period"] == "day"

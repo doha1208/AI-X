@@ -1,0 +1,108 @@
+.sheet {
+  --sheet-collapsed-height: 104px;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.handle {
+  display: none;
+}
+
+.summary {
+  display: none;
+  flex-shrink: 0;
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (max-width: 767px) {
+  .sheet {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    height: calc(100% - var(--sheet-top-gap, 12px));
+    max-height: none;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 24px 24px 0 0;
+    box-shadow: 0 -8px 28px rgb(0 0 0 / 14%);
+    overflow: hidden;
+    will-change: transform;
+    transition: transform 220ms ease;
+  }
+
+  .sheet[data-snap="collapsed"] {
+    transform: translateY(calc(100% - var(--sheet-collapsed-height)));
+  }
+
+  .sheet[data-snap="half"] {
+    transform: translateY(50%);
+  }
+
+  .sheet[data-snap="full"] {
+    transform: translateY(0);
+  }
+
+  .sheet[data-dragging="true"] {
+    transform: translateY(var(--sheet-drag-offset));
+    transition: none;
+  }
+
+  .handle {
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 100%;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .handle:active {
+    cursor: grabbing;
+  }
+
+  .grabber {
+    width: 40px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--text-faint);
+  }
+
+  .summary {
+    display: block;
+    min-height: 60px;
+    padding: 4px 18px 14px;
+  }
+
+  .content {
+    flex: 1;
+    padding: 0 16px calc(16px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  .handle:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: -4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet {
+    transition: none;
+  }
+}

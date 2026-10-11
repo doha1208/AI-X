@@ -1,0 +1,165 @@
+import json
+
+import networkx as nx
+import numpy as np
+from shapely.geometry import LineString
+
+from app.core.config import settings
+from app.services import safe_route as sr
+from app.services.route_artifact import RouteArtifact, publish_artifact
+
+
+def _artifact(version: str = "v1", score: float = 70.0) -> RouteArtifact:
+    graph = nx.DiGraph()
+    graph.add_node(1, y=37.5, x=127.0)
+    graph.add_node(2, y=37.501, x=127.001)
+    graph.add_edge(1, 2, length=140.0, edge_score=score, safety_cost=210.0)
+    return RouteArtifact(
+        version=version,
+        region="seoul-gyeonggi",
+        graph_by_period={"day": graph, "night": graph.copy()},
+        node_ids=[1, 2],
+        node_points=np.array([(37.5, 100.75587421698687), (37.501, 100.75666757032717)]),
+    )
+
+
+def test_runtime_finds_route_in_loaded_artifact_without_graph_fetch(monkeypatch):
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(_artifact())
+    monkeypatch.setattr(sr, "_get_graph", lambda *_: (_ for _ in ()).throw(AssertionError("must not fetch graph")))
+
+    routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert routes == [{"points": [(37.5, 127.0), (37.501, 127.001)], "score": 70.0, "distance_m": 140.0}]
+
+
+def test_runtime_does_not_snap_a_distant_coordinate_to_the_artifact_graph():
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(_artifact())
+
+    routes = runtime.find_routes(37.5, 127.0, 35.1796, 129.0756, period="day", k=1)
+
+    assert routes is None
+
+
+def test_route_points_follow_the_road_shape_not_a_straight_line():
+    artifact = _artifact()
+    # osmnx가 합친 간선은 모양(geometry)을 따로 가진다 — 역방향 간선은 좌표 순서가 반대일 수 있다.
+    curve = LineString([(127.001, 37.501), (127.0, 37.5012), (127.0, 37.5)])
+    artifact.graph_by_period["day"][1][2]["geometry"] = curve
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(artifact)
+
+    routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert routes[0]["points"] == [(37.5, 127.0), (37.5012, 127.0), (37.501, 127.001)]
+
+
+def test_find_safe_routes_returns_none_without_a_loaded_artifact(monkeypatch, tmp_path):
+    monkeypatch.setattr(sr, "route_artifact_runtime", sr.RouteArtifactRuntime())
+    monkeypatch.setattr(sr, "_get_graph", lambda *_: (_ for _ in ()).throw(AssertionError("must not fetch graph")))
+    # 개발 머신에 실제로 게시된 산출물이 있으면 reload_if_changed가 그걸 불러와 버려서,
+    # "빈 런타임"이라는 이 테스트의 전제가 환경에 따라 깨진다 — 빈 디렉터리로 격리한다.
+    monkeypatch.setattr(settings, "route_artifact_dir", str(tmp_path))
+
+    assert sr.find_safe_routes(37.5, 127.0, 37.501, 127.001, [], period="day") is None
+
+
+def test_runtime_loads_the_current_published_artifact(tmp_path):
+    publish_artifact(_artifact(), tmp_path)
+    runtime = sr.RouteArtifactRuntime()
+
+    assert runtime.load(tmp_path) is True
+    assert runtime.published_at() is not None
+    assert runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="night", k=1) is not None
+
+
+def test_result_cache_is_discarded_when_a_new_artifact_is_installed():
+    runtime = sr.RouteArtifactRuntime(cache_size=2)
+    first_artifact = _artifact(version="v1", score=70.0)
+    runtime.install(first_artifact)
+
+    first = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+    first_artifact.graph_by_period["day"][1][2]["edge_score"] = 20.0
+    cached = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+    runtime.install(_artifact(version="v2", score=20.0))
+    refreshed = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert first[0]["score"] == 70.0
+    assert cached[0]["score"] == 70.0
+    assert refreshed[0]["score"] == 20.0
+
+
+def test_invalid_new_manifest_keeps_the_last_loaded_artifact(tmp_path):
+    publish_artifact(_artifact(version="v1", score=70.0), tmp_path)
+    runtime = sr.RouteArtifactRuntime()
+    assert runtime.load(tmp_path) is True
+    (tmp_path / "current.json").write_text(json.dumps({"version": "v2"}), encoding="utf-8")
+
+    assert runtime.reload_if_changed(tmp_path, now=1000.0) is False
+    routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert routes[0]["score"] == 70.0
+
+
+def test_runtime_reloads_a_newly_published_artifact(tmp_path):
+    publish_artifact(_artifact(version="v1", score=70.0), tmp_path)
+    runtime = sr.RouteArtifactRuntime()
+    assert runtime.load(tmp_path) is True
+    publish_artifact(_artifact(version="v2", score=20.0), tmp_path)
+
+    assert runtime.reload_if_changed(tmp_path, now=1000.0) is True
+    routes = runtime.find_routes(37.5, 127.0, 37.501, 127.001, period="day", k=1)
+
+    assert routes[0]["score"] == 20.0
+
+
+def test_route_lookup_uses_a_newly_published_artifact_after_reload(monkeypatch, tmp_path):
+    publish_artifact(_artifact(version="v1", score=70.0), tmp_path)
+    runtime = sr.RouteArtifactRuntime()
+    assert runtime.load(tmp_path) is True
+    monkeypatch.setattr(sr, "route_artifact_runtime", runtime)
+    monkeypatch.setattr(settings, "route_artifact_dir", str(tmp_path))
+    publish_artifact(_artifact(version="v2", score=20.0), tmp_path)
+
+    routes = sr.find_safe_routes(37.5, 127.0, 37.501, 127.001, [], period="day")
+
+    assert routes[0]["score"] == 20.0
+
+
+def _diamond_with_near_duplicates_artifact() -> RouteArtifact:
+    """1->9 사이에 진짜 다른 길(7-8 경유) 하나와, A(2-3 직결)의 사소한 변형(2-4-3 등)
+    세 개를 함께 둔다. 변형들이 진짜 대안보다 조금씩 더 싸서, 다양성을 신경 쓰지 않으면
+    top-k가 변형들로만 채워진다."""
+    graph = nx.DiGraph()
+    for n in range(1, 10):
+        graph.add_node(n, y=37.5 + n * 0.001, x=127.0 + n * 0.001)
+
+    def edge(u: int, v: int, length: float) -> None:
+        graph.add_edge(u, v, length=length, edge_score=70.0, safety_cost=length)
+
+    edge(1, 2, 100.0)
+    edge(3, 9, 100.0)
+    edge(2, 3, 100.0)  # A: 1-2-3-9 = 300
+    edge(2, 4, 60.0); edge(4, 3, 45.0)  # B1: 1-2-4-3-9 = 305
+    edge(2, 5, 61.0); edge(5, 3, 45.0)  # B2: 1-2-5-3-9 = 306
+    edge(2, 6, 62.0); edge(6, 3, 45.0)  # B3: 1-2-6-3-9 = 307
+    edge(1, 7, 110.0); edge(7, 8, 110.0); edge(8, 9, 110.0)  # C: 1-7-8-9 = 330
+
+    graph_points = np.array([(graph.nodes[n]["y"], graph.nodes[n]["x"] * sr._LNG_SCALE) for n in graph.nodes])
+    return RouteArtifact(
+        version="v1",
+        region="seoul-gyeonggi",
+        graph_by_period={"day": graph, "night": graph.copy()},
+        node_ids=list(graph.nodes),
+        node_points=graph_points,
+    )
+
+
+def test_alternatives_prefer_genuinely_different_routes_over_near_duplicates():
+    runtime = sr.RouteArtifactRuntime()
+    runtime.install(_diamond_with_near_duplicates_artifact())
+
+    routes = runtime.find_routes(37.501, 127.001, 37.509, 127.009, period="day", k=3)
+
+    assert [round(r["distance_m"]) for r in routes] == [300, 330, 305]

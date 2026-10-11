@@ -2,689 +2,394 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { nearbyZones, residenceRecommend, routeSafety, type RouteResult, type SafetyZone } from "@/lib/api";
-import { clearToken, getEmailFromToken, getToken } from "@/lib/auth";
+import { nearbyBells, nearbyZones, residenceRecommend, type SafetyZone } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
-import { geocodeAddress, reverseGeocode, type LatLng } from "@/lib/kakao";
-import { SafetyMap } from "@/components/SafetyMap";
+import { reverseGeocode, type LatLng } from "@/lib/kakao";
+import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
+import { addRecent, loadSettings } from "@/lib/preferences";
 import {
-  AlertIcon,
-  BellIcon,
-  CloseIcon,
-  ExpandIcon,
-  LogoutIcon,
-  MapPinIcon,
-  RouteIcon,
-  SearchIcon,
-  ShieldPinIcon,
-  TrophyIcon,
-} from "@/components/icons";
+  applyScoreChanges,
+  loadWatchedZones,
+  MAX_WATCHED_ZONES,
+  saveWatchedZones,
+  toggleWatchedZone,
+  type WatchedZone,
+} from "@/lib/watchedZones";
+import { useMyLocation } from "@/lib/useMyLocation";
+import { userInitial, useSessionUser } from "@/lib/useSessionUser";
+import { AppHeader } from "@/components/AppHeader";
+import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
+import { SafetyMap, type SafetyMapHandle } from "@/components/SafetyMap";
+import { MapContextMenu, MapControls, MapLegend, useMapContextMenu } from "@/components/MapOverlays";
+import { withSearch } from "@/components/WithSearch";
+import { AlertIcon, CloseIcon, LocateIcon, MapPinIcon, SearchIcon } from "@/components/icons";
+import type { SheetSnap } from "@/lib/bottomSheet";
 import styles from "./page.module.css";
 
-// ponytail: 토큰을 localStorage에 보관 (XSS 노출 위험). 프로덕션 전환 시
-// httpOnly 쿠키 기반 세션으로 교체하고 백엔드에 CSRF 보호 추가 필요.
+const NEARBY_RADIUS_KM = 5;
+const TOP_NEARBY = 5;
+const TOP_ALL = 10;
+// 관심 동네의 최신 점수는 그 동네 중심에서 좁게 조회해 같은 동 코드를 찾는다.
+const WATCH_LOOKUP_KM = 1;
 
-function scoreColor(score: number): string {
-  if (score >= 70) return "var(--safe)";
-  if (score >= 40) return "var(--caution)";
-  return "var(--warning)";
+const SAFETY_LEGEND = [
+  { label: "참고 점수 높음 (70~100)", swatch: "dot" as const, color: "var(--safe)" },
+  { label: "참고 점수 중간 (40~69)", swatch: "dot" as const, color: "var(--caution)" },
+  { label: "참고 점수 낮음 (0~39)", swatch: "dot" as const, color: "var(--warning)" },
+];
+
+function scoreTone(score: number): string {
+  if (score >= 70) return styles.scoreSafe;
+  if (score >= 40) return styles.scoreCaution;
+  return styles.scoreWarning;
 }
 
-// "37.55, 126.92" 같은 위경도 직접 입력도 계속 지원 (지오코딩 실패 대비 폴백).
-function parseLatLng(value: string): LatLng | null {
-  const parts = value.split(",").map((v) => Number(v.trim()));
-  if (parts.length !== 2 || parts.some(Number.isNaN)) return null;
-  return { lat: parts[0], lng: parts[1] };
+function scoreLabel(score: number): string {
+  if (score >= 70) return "참고 점수 높음";
+  if (score >= 40) return "참고 점수 중간";
+  return "참고 점수 낮음";
 }
 
-type FieldKey = "nearby" | "start" | "end";
+type Nearby = { place: Place; zones: SafetyZone[] };
 
-const REROUTE_DISTANCE_M = 50;
-const REROUTE_MIN_INTERVAL_MS = 5000;
-const ARRIVAL_RADIUS_M = 30;
+export default withSearch(ResidencePage);
 
-export default function Dashboard() {
+function ResidencePage({ search }: { search: string }) {
   const router = useRouter();
-  const [ready, setReady] = useState(false);
-  const [displayName, setDisplayName] = useState("");
-  const [recommended, setRecommended] = useState<SafetyZone[]>([]);
-  const [nearby, setNearby] = useState<SafetyZone[]>([]);
-  const [route, setRoute] = useState<RouteResult | null>(null);
+  const user = useSessionUser();
+  const { location, request: requestLocation } = useMyLocation();
+  const mapRef = useRef<SafetyMapHandle>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const menu = useMapContextMenu();
+  const [settings] = useState(loadSettings);
+  const [initialNear] = useState(() => placeFromQuery(search, "near"));
+  const [query, setQuery] = useState(initialNear?.label ?? "");
+  const [allRanking, setAllRanking] = useState<SafetyZone[] | null>(null);
+  const [nearby, setNearby] = useState<Nearby | null>(null);
+  const [scope, setScope] = useState<"nearby" | "all">(initialNear ? "nearby" : "all");
+  const [bells, setBells] = useState<LatLng[]>([]);
   const [selectedZone, setSelectedZone] = useState<SafetyZone | null>(null);
+  const [watched, setWatched] = useState<WatchedZone[]>(loadWatchedZones);
+  // 관심 동네 점수가 바뀌었을 때 바로 보여주는 배너 문구(닫으면 사라진다).
+  const [scoreAlerts, setScoreAlerts] = useState<string[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [searching, setSearching] = useState(initialNear !== null);
   const [error, setError] = useState<string | null>(null);
-  const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [myLocation, setMyLocation] = useState<LatLng | null>(null);
-  const [pickMode, setPickMode] = useState<FieldKey | null>(null);
-  const [mapFullscreen, setMapFullscreen] = useState(false);
-  const [locationDenied, setLocationDenied] = useState(false);
-  const [contextMenu, setContextMenu] = useState<
-    (LatLng & { x: number; y: number; address: string | null; loading: boolean }) | null
-  >(null);
+  const [sheetSnap, setSheetSnap] = useState<SheetSnap>("collapsed");
 
-  function requestMyLocation() {
-    if (!navigator.geolocation) {
-      setLocationDenied(true);
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocationDenied(false);
-      },
-      (err) => {
-        console.warn("[geolocation] failed:", err.message);
-        setLocationDenied(true);
-      }
-    );
+  function searchAt(place: Place) {
+    setSearching(true);
+    setError(null);
+    return loadNearby(place);
   }
 
-  const [navigating, setNavigating] = useState(false);
-  const destinationRef = useRef<LatLng | null>(null);
-  const watchIdRef = useRef<number | null>(null);
-  const lastRouteFetchRef = useRef<{ origin: LatLng; at: number } | null>(null);
-  const isRefetchingRef = useRef(false);
-
-  function stopNavigation() {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-    setNavigating(false);
-  }
-
-  async function handlePositionUpdate(pos: GeolocationPosition) {
-    const here: LatLng = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    setMyLocation(here);
-    const destination = destinationRef.current;
-    if (!destination) return;
-
-    if (haversineMeters(here, destination) <= ARRIVAL_RADIUS_M) {
-      stopNavigation();
-      return;
-    }
-
-    const last = lastRouteFetchRef.current;
-    const movedEnough = !last || haversineMeters(here, last.origin) >= REROUTE_DISTANCE_M;
-    const enoughTimePassed = !last || Date.now() - last.at >= REROUTE_MIN_INTERVAL_MS;
-    if (!movedEnough || !enoughTimePassed || isRefetchingRef.current) return;
-
-    isRefetchingRef.current = true;
+  // 상태 변경은 모두 await 이후에만 한다 — 처음 쿼리로 들어온 위치를 effect에서 바로 불러오기 때문.
+  async function loadNearby(place: Place) {
     try {
-      const result = await routeSafety(here.lat, here.lng, destination.lat, destination.lng);
-      setRoute(result);
-      lastRouteFetchRef.current = { origin: here, at: Date.now() };
+      const zones = await nearbyZones(place.lat, place.lng, NEARBY_RADIUS_KM);
+      setNearby({ place, zones });
+      setScope("nearby");
+      setSelectedZone(null);
+      setSheetSnap("half");
+      mapRef.current?.panTo(place);
+      const closest = zones.reduce<SafetyZone | null>(
+        (best, z) => (!best || haversineMeters(place, z) < haversineMeters(place, best) ? z : best),
+        null
+      );
+      if (closest) addRecent("searches", { label: closest.dong_name, lat: closest.lat, lng: closest.lng });
+      // 비상벨은 데이터가 촘촘해서(동 중앙값 약 67m) 좁은 반경만 조회한다.
+      if (settings.showBells) {
+        nearbyBells(place.lat, place.lng, 1).then(setBells).catch(() => setBells([]));
+      }
     } catch (err) {
-      console.warn("[live-route] recompute failed:", err instanceof Error ? err.message : err);
-      // 재계산 실패는 배너로 방해하지 않는다 — 기존 경로를 유지하고 다음 위치 갱신에서 재시도.
+      setError(err instanceof Error ? err.message : "주변 안전 구역을 불러오지 못했어요");
     } finally {
-      isRefetchingRef.current = false;
+      setSearching(false);
     }
-  }
-
-  function startNavigation() {
-    if (!route || !navigator.geolocation) return;
-    const end = route.route_points[route.route_points.length - 1];
-    destinationRef.current = { lat: end.lat, lng: end.lng };
-    lastRouteFetchRef.current = myLocation ? { origin: myLocation, at: Date.now() } : null;
-    setNavigating(true);
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      handlePositionUpdate,
-      (err) => {
-        console.warn("[geolocation] watch failed:", err.message);
-        setError("실시간 위치를 가져오지 못했어요. 위치 권한을 확인해주세요");
-        stopNavigation();
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
-    );
   }
 
   useEffect(() => {
+    residenceRecommend(TOP_ALL)
+      .then(setAllRanking)
+      .catch((err) => setError(err instanceof Error ? err.message : "추천 목록을 불러오지 못했어요"));
+  }, []);
+
+  // 관심 동네의 안전지수가 지난번 확인 때와 달라졌으면 알림으로 남긴다(데이터 재적재 후 처음 열 때 걸린다).
+  useEffect(() => {
+    const saved = loadWatchedZones();
+    if (saved.length === 0) return;
+    let cancelled = false;
+    Promise.all(saved.map((w) => nearbyZones(w.lat, w.lng, WATCH_LOOKUP_KM).catch(() => [] as SafetyZone[]))).then(
+      (results) => {
+        if (cancelled) return;
+        const { next, messages } = applyScoreChanges(loadWatchedZones(), results.flat());
+        saveWatchedZones(next);
+        setWatched(next);
+        if (messages.length > 0) setScoreAlerts(messages);
+      }
+    );
     return () => {
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      cancelled = true;
     };
   }, []);
 
-  const [resolved, setResolved] = useState<Record<FieldKey, LatLng | null>>({
-    nearby: null,
-    start: null,
-    end: null,
-  });
-  const nearbyInputRef = useRef<HTMLInputElement>(null);
-  const startInputRef = useRef<HTMLInputElement>(null);
-  const endInputRef = useRef<HTMLInputElement>(null);
-  const fieldRefs: Record<FieldKey, React.RefObject<HTMLInputElement | null>> = {
-    nearby: nearbyInputRef,
-    start: startInputRef,
-    end: endInputRef,
-  };
-
-  function clearResolved(key: FieldKey) {
-    setResolved((r) => (r[key] ? { ...r, [key]: null } : r));
-  }
-
-  async function resolveField(key: FieldKey): Promise<LatLng | null> {
-    if (resolved[key]) return resolved[key];
-    const text = fieldRefs[key].current?.value.trim() ?? "";
-    if (!text) return null;
-    return parseLatLng(text) ?? geocodeAddress(text);
-  }
-
-  async function handleMapPick(latlng: LatLng) {
-    if (!pickMode) return;
-    const key = pickMode;
-    setPickMode(null);
-    const label = (await reverseGeocode(latlng.lat, latlng.lng)) ?? `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
-    const input = fieldRefs[key].current;
-    if (input) input.value = label;
-    setResolved((r) => ({ ...r, [key]: latlng }));
-  }
-
-  async function handleMapContextMenu(info: LatLng & { x: number; y: number }) {
-    setContextMenu({ ...info, address: null, loading: true });
-    const address = await reverseGeocode(info.lat, info.lng);
-    setContextMenu((cm) => (cm && cm.x === info.x && cm.y === info.y ? { ...cm, address, loading: false } : cm));
-  }
-
-  function setFieldFromContextMenu(key: FieldKey) {
-    if (!contextMenu) return;
-    const { lat, lng, address } = contextMenu;
-    const label = address ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    const input = fieldRefs[key].current;
-    if (input) input.value = label;
-    setResolved((r) => ({ ...r, [key]: { lat, lng } }));
-    setContextMenu(null);
-  }
-
-  async function searchNearbyFromContextMenu() {
-    if (!contextMenu) return;
-    const { lat, lng } = contextMenu;
-    setFieldFromContextMenu("nearby");
-    await runNearbySearch({ lat, lng });
-  }
-
-  async function runNearbySearch(coords: LatLng) {
-    try {
-      setRoute(null);
-      setNearby(await nearbyZones(coords.lat, coords.lng, 5));
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "조회 실패");
-    }
-  }
-
-  function selectZone(zone: SafetyZone) {
-    setSelectedZone(zone);
-    document.getElementById("map-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  function loadRecommended() {
-    residenceRecommend(5)
-      .then((zones) => {
-        setRecommended(zones);
-        setError(null);
-      })
-      .catch((e) => setError(e.message));
-  }
-
   useEffect(() => {
-    const token = getToken();
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
-    setDisplayName(getEmailFromToken(token)?.split("@")[0] ?? "회원");
-    loadRecommended();
-    requestMyLocation();
-  }, [router]);
+    if (initialNear) void loadNearby(initialNear);
+    // 쿼리로 넘어온 위치는 처음 한 번만 검색한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useEffect(() => {
-    if (!mapFullscreen && !contextMenu) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      setMapFullscreen(false);
-      setContextMenu(null);
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mapFullscreen, contextMenu]);
-
-  useEffect(() => {
-    if (!contextMenu) return;
-    function handleOutsideClick() {
-      setContextMenu(null);
-    }
-    const id = window.setTimeout(() => window.addEventListener("click", handleOutsideClick), 0);
-    return () => {
-      window.clearTimeout(id);
-      window.removeEventListener("click", handleOutsideClick);
-    };
-  }, [contextMenu]);
-
-  async function handleNearbySearch(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const coords = await resolveField("nearby");
-    if (!coords) {
+    const place = await resolvePlace(query);
+    if (!place) {
       setError("주소를 찾을 수 없어요. 정확한 주소를 입력하거나 지도에서 선택해주세요");
       return;
     }
-    await runNearbySearch(coords);
+    await searchAt(place);
   }
 
-  async function handleRouteSearch(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const [start, end] = await Promise.all([resolveField("start"), resolveField("end")]);
-    if (!start || !end) {
-      setError("출발지/도착지 주소를 찾을 수 없어요. 정확한 주소를 입력하거나 지도에서 선택해주세요");
+  function searchMyLocation() {
+    if (!location) {
+      requestLocation();
+      setError("내 위치를 가져오지 못했어요. 브라우저의 위치 권한을 허용해주세요");
       return;
     }
-    try {
-      stopNavigation();
-      const result = await routeSafety(start.lat, start.lng, end.lat, end.lng);
-      setNearby([]);
-      setRoute(result);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "경로 조회 실패");
-    }
+    setQuery("현재 위치");
+    void searchAt({ ...location, label: "현재 위치" });
   }
 
-  function handleLogout() {
-    clearToken();
-    router.replace("/login");
+  async function handleMapPick(latlng: LatLng) {
+    if (!picking) return;
+    setPicking(false);
+    const label = (await reverseGeocode(latlng.lat, latlng.lng)) ?? `${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`;
+    setQuery(label);
+    await searchAt({ ...latlng, label });
   }
 
-  const mapZones = useMemo(
+  const showingNearby = scope === "nearby" && nearby !== null;
+  // 매 렌더마다 새 배열을 만들면 지도 오버레이가 키 입력마다 다시 그려진다.
+  const ranking = useMemo(
     () =>
-      Array.from(
-        new Map([...recommended, ...nearby, ...(route?.zones_passed ?? [])].map((z) => [z.dong_code, z])).values()
-      ),
-    [recommended, nearby, route]
+      showingNearby
+        ? [...nearby.zones].sort((a, b) => b.safety_score - a.safety_score).slice(0, TOP_NEARBY)
+        : (allRanking ?? []),
+    [showingNearby, nearby, allRanking]
   );
 
-  if (!ready) return null;
+  if (!user) return null;
+  const loadingList = showingNearby ? searching : allRanking === null;
+  const selectedRank = selectedZone ? ranking.findIndex((zone) => zone.dong_code === selectedZone.dong_code) + 1 : 0;
+  const currentPeriod = (selectedZone ?? ranking[0])?.period;
 
   return (
     <main className={styles.page}>
-      <nav className={styles.navbar}>
-        <div className={styles.navLeft}>
-          <span className={styles.brand}>
-            <span className={styles.brandIcon}>
-              <ShieldPinIcon size={16} />
-            </span>
-            안심 거주지
-          </span>
-          <div className={styles.navLinks}>
-            <a className={styles.navLink} href="#map-section">
-              안전 지도
-            </a>
-            <a className={styles.navLink} href="#route-section">
-              귀갓길 조회
-            </a>
-            <span className={styles.navLinkDisabled} title="준비 중">
-              마이페이지
-            </span>
-          </div>
-        </div>
-        <div className={styles.navRight}>
-          <button className={styles.bellButton} type="button" aria-label="알림" title="준비 중">
-            <BellIcon size={18} />
-            <span className={styles.bellDot} />
-          </button>
-          <span className={styles.avatar}>{displayName.slice(0, 1).toUpperCase()}</span>
-          <button className={styles.logoutButton} onClick={handleLogout}>
-            <LogoutIcon size={14} />
-            로그아웃
-          </button>
-        </div>
-      </nav>
+      <AppHeader userInitial={userInitial(user)} />
 
-      {error && !bannerDismissed && (
-        <div className={styles.banner}>
-          <AlertIcon size={16} />
-          {error}
-          <button type="button" className={styles.bannerRetry} onClick={loadRecommended}>
-            다시 시도
-          </button>
+      <div ref={stageRef} className={styles.stage} data-sheet-snap={sheetSnap}>
+        <SafetyMap
+          ref={mapRef}
+          zones={showingNearby ? nearby.zones : ranking}
+          rankedZones={ranking}
+          bells={settings.showBells ? bells : undefined}
+          center={location ?? undefined}
+          myLocation={location ?? undefined}
+          focusZone={selectedZone}
+          onSelect={handleMapPick}
+          onZoneSelect={(zone) => {
+            setSelectedZone(zone);
+            setSheetSnap("half");
+          }}
+          onContextMenu={menu.open}
+          height="100%"
+        />
+
+        <form className={styles.searchBar} onSubmit={handleSearch} role="search">
+          <SearchIcon size={18} className={styles.searchIcon} />
+          <input
+            className={styles.searchInput}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="동네나 주소를 검색하세요 (예: 수원시 영통구 망포동)"
+            aria-label="주소 검색"
+          />
           <button
             type="button"
-            className={styles.bannerClose}
-            aria-label="배너 닫기"
-            onClick={() => setBannerDismissed(true)}
+            className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
+            onClick={() => setPicking((p) => !p)}
+            aria-pressed={picking}
+            aria-label="지도에서 선택"
           >
-            <CloseIcon size={14} />
+            <MapPinIcon size={17} className={styles.chipIcon} />
+            <span className={styles.chipLabel}>지도에서 선택</span>
           </button>
-        </div>
-      )}
+          <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
+            <LocateIcon size={17} className={styles.chipIcon} />
+            <span className={styles.chipLabel}>현재 위치</span>
+          </button>
+        </form>
 
-      <div className={styles.shell}>
-        <h1 className={styles.greeting}>안녕하세요, {displayName}님 👋</h1>
-        <p className={styles.greetingSub}>오늘도 안전한 하루 보내세요. 우리 동네 안전지수를 확인해보세요.</p>
+        {scoreAlerts.length > 0 && (
+          <div className={`${styles.notice} ${styles.noticeScore}`} role="status">
+            {scoreAlerts.join(" · ")}
+            <button
+              type="button"
+              className={styles.noticeClose}
+              aria-label="알림 닫기"
+              onClick={() => setScoreAlerts([])}
+            >
+              <CloseIcon size={14} />
+            </button>
+          </div>
+        )}
 
-        <div className={styles.layout}>
-          <aside className={styles.sidebar}>
-            <section className={styles.card}>
-              <div className={styles.cardHeaderRow}>
-                <h2 className={styles.cardHeader}>
-                  <TrophyIcon size={17} />
-                  안심 거주지 추천 Top 5
-                </h2>
-                <span className={styles.viewAllLink}>전체보기</span>
+        {(error || picking) && (
+          <div className={`${styles.notice} ${error ? styles.noticeError : ""}`} role={error ? "alert" : "status"}>
+            {error ? <AlertIcon size={16} /> : null}
+            {error ?? "지도를 클릭해서 검색할 위치를 선택하세요"}
+            <button
+              type="button"
+              className={styles.noticeClose}
+              aria-label="닫기"
+              onClick={() => (error ? setError(null) : setPicking(false))}
+            >
+              <CloseIcon size={14} />
+            </button>
+          </div>
+        )}
+
+        <AdaptiveBottomSheet
+          className={styles.panel}
+          label="안심 순위"
+          snap={sheetSnap}
+          onSnapChange={setSheetSnap}
+          workspaceRef={stageRef}
+          summary={
+            <div className={styles.sheetSummary}>
+              <div className={styles.sheetSummaryText}>
+                <span>{showingNearby ? "내 주변 안심 순위" : "전체 지역 안심 순위"}</span>
+                <strong>{(selectedZone ?? ranking[0])?.dong_name ?? "안전 구역을 불러오는 중"}</strong>
               </div>
-              {recommended.length === 0 ? (
-                <p className={styles.rankMeta}>추천 데이터를 불러오는 중이에요</p>
-              ) : (
-                <ul className={styles.rankList}>
-                  {recommended.map((z, i) => (
-                    <li
-                      key={z.dong_code}
-                      className={`${styles.rankItem} ${selectedZone?.dong_code === z.dong_code ? styles.rankItemSelected : ""}`}
-                      onClick={() => selectZone(z)}
-                    >
-                      <span className={styles.rankNumber}>{i + 1}</span>
-                      <span className={styles.rankInfo}>
-                        <div className={styles.rankName}>{z.dong_name}</div>
-                      </span>
-                      <span className={styles.scoreBadge} style={{ background: scoreColor(z.safety_score) }}>
-                        {z.safety_score.toFixed(0)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+              {(selectedZone ?? ranking[0]) && (
+                <span className={`${styles.scoreBadge} ${scoreTone((selectedZone ?? ranking[0]).safety_score)}`}>
+                  {(selectedZone ?? ranking[0]).safety_score.toFixed(0)}점
+                </span>
               )}
-            </section>
+            </div>
+          }
+        >
+          <header className={styles.panelHeader}>
+            <h1 className={styles.panelTitle}>{showingNearby ? "안심 거주지 추천 Top 5" : "전체 지역 안심 순위"}</h1>
+            <p className={styles.panelSub}>
+              {showingNearby
+                ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
+                : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
+            </p>
+            {currentPeriod && (
+              <p className={styles.panelSub}>현재 시간 기준: {currentPeriod === "night" ? "야간" : "주간"}</p>
+            )}
+          </header>
 
-            <section className={styles.card}>
-              <h2 className={styles.cardHeader}>
-                <SearchIcon size={17} />
-                주변 안전 구역 검색
-              </h2>
-              <form onSubmit={handleNearbySearch} className={styles.searchRow}>
-                <input
-                  ref={nearbyInputRef}
-                  className={styles.searchInput}
-                  type="text"
-                  placeholder="예: 서울시 마포구 연남동"
-                  onChange={() => clearResolved("nearby")}
-                  required
-                />
-                <button type="submit" className={styles.iconButton} aria-label="검색하기">
-                  <SearchIcon size={16} />
-                </button>
-              </form>
-              <div className={styles.hintRow}>
-                <p className={styles.searchHint}>주소로 검색해보세요</p>
-                <button
-                  type="button"
-                  className={`${styles.pickLink} ${pickMode === "nearby" ? styles.pickLinkActive : ""}`}
-                  onClick={() => setPickMode((m) => (m === "nearby" ? null : "nearby"))}
-                >
-                  <MapPinIcon size={12} />
-                  지도에서 선택
-                </button>
+          {selectedZone && (
+            <section className={styles.mobileSelectedDetail} aria-label="선택 안전구역 상세">
+              <div>
+                <span>선택 안전구역</span>
+                <strong>{selectedZone.dong_name}</strong>
               </div>
-              {nearby.length > 0 && (
-                <ul className={styles.miniList}>
-                  {nearby.map((z) => (
-                    <li
-                      key={z.dong_code}
-                      className={`${styles.miniItem} ${selectedZone?.dong_code === z.dong_code ? styles.miniItemSelected : ""}`}
-                      onClick={() => selectZone(z)}
-                    >
-                      <span>{z.dong_name}</span>
-                      <span className={styles.scoreBadge} style={{ background: scoreColor(z.safety_score) }}>
-                        {z.safety_score.toFixed(0)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-
-            <section id="route-section" className={styles.card}>
-              <h2 className={styles.cardHeader}>
-                <RouteIcon size={17} />
-                귀갓길 안전도 조회
-              </h2>
-              <form onSubmit={handleRouteSearch} className={styles.formStack}>
-                <div className={styles.addressFieldRow}>
-                  <div className={styles.addressField}>
-                    <span className={styles.addressIcon}>
-                      <MapPinIcon size={16} />
-                    </span>
-                    <input
-                      ref={startInputRef}
-                      className={styles.addressInput}
-                      type="text"
-                      placeholder="출발지 주소를 입력하세요"
-                      onChange={() => clearResolved("start")}
-                      required
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className={`${styles.pickLink} ${pickMode === "start" ? styles.pickLinkActive : ""}`}
-                    onClick={() => setPickMode((m) => (m === "start" ? null : "start"))}
-                  >
-                    <MapPinIcon size={12} />
-                    지도에서 선택
-                  </button>
-                </div>
-                <div className={styles.addressFieldRow}>
-                  <div className={styles.addressField}>
-                    <span className={styles.addressIcon}>
-                      <MapPinIcon size={16} />
-                    </span>
-                    <input
-                      ref={endInputRef}
-                      className={styles.addressInput}
-                      type="text"
-                      placeholder="도착지 주소를 입력하세요"
-                      onChange={() => clearResolved("end")}
-                      required
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className={`${styles.pickLink} ${pickMode === "end" ? styles.pickLinkActive : ""}`}
-                    onClick={() => setPickMode((m) => (m === "end" ? null : "end"))}
-                  >
-                    <MapPinIcon size={12} />
-                    지도에서 선택
-                  </button>
-                </div>
-                <button type="submit" className={styles.primaryButton}>
-                  안전도 조회
-                </button>
-              </form>
-            </section>
-          </aside>
-
-          <div className={styles.main}>
-            <section id="map-section" className={`${styles.card} ${styles.mapCard}`}>
-              <div className={styles.mapHeader}>
-                <h2 className={styles.cardHeader} style={{ marginBottom: 0 }}>
-                  안전지수 지도
-                </h2>
-                <div className={styles.mapHeaderRight}>
-                  <div className={styles.legend}>
-                    <span>
-                      <span className={styles.legendDot} style={{ background: "var(--safe)" }} />
-                      안전 (70+)
-                    </span>
-                    <span>
-                      <span className={styles.legendDot} style={{ background: "var(--caution)" }} />
-                      보통 (40~69)
-                    </span>
-                    <span>
-                      <span className={styles.legendDot} style={{ background: "var(--warning)" }} />
-                      주의 (40 미만)
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    className={styles.mapExpandButton}
-                    onClick={() => setMapFullscreen(true)}
-                    aria-label="지도 크게 보기"
-                    title="지도 크게 보기"
-                  >
-                    <ExpandIcon size={16} />
-                  </button>
-                </div>
-              </div>
-              {pickMode && (
-                <p className={styles.pickModeHint}>
-                  지도를 클릭해서 {pickMode === "nearby" ? "검색 위치를" : pickMode === "start" ? "출발지를" : "도착지를"} 선택하세요
-                </p>
-              )}
-              {locationDenied && !myLocation && (
-                <p className={styles.locationHint}>
-                  내 위치를 가져오지 못했어요. 브라우저 주소창의 위치 권한을 허용한 뒤{" "}
-                  <button type="button" className={styles.pickLink} onClick={requestMyLocation}>
-                    다시 시도
-                  </button>
-                </p>
-              )}
-              <div className={styles.mapBody}>
-                <SafetyMap
-                  zones={mapZones}
-                  center={myLocation ?? undefined}
-                  myLocation={myLocation ?? undefined}
-                  routePath={route?.route_points}
-                  focusZone={selectedZone}
-                  onSelect={handleMapPick}
-                  onContextMenu={handleMapContextMenu}
-                />
+              <div className={styles.selectedDetailStats}>
+                <span className={`${styles.scoreBadge} ${scoreTone(selectedZone.safety_score)}`}>
+                  {scoreLabel(selectedZone.safety_score)} · {selectedZone.safety_score.toFixed(0)}점
+                </span>
+                {selectedRank > 0 && <span>{showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
               </div>
             </section>
+          )}
 
-            {mapFullscreen && (
-              <div className={styles.mapOverlay} onClick={() => setMapFullscreen(false)}>
-                <div className={styles.mapOverlayCard} onClick={(e) => e.stopPropagation()}>
-                  <div className={styles.mapOverlayHeader}>
-                    <h2 className={styles.cardHeader} style={{ marginBottom: 0 }}>
-                      안전지수 지도
-                    </h2>
+          {loadingList ? (
+            <p className={styles.panelEmpty}>불러오는 중...</p>
+          ) : ranking.length === 0 ? (
+            <p className={styles.panelEmpty}>이 주변에서 안전 구역을 찾지 못했어요. 다른 위치를 검색해보세요.</p>
+          ) : (
+            <ol className={styles.rankList}>
+              {ranking.map((zone, i) => {
+                const isWatched = watched.some((w) => w.dong_code === zone.dong_code);
+                return (
+                  <li key={zone.dong_code} className={styles.rankRow}>
                     <button
                       type="button"
-                      className={styles.mapExpandButton}
-                      onClick={() => setMapFullscreen(false)}
-                      aria-label="닫기"
-                      title="닫기"
+                      className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
+                      onClick={() => {
+                        setSelectedZone(zone);
+                        setSheetSnap("half");
+                      }}
                     >
-                      <CloseIcon size={16} />
+                      <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
+                      <span className={styles.rankName}>{zone.dong_name}</span>
+                      <span className={`${styles.scoreBadge} ${scoreTone(zone.safety_score)}`}>
+                        {zone.safety_score.toFixed(0)}점
+                      </span>
                     </button>
-                  </div>
-                  {pickMode && (
-                    <p className={styles.pickModeHint}>
-                      지도를 클릭해서 {pickMode === "nearby" ? "검색 위치를" : pickMode === "start" ? "출발지를" : "도착지를"} 선택하세요
-                    </p>
-                  )}
-                  <div className={styles.mapOverlayBody}>
-                    <SafetyMap
-                      zones={mapZones}
-                      center={myLocation ?? undefined}
-                      myLocation={myLocation ?? undefined}
-                      routePath={route?.route_points}
-                      focusZone={selectedZone}
-                      onSelect={handleMapPick}
-                      onContextMenu={handleMapContextMenu}
-                      height="100%"
-                    />
-                  </div>
-                </div>
-              </div>
+                    <button
+                      type="button"
+                      className={`${styles.watchButton} ${isWatched ? styles.watchButtonOn : ""}`}
+                      aria-pressed={isWatched}
+                      aria-label={`${zone.dong_name} 관심 동네 ${isWatched ? "해제" : "저장"}`}
+                      title={
+                        !isWatched && watched.length >= MAX_WATCHED_ZONES
+                          ? `관심 동네는 ${MAX_WATCHED_ZONES}곳까지 저장할 수 있어요`
+                          : "점수가 바뀌면 알림으로 알려드려요"
+                      }
+                      disabled={!isWatched && watched.length >= MAX_WATCHED_ZONES}
+                      onClick={() => setWatched(toggleWatchedZone(zone))}
+                    >
+                      {isWatched ? "관심 중" : "관심"}
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+
+          <footer className={styles.panelFooter}>
+            {showingNearby ? (
+              <button type="button" className={styles.footerButton} onClick={() => setScope("all")}>
+                전체 지역 순위 보기
+              </button>
+            ) : nearby ? (
+              <button type="button" className={styles.footerButton} onClick={() => setScope("nearby")}>
+                {nearby.place.label} 주변 순위 보기
+              </button>
+            ) : (
+              <button type="button" className={styles.footerButton} onClick={searchMyLocation}>
+                내 주변 순위 보기
+              </button>
             )}
+          </footer>
+          <MapLegend className={styles.mobileLegend} title="안전도" items={SAFETY_LEGEND} />
+        </AdaptiveBottomSheet>
 
-            <section className={styles.card}>
-              {route ? (
-                <>
-                  <h2 className={styles.cardHeader}>경로 안전도 결과</h2>
-                  <p className={styles.routeModeHint}>
-                    {route.mode === "safety_weighted"
-                      ? "안전점수를 반영한 최적 경로예요"
-                      : route.mode === "tmap"
-                        ? "실제 도보 최단경로 기준(안전 가중치 미반영)"
-                        : "실제 경로를 가져오지 못해 직선 거리로 추정했어요"}
-                  </p>
-                  <div className={styles.navToggleRow}>
-                    {navigating ? (
-                      <>
-                        <span className={styles.liveBadge}>
-                          <span className={styles.liveDot} /> 실시간 안내 중
-                        </span>
-                        <button type="button" className={styles.navStopButton} onClick={stopNavigation}>
-                          중지
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" className={styles.navStartButton} onClick={startNavigation}>
-                        실시간 안내 시작
-                      </button>
-                    )}
-                  </div>
-                  <div className={styles.resultSummary}>
-                    <span>경로 전체 안전지수</span>
-                    <strong>{route.safety_score.toFixed(0)}점</strong>
-                  </div>
-                  <ul className={styles.rankList}>
-                    {route.zones_passed.map((z) => (
-                      <li key={z.dong_code} className={styles.rankItem}>
-                        <span className={styles.rankInfo}>
-                          <div className={styles.rankName}>{z.dong_name}</div>
-                        </span>
-                        <span className={styles.scoreBadge} style={{ background: scoreColor(z.safety_score) }}>
-                          {z.safety_score.toFixed(0)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : (
-                <div className={styles.emptyState}>
-                  <span className={styles.emptyIcon}>
-                    <MapPinIcon size={20} />
-                  </span>
-                  <span className={styles.emptyTitle}>아직 검색 결과가 없어요</span>
-                  <span>주소를 입력하거나 지도를 움직여서 주변 안전 구역을 확인해보세요</span>
-                </div>
-              )}
-            </section>
-          </div>
-        </div>
-
-        <footer className={styles.footer}>
-          © 2026 안심 거주지. 모두의 안전한 일상을 응원합니다.
-          <div className={styles.footerLinks}>
-            <span>이용약관</span>
-            <span>개인정보처리방침</span>
-            <span>고객센터</span>
-          </div>
-        </footer>
+        <MapControls
+          className={styles.controls}
+          onZoomIn={() => mapRef.current?.zoomIn()}
+          onZoomOut={() => mapRef.current?.zoomOut()}
+        />
+        <MapLegend className={styles.legend} title="안전도" items={SAFETY_LEGEND} />
       </div>
 
-      {contextMenu && (
-        <div
-          className={styles.contextMenu}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <p className={styles.contextMenuAddress}>
-            {contextMenu.loading
-              ? "주소를 찾는 중..."
-              : contextMenu.address ?? `${contextMenu.lat.toFixed(5)}, ${contextMenu.lng.toFixed(5)}`}
-          </p>
-          <button type="button" className={styles.contextMenuItem} onClick={() => setFieldFromContextMenu("start")}>
-            출발지로 설정
-          </button>
-          <button type="button" className={styles.contextMenuItem} onClick={() => setFieldFromContextMenu("end")}>
-            도착지로 설정
-          </button>
-          <button type="button" className={styles.contextMenuItem} onClick={searchNearbyFromContextMenu}>
-            이 위치 주변 안전구역 검색
-          </button>
-        </div>
-      )}
+      <MapContextMenu
+        menu={menu.menu}
+        onClose={menu.close}
+        items={[
+          {
+            label: "이 위치 주변 안전구역 검색",
+            onSelect: (place) => {
+              setQuery(place.label);
+              void searchAt(place);
+            },
+          },
+          { label: "여기로 길찾기", onSelect: (place) => router.push(`/route?${placeQuery("end", place)}`) },
+        ]}
+      />
     </main>
   );
 }
