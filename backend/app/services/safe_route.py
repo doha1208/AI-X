@@ -19,7 +19,9 @@ from scipy.spatial import cKDTree
 from app.core.config import settings
 from app.models.safety_zone import SafetyZone
 from app.services.facility_density import (
+    ACCIDENT_POINTS_PATH,
     FACILITY_POINTS_PATH,
+    POIS_PATH,
     FacilityIndex,
     edge_local_scores,
     load_facility_index,
@@ -32,7 +34,7 @@ from app.services.safety_score import (
     Period,
     compute_zone_period_scores,
 )
-from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile, route_zone_profile
 from app.observability import metrics
 
 logger = logging.getLogger(__name__)
@@ -336,8 +338,7 @@ def _prebuild_route_indexes(graph: nx.MultiDiGraph, zones: list[SafetyZone]) -> 
     _node_index(graph)
     zone_index = _build_zone_index(zones)
     for period in ("day", "night"):
-        score_map = compute_zone_period_scores(zones, period)
-        _get_scored_graph(graph, zones, score_map, zone_index, period)
+        _get_scored_graph(graph, zones, route_zone_scores(zones, period), zone_index, period)
 
 
 # 위도 37.5도(서울·경기) 부근에서 경도 1도는 위도 1도의 약 0.79배 길이라, 위경도를
@@ -395,13 +396,22 @@ def _edge_cost(length_m: float, safety_score: float) -> float:
     return length_m * multiplier
 
 
-# 간선 점수 = 동 단위 점수(CCTV·보안등·범죄·경찰서·상점) + 도로 특성 점수(큰길/골목,
-# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 CCTV·보안등 밀도(facility_density)의 가중 평균.
-# 도로 특성과 주변 밀도는 같은 동 안에서도 구간마다 달라서 귀갓길 선택을 실제로 가른다.
-# ponytail: MVP 값 — 비중은 체감으로 조정 필요.
-ZONE_SCORE_WEIGHT = 0.4
+# 간선 점수 = 동 단위 점수(범죄율·경찰서·비상벨, route_zone_scores) + 도로 특성 점수(큰길/골목,
+# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 시설(CCTV·보안등·상점·사고다발, facility_density)의
+# 가중 평균. 도로 특성과 주변 시설은 같은 동 안에서도 구간마다 달라서 귀갓길 선택을 실제로 가른다.
+# ponytail: 실험(수원·안산·신림 90쌍) 기반 첫 값 — 비중은 실제 귀갓길 피드백으로 조정 필요.
+ZONE_SCORE_WEIGHT = 0.3
 ROAD_SCORE_WEIGHT = 0.3
-LOCAL_SCORE_WEIGHT = 0.3
+LOCAL_SCORE_WEIGHT = 0.4
+# 경로 점수 계산 방식이 바뀌면 올린다 — 이전 방식으로 만든 산출물이 최신으로 오인되지 않게.
+ROUTE_SCORING_VERSION = "segment-store-accident-v1"
+
+
+def route_zone_scores(
+    zones: list[SafetyZone], period: Period, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+) -> dict[str, float]:
+    """간선에 섞는 동 점수. 구간 단위로 따로 세는 요인을 뺀 프로필로 계산한다."""
+    return compute_zone_period_scores(zones, period, profile=route_zone_profile(profile))
 
 
 @lru_cache(maxsize=1)
@@ -750,10 +760,10 @@ def build_route_artifact(
     graph_by_period: dict[Period, nx.DiGraph] = {}
     score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
-        score_map = compute_zone_period_scores(zones, period, profile=profile)
-        score_by_period[period] = score_map
+        # 화면에 보여줄 동 점수(전체 요인)와 간선에 섞을 동 점수(구간 단위 요인 제외)는 다르다.
+        score_by_period[period] = compute_zone_period_scores(zones, period, profile=profile)
         graph_by_period[period] = _build_scored_graph(
-            graph, zones, score_map, zone_index, period, facilities
+            graph, zones, route_zone_scores(zones, period, profile), zone_index, period, facilities
         )
 
     # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
@@ -804,13 +814,20 @@ def _file_sha256(path: Path) -> str:
 
 
 def route_input_data_version(
-    zones: list[SafetyZone], *, facility_points_path: Path = FACILITY_POINTS_PATH
+    zones: list[SafetyZone],
+    *,
+    facility_points_path: Path = FACILITY_POINTS_PATH,
+    pois_path: Path = POIS_PATH,
+    accident_points_path: Path = ACCIDENT_POINTS_PATH,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
         "zones": _zone_data_version(zones),
         "facility_points": _file_sha256(facility_points_path),
+        "pois": _file_sha256(pois_path),
+        "accident_points": _file_sha256(accident_points_path),
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
+        "route_scoring": ROUTE_SCORING_VERSION,
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()

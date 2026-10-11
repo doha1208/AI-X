@@ -2,7 +2,26 @@ from dataclasses import replace
 
 import pytest
 
-from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile, validate_profile
+from app.services.scoring_profile import (
+    DEFAULT_SCORING_PROFILE,
+    ROUTE_ZONE_FACTORS,
+    ScoringProfile,
+    route_zone_profile,
+    validate_profile,
+)
+
+
+def test_route_zone_profile_keeps_only_area_level_factors_in_their_original_ratio():
+    route = route_zone_profile(DEFAULT_SCORING_PROFILE)
+
+    validate_profile(route)
+    for period in ("day", "night"):
+        weights = route.weights[period]
+        assert all(weights[f] == 0 for f in weights if f not in ROUTE_ZONE_FACTORS)
+        original = DEFAULT_SCORING_PROFILE.weights[period]
+        assert weights["crime_rate"] / weights["bell_dist_m"] == pytest.approx(
+            original["crime_rate"] / original["bell_dist_m"]
+        )
 
 
 def test_default_profile_preserves_day_and_night_priorities():

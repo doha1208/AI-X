@@ -68,6 +68,32 @@ def test_scores_are_in_range_and_one_per_point():
     assert all(0.0 <= s <= 100.0 for s in scores)
 
 
+def test_nearby_stores_raise_the_score():
+    shops = build_facility_index(cctv=[], lights=[], stores=[NEAR] * 3)
+    empty = build_facility_index(cctv=[], lights=[], stores=[FAR])
+    assert _score(shops, "day") > _score(empty, "day")
+
+
+def test_nearby_accident_hotspot_lowers_the_score():
+    hotspot = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[NEAR])
+    clear = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[FAR])
+    assert _score(hotspot, "night") < _score(clear, "night")
+
+
+def test_store_and_accident_files_load_alongside_facilities(tmp_path):
+    facilities = tmp_path / "facility_points.json"
+    facilities.write_text(json.dumps({"cctv": [], "lights": []}))
+    pois = tmp_path / "safety_pois.json"
+    pois.write_text(json.dumps({"police": [], "stores": [list(NEAR)] * 3}))
+    accidents = tmp_path / "accident_points.json"
+    accidents.write_text(json.dumps([list(FAR)]))
+
+    index = load_facility_index(facilities, pois, accidents)
+
+    assert index.store_tree is not None and index.accident_tree is not None
+    assert _score(index, "day") > 0
+
+
 def test_missing_points_file_means_no_index(tmp_path):
     assert load_facility_index(tmp_path / "nope.json") is None
 

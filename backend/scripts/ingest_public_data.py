@@ -68,6 +68,8 @@ POIS_PATH = BACKEND_DIR / "data" / "osm" / "safety_pois.json"
 FACILITY_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "facility_points.json"
 # 안전비상벨 좌표(서울+경기 범위) — 안전지수 계산과 지도 표시(app/services/bells.py) 둘 다 이 파일을 쓴다.
 BELL_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "bell_points.json"
+# 교통사고 다발지역 좌표 — 도로 구간 점수(app/services/facility_density.py)가 근처 구간을 감점한다.
+ACCIDENT_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "accident_points.json"
 # 좌표 없이 주소만 있는 보안등 행(주소별 개수) — geocode_light_addresses.py가 좌표로 바꾼다.
 LIGHT_ADDRESSES_PATH = BACKEND_DIR / "data" / "osm" / "light_addresses.json"
 
@@ -192,6 +194,15 @@ def dump_bell_points() -> list[tuple[float, float]]:
     """비상벨 CSV를 한 번만 읽어 (동 점수 계산용 리스트를 돌려주고) 지도 표시용 JSON도 저장한다."""
     points = list(iter_bell_points())
     _atomic_write_json(BELL_POINTS_PATH, [[round(lat, 6), round(lng, 6)] for lat, lng in points])
+    return points
+
+
+def dump_accident_points() -> list[tuple[float, float]]:
+    """사고다발지역 좌표를 동 점수 계산용으로 돌려주고, 도로 구간 감점용 JSON(facility_density)도 저장한다."""
+    if not ACCIDENT_CSV.exists():
+        return []
+    points = list(iter_accident_points())
+    _atomic_write_json(ACCIDENT_POINTS_PATH, [[round(lat, 6), round(lng, 6)] for lat, lng in points])
     return points
 
 
@@ -334,7 +345,7 @@ def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None
     police_dists = nearest_police_distances_m(centroids, [(lat, lng) for lat, lng in pois["police"]])
     bell_points = dump_bell_points()
     bell_dists = nearest_bell_distances_m(centroids, bell_points)
-    accident_points = list(iter_accident_points()) if ACCIDENT_CSV.exists() else []
+    accident_points = dump_accident_points()
     accident_dists = nearest_accident_distances_m(centroids, accident_points)
     stores_by_dong = count_points_by_dong(pois["stores"], step, cells, bbox)
     for record, police_dist, bell_dist, accident_dist in zip(records, police_dists, bell_dists, accident_dists):
