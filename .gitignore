@@ -5,9 +5,11 @@ backend/**/__pycache__/
 backend/*.db
 backend/*.db.bak*
 backend/.pytest_cache/
+backend/.pytest-codex-temp/
 backend/.env
 backend/cache/
-backend/data/osm/
+# OSM 원본·그래프(약 1.8GB)와 경로 아티팩트(약 3GB) — 용량이 커서 git 대신 따로 전달한다(README 참고).
+backend/data/
 
 # 공공데이터 원본 다운로드 (대용량, data.go.kr에서 재다운로드 가능 — 출처는
 # backend/scripts/ingest_public_data.py 상단 주석 참고)
@@ -39,8 +41,14 @@ Thumbs.db
 /.agents/
 /DEVELOPMENT.md
 
-# aaaaa
+# pytest 캐시 (backend 밖에서 실행했을 때)
 .pytest_cache/
+
+# 루트에 받아둔 개인 자료(참고 PDF·스크린샷·영상, 양식 백업) — 프로젝트 산출물이 아니다.
+/*.pdf
+/*.png
+/*.mp4
+/양식_원본백업/
 
 # Codex planning and design notes are local working material, not project deliverables.
 /docs/superpowers/
