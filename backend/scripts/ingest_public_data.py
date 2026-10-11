@@ -58,6 +58,7 @@ PROJECT_ROOT = BACKEND_DIR.parent
 CCTV_CSV = PROJECT_ROOT / "CCTV정보.csv"
 BELL_CSV = PROJECT_ROOT / "안전비상벨위치정보.csv"
 ACCIDENT_CSV = PROJECT_ROOT / "전국교통사고다발지역표준데이터.csv"
+ACCIDENT_RECENT_YEARS = 3  # 최신 사고연도 포함 최근 몇 년치 다발지역만 쓸지
 CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
 # 경기데이터드림 행정동 단위 시간대별 유동인구(구 단위로 합쳐 등록인구 대신/대체로 쓴다).
 FLOATING_POP_CSV = PROJECT_ROOT / "유동인구_행정동단위집계.csv"
@@ -177,18 +178,26 @@ def iter_accident_points():
 
     동 중심에서 가장 가까운 지점까지 거리(accident_dist_m)를 잴 때만 쓴다 — 가장 가까운
     점은 어차피 하나뿐이라 사고건수만큼 반복할 필요가 없다.
+
+    표준데이터에는 2012년부터의 다발지역이 쌓여 있다. 오래된 지점은 신호·횡단보도 개선으로
+    이미 안전해졌을 수 있어, 파일의 최신 사고연도부터 ACCIDENT_RECENT_YEARS년치만 쓴다.
+    (서울 지점도 남긴다 — 서울 경계에 붙은 경기도 동의 "가장 가까운 사고지점"일 수 있어서.)
     """
     with ACCIDENT_CSV.open(encoding="cp949", errors="replace", newline="") as f:
-        for row in csv.DictReader(f):
-            addr = row.get("사고다발지역시도시군구", "")
-            if not addr.startswith(("서울", "경기")):
-                continue
-            try:
-                lat = float(row["위도"])
-                lng = float(row["경도"])
-            except (KeyError, ValueError):
-                continue
-            yield lat, lng
+        rows = [row for row in csv.DictReader(f) if row.get("사고다발지역시도시군구", "").startswith(("서울", "경기"))]
+    years = [int(row["사고연도"]) for row in rows if row.get("사고연도", "").isdigit()]
+    if not years:
+        return
+    oldest = max(years) - ACCIDENT_RECENT_YEARS + 1
+    for row in rows:
+        if not row.get("사고연도", "").isdigit() or int(row["사고연도"]) < oldest:
+            continue
+        try:
+            lat = float(row["위도"])
+            lng = float(row["경도"])
+        except (KeyError, ValueError):
+            continue
+        yield lat, lng
 
 
 def dump_bell_points() -> list[tuple[float, float]]:
