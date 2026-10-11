@@ -1,5 +1,8 @@
 import json
 
+import shapely
+import shapely.affinity
+
 from app.services.facility_density import (
     LIGHT_SATURATION,
     build_facility_index,
@@ -78,6 +81,31 @@ def test_nearby_accident_hotspot_lowers_the_score():
     hotspot = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[NEAR])
     clear = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[FAR])
     assert _score(hotspot, "night") < _score(clear, "night")
+
+
+# ORIGIN을 감싸는 약 200m 크기 공원
+PARK_WKT = "POLYGON ((126.999 37.499, 127.001 37.499, 127.001 37.501, 126.999 37.501, 126.999 37.499))"
+
+
+def test_segments_inside_a_park_or_riverside_lose_points_at_night_only():
+    park = shapely.from_wkt(PARK_WKT)
+    in_park = build_facility_index(cctv=[NEAR], lights=[NEAR], isolated_areas=[park])
+    park_elsewhere = build_facility_index(cctv=[NEAR], lights=[NEAR], isolated_areas=[shapely.affinity.translate(park, yoff=0.01)])
+
+    assert _score(in_park, "night") < _score(park_elsewhere, "night")
+    assert _score(in_park, "day") == _score(park_elsewhere, "day")
+
+
+def test_isolated_areas_file_loads_every_kind(tmp_path):
+    facilities = tmp_path / "facility_points.json"
+    facilities.write_text(json.dumps({"cctv": [], "lights": []}))
+    areas = tmp_path / "isolated_areas.json"
+    areas.write_text(json.dumps({"bbox": [0, 0, 1, 1], "park": [], "water": [PARK_WKT]}))
+
+    index = load_facility_index(facilities, tmp_path / "none.json", tmp_path / "none.json", areas)
+
+    assert index.isolated_tree is not None
+    assert edge_local_scores(index, [ORIGIN], "night")[0] < edge_local_scores(index, [FAR], "night")[0]
 
 
 def test_store_and_accident_files_load_alongside_facilities(tmp_path):
