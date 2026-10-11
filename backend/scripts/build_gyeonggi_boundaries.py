@@ -2,7 +2,7 @@
 
 전국 행정동 경계(약 35MB)를 받아서 dong_grid.json에 실제로 쓰인 경기도 동만 남기고,
 지도에 그리기에 충분한 수준으로 경계선을 단순화해 용량을 줄인다.
-서울은 frontend/public/data/seoul-dong-boundaries.geojson이 이미 있다.
+서비스 지역은 경기도뿐이라 이 파일 하나만 프론트에서 쓴다.
 
 데이터 출처(표기 의무): 통계청 SGIS 행정동 경계(공공누리 제1유형)를
 vuski/admdongkor가 가공, CC BY 4.0 — 출력 파일의 "attribution" 필드에 그대로 남긴다.

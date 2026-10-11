@@ -277,7 +277,7 @@ async def route_safety(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "reason": "outside_service_area",
-                "action": "현재 길찾기는 서울·경기 지역에서만 지원합니다.",
+                "action": "현재 길찾기는 경기도 지역에서만 지원합니다.",
                 "points": unsupported_points,
             },
         )

@@ -34,6 +34,7 @@ from pathlib import Path
 
 from sqlalchemy import inspect, text
 
+from app.core.config import settings
 from app.db.session import Base, SessionLocal, engine
 from app.models.safety_zone import SafetyZone
 from app.services.crime_rate import (
@@ -436,6 +437,9 @@ def refresh_derived_factors() -> None:
 
     db = SessionLocal()
     try:
+        stale = db.query(SafetyZone).filter(~SafetyZone.dong_code.startswith(settings.region_scope_prefix))
+        if removed := stale.delete(synchronize_session=False):
+            print(f"Removed {removed} dongs outside the service area ({settings.region_scope_prefix}).")
         zones = db.query(SafetyZone).all()
         cctv_by_dong, light_by_dong = count_facilities_by_dong(step, cells, bbox)
         records = [
@@ -502,6 +506,9 @@ def ingest():
 
     records = []
     for code, meta in dong_meta.items():
+        # 격자에는 서울 동도 있지만 서비스 범위(경기도) 밖은 저장하지 않는다 — 점수 정규화에도 섞이지 않게.
+        if not code.startswith(settings.region_scope_prefix):
+            continue
         records.append(
             {
                 "dong_code": code,

@@ -3,12 +3,13 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 PUBLIC_DATA = BACKEND_DIR.parent / "frontend" / "public" / "data"
-BOUNDARY_FILES = ("seoul-dong-boundaries.geojson", "gyeonggi-dong-boundaries.geojson")
+BOUNDARY_FILES = ("gyeonggi-dong-boundaries.geojson",)
+SERVICE_PREFIX = "41"  # 서비스 지역은 경기도만 — 격자의 서울 칸은 서울 좌표를 걸러내는 용도로만 남아 있다
 
 
 def _grid_dong_codes() -> set[str]:
     cells = json.loads((BACKEND_DIR / "app" / "data" / "dong_grid.json").read_text(encoding="utf-8"))["cells"]
-    return {cell["dong_code"] for cell in cells.values()}
+    return {cell["dong_code"] for cell in cells.values() if cell["dong_code"].startswith(SERVICE_PREFIX)}
 
 
 def _boundary_features() -> dict[str, dict]:

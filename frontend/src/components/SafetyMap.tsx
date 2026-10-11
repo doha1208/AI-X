@@ -79,7 +79,7 @@ type DongBoundaryMap = Map<string, number[][][][]>;
 
 let boundaryCache: Promise<DongBoundaryMap> | null = null;
 
-const BOUNDARY_FILES = ["/data/seoul-dong-boundaries.geojson", "/data/gyeonggi-dong-boundaries.geojson"];
+const BOUNDARY_FILES = ["/data/gyeonggi-dong-boundaries.geojson"];
 
 // 파일 하나가 실패해도 다른 지역 경계는 살린다 — 실패한 지역만 원(circle) 폴백으로 그려진다.
 async function fetchBoundaryFeatures(url: string): Promise<DongBoundaryGeoJson["features"]> {

@@ -146,7 +146,28 @@ def test_nearby_zones_use_the_current_kst_period(monkeypatch):
     }
 
 
-def test_route_rejects_coordinates_outside_the_seoul_gyeonggi_service_area():
+def test_service_area_defaults_to_gyeonggi_only():
+    # 테스트는 conftest에서 지역 필터를 끄지만, .env에 설정이 없을 때 기본값은 경기도다.
+    from app.core.config import Settings
+
+    assert Settings.model_fields["region_scope_prefix"].default == "41"
+
+
+def test_route_rejects_seoul_coordinates_in_gyeonggi_scope(monkeypatch):
+    # 신림동 → 신림동
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "region_scope_prefix", "41")
+    response = client.post(
+        "/safety/route",
+        json={"start_lat": 37.4842, "start_lng": 126.9297, "end_lat": 37.4870, "end_lng": 126.9330},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["reason"] == "outside_service_area"
+
+
+def test_route_rejects_coordinates_outside_the_gyeonggi_service_area():
     response = client.post(
         "/safety/route",
         json={
@@ -160,7 +181,7 @@ def test_route_rejects_coordinates_outside_the_seoul_gyeonggi_service_area():
     assert response.status_code == 422
     assert response.json()["detail"] == {
         "reason": "outside_service_area",
-        "action": "현재 길찾기는 서울·경기 지역에서만 지원합니다.",
+        "action": "현재 길찾기는 경기도 지역에서만 지원합니다.",
         "points": ["start", "end"],
     }
 
