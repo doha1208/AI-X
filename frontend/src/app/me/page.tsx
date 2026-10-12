@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { endSession } from "@/lib/auth";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
@@ -250,12 +251,14 @@ export default function MyInfoPage() {
             안전지수 계산 방식 안내
           </h2>
           <p className={styles.infoText}>
-            안전지수는 <strong>CCTV·보안등 개수, 1만 명당 범죄율(유동인구 반영), 가까운 경찰서·안전비상벨까지의 거리,
-            상점 밀도, 교통사고 다발지역과의 거리</strong>를 종합해 계산해요. 밤에는 보안등과 비상벨의 비중을 더 높여
-            계산합니다.
+            안전지수는 <strong>CCTV·보안등 개수, 1만 명당 범죄율, 가까운 경찰서·안전비상벨까지의 거리, 상점 밀도,
+            교통사고 다발지역과의 거리</strong>를 종합해 계산해요. 밤에는 보안등 비중을 높이고 야간 유동인구를 더하며,
+            길안내에서는 편의점 근처를 더 낫게, 유흥업소 근처와 공원·하천변을 덜 좋게 봐요.
           </p>
           <p className={styles.infoText}>
-            이 점수와 추천 경로는 공개 데이터를 바탕으로 한 참고 정보이며, 실제 안전을 보장하지 않아요.
+            지자체가 데이터를 제출하지 않은 항목은 0이나 중간값으로 채우지 않고 계산에서 빼요. 이 점수와 추천 경로는
+            공개 데이터를 바탕으로 한 참고 정보이며, 실제 안전을 보장하지 않아요.{" "}
+            <Link href="/data">데이터 출처와 기준 보기</Link>
           </p>
         </section>
 

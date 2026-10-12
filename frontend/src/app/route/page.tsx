@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearRouteHistory, getRouteHistory, routeSafety, saveRouteHistory, setRouteHistoryRemember, type RouteDataBasis, type RouteMissingDataFactor, type RouteHistorySnapshot, type RouteResult } from "@/lib/api";
@@ -430,7 +431,9 @@ function RoutePage({ search }: { search: string }) {
                 ) : (
                   <p className={styles.disclosureNote}>경유 동 기준으로 확인된 누락 데이터가 없어요.</p>
                 )}
-                <p className={styles.disclosureNote}>확인할 수 없는 지표는 점수 계산에서 중립값으로 처리됩니다.</p>
+                <p className={styles.disclosureNote}>
+                  확인할 수 없는 지표는 점수 계산에서 빼고 나머지 지표로 계산해요. <Link href="/data">데이터 출처와 기준</Link>
+                </p>
               </details>
               {route.mode !== "safety_weighted" && (
                 <p className={styles.fallback}>
