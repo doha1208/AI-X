@@ -23,6 +23,7 @@ from app.services.facility_density import (
     FACILITY_POINTS_PATH,
     ISOLATED_AREAS_PATH,
     NIGHT_PLACES_PATH,
+    STORE_POINTS_PATH,
     POIS_PATH,
     FacilityIndex,
     edge_local_scores,
@@ -409,7 +410,7 @@ ZONE_SCORE_WEIGHT = 0.3
 ROAD_SCORE_WEIGHT = 0.3
 LOCAL_SCORE_WEIGHT = 0.4
 # 경로 점수 계산 방식이 바뀌면 올린다 — 이전 방식으로 만든 산출물이 최신으로 오인되지 않게.
-ROUTE_SCORING_VERSION = "segment-store-accident-isolation-v2-night-places"
+ROUTE_SCORING_VERSION = "segment-store-accident-isolation-v3-official-stores"
 
 
 def route_zone_scores(
@@ -824,6 +825,7 @@ def route_input_data_version(
     accident_points_path: Path = ACCIDENT_POINTS_PATH,
     isolated_areas_path: Path = ISOLATED_AREAS_PATH,
     night_places_path: Path = NIGHT_PLACES_PATH,
+    store_points_path: Path = STORE_POINTS_PATH,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
@@ -833,6 +835,7 @@ def route_input_data_version(
         "accident_points": _file_sha256(accident_points_path),
         "isolated_areas": _file_sha256(isolated_areas_path),
         "night_places": _file_sha256(night_places_path),
+        "store_points": _file_sha256(store_points_path),
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
         "route_scoring": ROUTE_SCORING_VERSION,
     }

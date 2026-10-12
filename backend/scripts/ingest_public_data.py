@@ -71,6 +71,8 @@ GRID_PATH = BACKEND_DIR / "app" / "data" / "dong_grid.json"
 ENV_PATH = BACKEND_DIR / ".env"
 # extract_safety_pois.py가 OSM PBF에서 뽑아둔 경찰서·상점 좌표.
 POIS_PATH = BACKEND_DIR / "data" / "osm" / "safety_pois.json"
+# scripts/extract_store_points.py가 만드는 소상공인 상가정보 길가 상점(경기도) — OSM 상점보다 빠짐없다.
+STORE_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "store_points.json"
 # --dump-points가 만드는 CCTV·보안등 좌표(도로 구간별 밀도 계산용).
 FACILITY_POINTS_PATH = BACKEND_DIR / "data" / "osm" / "facility_points.json"
 # 안전비상벨 좌표(서울+경기 범위) — 안전지수 계산과 지도 표시(app/services/bells.py) 둘 다 이 파일을 쓴다.
@@ -338,9 +340,13 @@ def _atomic_write_json(path: Path, payload) -> None:
 
 
 def load_pois() -> dict:
+    """경찰서는 OSM(safety_pois.json), 상점은 소상공인 상가정보(store_points.json)가 있으면 그것을 쓴다."""
     if not POIS_PATH.exists():
         raise RuntimeError(f"{POIS_PATH} 없음 — 먼저 scripts/extract_safety_pois.py를 실행하세요.")
-    return json.loads(POIS_PATH.read_text(encoding="utf-8"))
+    pois = json.loads(POIS_PATH.read_text(encoding="utf-8"))
+    if STORE_POINTS_PATH.exists():
+        pois["stores"] = json.loads(STORE_POINTS_PATH.read_text(encoding="utf-8"))["stores"]
+    return pois
 
 
 def count_points_by_dong(points: list, step: float, cells: dict, bbox) -> dict:

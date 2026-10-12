@@ -5,6 +5,7 @@ import shapely.affinity
 
 from app.services.facility_density import (
     LIGHT_SATURATION,
+    STORE_SATURATION,
     build_facility_index,
     edge_local_scores,
     load_facility_index,
@@ -131,6 +132,23 @@ def test_isolated_areas_file_loads_every_kind(tmp_path):
 
     assert index.isolated_tree is not None
     assert edge_local_scores(index, [ORIGIN], "night")[0] < edge_local_scores(index, [FAR], "night")[0]
+
+
+def test_official_store_file_replaces_osm_stores_and_convenience(tmp_path):
+    facilities = tmp_path / "facility_points.json"
+    facilities.write_text(json.dumps({"cctv": [], "lights": []}))
+    pois = tmp_path / "safety_pois.json"
+    pois.write_text(json.dumps({"police": [], "stores": [list(FAR)]}))
+    stores = tmp_path / "store_points.json"
+    stores.write_text(json.dumps({"stores": [list(NEAR)] * STORE_SATURATION, "convenience": [list(NEAR)]}))
+    none = tmp_path / "none.json"
+
+    official = load_facility_index(facilities, pois, none, none, none, stores)
+    osm_only = load_facility_index(facilities, pois, none, none, none, none)
+
+    # 공식 상가 데이터의 상점·편의점(근처)이 쓰였다 — OSM 상점(멀리)이 아니라
+    assert _score(official, "day") > _score(osm_only, "day")
+    assert _score(official, "night") > _score(osm_only, "night")
 
 
 def test_store_and_accident_files_load_alongside_facilities(tmp_path):

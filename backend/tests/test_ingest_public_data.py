@@ -34,3 +34,23 @@ def test_night_floating_population_averages_night_hours_per_dong(tmp_path):
     result = ingest.parse_night_floating_population([archive])
 
     assert result == {"4111759600": (24 + 6) / 2}
+
+
+def test_store_extraction_keeps_street_level_food_and_retail_and_convenience():
+    from scripts.extract_store_points import extract
+
+    def row(category, sub, floor, lat="37.5"):
+        return {"상권업종대분류명": category, "상권업종소분류명": sub, "층정보": floor, "위도": lat, "경도": "127.0"}
+
+    rows = [
+        row("음식", "카페", ""),  # 층 정보 없음 → 길가로 본다
+        row("소매", "편의점", "1"),
+        row("소매", "편의점", "3"),  # 3층 편의점은 길을 보지 않는다
+        row("교육", "입시·교과학원", "1"),  # 학원은 상점이 아니다
+        row("음식", "치킨", "지"),
+    ]
+
+    result = extract(rows)
+
+    assert len(result["stores"]) == 3
+    assert result["convenience"] == [[37.5, 127.0]]

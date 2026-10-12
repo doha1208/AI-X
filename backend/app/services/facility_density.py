@@ -4,10 +4,10 @@
 1%도 안 돼서, 좌표가 있는 공공데이터를 구간 단위로 직접 센다.
 
 - CCTV·보안등: scripts/ingest_public_data.py --dump-points
-- 상점: scripts/extract_safety_pois.py (OSM) — 거리에 사람 눈이 있는지. 밤엔 문 연 편의점만 센다
-  (24시간 영업이고 여성안심지킴이집도 대부분 편의점이다)
-- 편의점·유흥주점·단란주점: scripts/fetch_night_places.py (행정안전부 인허가, 영업 중) — 밤에
-  편의점은 상점 자리에, 유흥업소 근처 구간은 감점
+- 상점·편의점: scripts/extract_store_points.py (소상공인 상가정보, 길가 음식·소매) — 거리에 사람 눈이
+  있는지. 밤엔 문 연 편의점만 센다(24시간 영업이고 여성안심지킴이집도 대부분 편의점이다).
+  이 파일이 없으면 OSM 상점(safety_pois.json)과 인허가 편의점(night_places.json)으로 대신한다.
+- 유흥주점·단란주점: scripts/fetch_night_places.py (행정안전부 인허가, 영업 중) — 밤에 근처 구간 감점
 - 교통사고 다발지역: ingest_public_data.py --refresh가 저장 — 근처 구간은 감점
 - 공원·숲·하천변·공터: scripts/extract_isolated_areas.py (OSM) — 밤에 그 안의 구간은 감점
 
@@ -38,6 +38,7 @@ ACCIDENT_POINTS_PATH = OSM_DIR / "accident_points.json"
 ISOLATED_AREAS_PATH = OSM_DIR / "isolated_areas.json"
 ISOLATED_AREA_KINDS = ("park", "forest", "water", "vacant")
 NIGHT_PLACES_PATH = OSM_DIR / "night_places.json"
+STORE_POINTS_PATH = OSM_DIR / "store_points.json"
 
 CCTV_RADIUS_M = 60.0
 LIGHT_RADIUS_M = 40.0
@@ -47,7 +48,8 @@ NIGHTLIFE_RADIUS_M = 50.0
 # 반경 안에 이 개수 이상이면 만점이다 — 더 많다고 계속 안전해지지는 않는다.
 CCTV_SATURATION = 1
 LIGHT_SATURATION = 2
-STORE_SATURATION = 3
+# 상가정보(길가 음식·소매)로 바꾸며 3 → 10: 50m 안 상점이 이 수 이상인 구간 비율이 OSM 때(약 4%)와 비슷하게.
+STORE_SATURATION = 10
 CONVENIENCE_SATURATION = 1
 
 # (cctv 비중, 보안등 비중) — 낮엔 방범 CCTV, 밤엔 즉시 시야를 확보해주는 보안등.
@@ -129,6 +131,7 @@ def load_facility_index(
     accident_path: Path = ACCIDENT_POINTS_PATH,
     isolated_path: Path = ISOLATED_AREAS_PATH,
     night_places_path: Path = NIGHT_PLACES_PATH,
+    store_points_path: Path = STORE_POINTS_PATH,
 ) -> FacilityIndex | None:
     """CCTV·보안등 좌표 파일이 없으면 None — 호출부가 구간별 밀도 없이(동 점수만으로) 계산하게 한다."""
     if not path.exists():
@@ -141,13 +144,14 @@ def load_facility_index(
     except (OSError, ValueError, KeyError):
         logger.warning("Facility points unreadable, per-road density disabled: %s", path, exc_info=True)
         return None
+    official = store_points_path.exists()  # 공식 상가 데이터가 있으면 OSM 상점·인허가 편의점 대신 쓴다
     return build_facility_index(
         cctv,
         lights,
-        _optional_points(pois_path, "stores"),
+        _optional_points(store_points_path, "stores") if official else _optional_points(pois_path, "stores"),
         _optional_points(accident_path),
         _optional_areas(isolated_path),
-        _optional_points(night_places_path, "convenience"),
+        _optional_points(store_points_path if official else night_places_path, "convenience"),
         _optional_points(night_places_path, "nightlife"),
     )
 
