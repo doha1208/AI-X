@@ -31,7 +31,7 @@ export type SafetyZone = {
 export type RouteMode = "safety_weighted" | "tmap";
 export type RoutePeriod = "day" | "night";
 export type RouteDataBasis = "zone_safety_indicators" | "osm_walking_network" | "facility_density" | "tmap_pedestrian_route";
-export type RouteMissingDataFactor = "streetlight_data" | "crime_rate" | "police_distance" | "emergency_bell_distance" | "accident_hotspot_distance";
+export type RouteMissingDataFactor = "streetlight_data" | "cctv_data" | "crime_rate" | "police_distance" | "emergency_bell_distance" | "accident_hotspot_distance" | "night_floating_population";
 export type RouteFallbackReason = "none" | "safety_weighted_unavailable";
 
 export type RouteDataDisclosure = {

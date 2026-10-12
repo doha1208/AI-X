@@ -4,6 +4,7 @@ from app.services.safety_score import (
     compute_safety_scores,
     compute_zone_period_scores,
     flag_unknown_streetlights,
+    flag_unsubmitted,
 )
 
 
@@ -54,8 +55,8 @@ def test_raw_crime_count_no_longer_drives_the_score():
     assert scores["BIG"] == scores["SMALL"]
 
 
-def test_unknown_streetlight_count_is_neutral_not_dark():
-    # 보안등 데이터를 못 받은 동(None)은 "0개=깜깜함"이 아니라 중간 점수로 본다
+def test_unknown_streetlight_count_is_excluded_not_dark():
+    # 보안등 데이터를 못 받은 동(None)은 "0개=깜깜함"으로 보지 않고 보안등을 빼고 계산한다
     records = [
         {"dong_code": "LIT", "cctv_count": 10, "streetlight_count": 500, "crime_rate": 50},
         {"dong_code": "DARK", "cctv_count": 10, "streetlight_count": 0, "crime_rate": 50},
@@ -85,7 +86,7 @@ def test_unknown_values_do_not_stretch_the_normalisation_range():
     assert by_code["B"] == without[1]["safety_score"]
 
 
-def test_zone_scores_treat_missing_lower_is_safer_inputs_as_neutral():
+def test_zone_scores_exclude_missing_lower_is_safer_inputs():
     zones = [
         SafetyZone(
             dong_code="KNOWN",
@@ -129,7 +130,7 @@ def test_safety_zone_persists_missing_lower_is_safer_inputs_as_null():
     assert table.c.bell_dist_m.nullable is True
 
 
-def test_absent_factor_is_neutral_instead_of_known_zero():
+def test_absent_factor_is_excluded_instead_of_known_zero():
     rows = [
         {"dong_code": "KNOWN", "crime_rate": 50},
         {"dong_code": "MISSING"},
@@ -155,7 +156,7 @@ def test_city_with_almost_no_lights_is_flagged_as_unknown_not_dark():
     assert [r["lights_known"] for r in records] == [True, True, False, False]
 
 
-def test_flagged_dongs_get_neutral_light_score_when_scoring():
+def test_flagged_dongs_are_scored_without_lights():
     records = [
         {"dong_code": "1111010100", "cctv_count": 10, "streetlight_count": 500, "crime_rate": 50, "lights_known": True},
         {"dong_code": "1111010200", "cctv_count": 10, "streetlight_count": 0, "crime_rate": 50, "lights_known": True},
@@ -165,6 +166,19 @@ def test_flagged_dongs_get_neutral_light_score_when_scoring():
     scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(records, period="night")}
 
     assert scores["1111010200"] < scores["1117010100"] < scores["1111010100"]
+
+
+def test_missing_factor_weight_is_spread_over_known_factors_only():
+    # 모르는 요소는 중간 점수를 받지 않는다 — 아는 요소의 점수만 비중대로 다시 나눠 평균낸다.
+    records = [
+        {"dong_code": "LOW", "cctv_count": 0, "crime_rate": 100, "night_floating_pop": 0},
+        {"dong_code": "HIGH", "cctv_count": 100, "crime_rate": 0, "night_floating_pop": 1000},
+        {"dong_code": "NO_POP", "cctv_count": 100, "crime_rate": 0, "night_floating_pop": None},
+    ]
+    scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(records, period="night")}
+
+    # 유동인구를 모르는 동도 아는 요소(CCTV·범죄율)가 모두 최고라면 만점이다 — 50점이 섞여 깎이지 않는다.
+    assert scores["NO_POP"] == scores["HIGH"] == 100.0
 
 
 def test_closer_bell_raises_score():
@@ -195,7 +209,7 @@ def test_more_shops_raise_score():
 
 
 def test_records_without_new_factors_still_score():
-    # police_dist_m/store_count가 없는 기존 레코드도 중립값으로 계산돼야 한다
+    # police_dist_m/store_count가 없는 기존 레코드도 있는 요소만으로 계산돼야 한다
     scored = compute_safety_scores([{"dong_code": "X", "cctv_count": 1, "streetlight_count": 1, "crime_count": 1}])
     assert 0 <= scored[0]["safety_score"] <= 100
 
@@ -270,3 +284,32 @@ def test_explicit_profile_changes_the_score_weights():
     }
 
     assert scores["LIGHT"] > scores["CCTV"]
+
+
+def test_city_that_did_not_submit_cctv_is_flagged_by_city_not_gu():
+    # 화성시처럼 시 전체가 CCTV를 거의 안 올린 경우 — 시(앞 4자리) 단위로 판단한다.
+    records = [
+        {"dong_code": "4159010100", "cctv_count": 1},
+        {"dong_code": "4159110100", "cctv_count": 0},  # 같은 화성시의 다른 구
+        {"dong_code": "4146110100", "cctv_count": 60},
+    ]
+    counts = {r["dong_code"]: r["cctv_count"] for r in records}
+
+    flagged = flag_unsubmitted(records, counts, "cctv_known")
+
+    assert flagged == ["4159"]
+    assert [r["cctv_known"] for r in records] == [False, False, True]
+
+
+def test_unsubmitted_cctv_and_bells_are_left_out_of_the_score():
+    # CCTV·비상벨을 안 올린 동은 "0대·멀다"로 깎이지 않는다 — 두 요소를 빼고 계산한다.
+    base = {"streetlight_count": 100, "crime_rate": 10}
+    records = [
+        {"dong_code": "GOOD", **base, "cctv_count": 50, "bell_dist_m": 50},
+        {"dong_code": "BAD", **base, "cctv_count": 0, "bell_dist_m": 1000},
+        {"dong_code": "UNSUBMITTED", **base, "cctv_count": 0, "bell_dist_m": 1000,
+         "cctv_known": False, "bell_known": False},
+    ]
+    scores = {r["dong_code"]: r["safety_score"] for r in compute_safety_scores(records)}
+
+    assert scores["UNSUBMITTED"] > scores["BAD"]

@@ -15,10 +15,12 @@ RouteDataBasis = Literal[
 ]
 RouteMissingDataFactor = Literal[
     "streetlight_data",
+    "cctv_data",
     "crime_rate",
     "police_distance",
     "emergency_bell_distance",
     "accident_hotspot_distance",
+    "night_floating_population",
 ]
 RouteFallbackReason = Literal["none", "safety_weighted_unavailable"]
 MAX_WALKING_DISTANCE_KM = 10.0

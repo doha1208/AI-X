@@ -498,7 +498,10 @@ def _build_scored_graph(
     )
     _, zone_idx = zone_index.query(midpoints)
     lights_known = np.array([z.lights_known is not False for z in zones])[zone_idx]
-    local_scores = edge_local_scores(facilities, midpoints, period, lights_known) if facilities else None
+    cctv_known = np.array([getattr(z, "cctv_known", None) is not False for z in zones])[zone_idx]
+    local_scores = (
+        edge_local_scores(facilities, midpoints, period, lights_known, cctv_known) if facilities else None
+    )
     dead_ends = _dead_end_nodes(graph)
 
     for i, (u, v, data) in enumerate(edges):
@@ -788,8 +791,8 @@ def build_route_artifact(
 
 def _zone_data_version(zones: list[SafetyZone]) -> str:
     fields = (
-        "dong_code", "lat", "lng", "cctv_count", "streetlight_count", "lights_known",
-        "crime_rate", "police_dist_m", "store_count", "bell_dist_m", "accident_dist_m",
+        "dong_code", "lat", "lng", "cctv_count", "streetlight_count", "lights_known", "cctv_known", "bell_known",
+        "crime_rate", "police_dist_m", "store_count", "bell_dist_m", "accident_dist_m", "night_floating_pop",
     )
     records = [
         {field: getattr(zone, field) for field in fields}

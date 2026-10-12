@@ -59,10 +59,12 @@ const DATA_BASIS_LABEL: Record<RouteDataBasis, string> = {
 
 const MISSING_DATA_LABEL: Record<RouteMissingDataFactor, string> = {
   streetlight_data: "보안등",
+  cctv_data: "CCTV",
   crime_rate: "범죄율",
   police_distance: "경찰서 거리",
   emergency_bell_distance: "안전비상벨 거리",
   accident_hotspot_distance: "사고다발지역 거리",
+  night_floating_population: "야간 유동인구",
 };
 
 function formatArtifactUpdatedAt(value: string | null): string {

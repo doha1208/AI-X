@@ -21,11 +21,12 @@ const FACTORS = [
   ["store_count", "상점 수"],
   ["bell_dist_m", "비상벨 거리"],
   ["accident_dist_m", "사고 다발지역 거리"],
+  ["night_floating_pop", "야간 유동인구"],
 ] as const;
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-  day: { cctv_count: 0.2, streetlight_count: 0.15, crime_rate: 0.2, police_dist_m: 0.1, store_count: 0.15, bell_dist_m: 0.1, accident_dist_m: 0.1 },
-  night: { cctv_count: 0.15, streetlight_count: 0.3, crime_rate: 0.2, police_dist_m: 0.05, store_count: 0.05, bell_dist_m: 0.15, accident_dist_m: 0.1 },
+  day: { cctv_count: 0.2, streetlight_count: 0.15, crime_rate: 0.2, police_dist_m: 0.1, store_count: 0.15, bell_dist_m: 0.1, accident_dist_m: 0.1, night_floating_pop: 0 },
+  night: { cctv_count: 0.15, streetlight_count: 0.25, crime_rate: 0.2, police_dist_m: 0.05, store_count: 0.05, bell_dist_m: 0.1, accident_dist_m: 0.1, night_floating_pop: 0.1 },
 };
 
 function cloneWeights(weights: ScoreWeights): ScoreWeights {

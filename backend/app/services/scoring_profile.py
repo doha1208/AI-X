@@ -13,7 +13,10 @@ LEGACY_FACTOR_NAMES = (
     "store_count",
     "bell_dist_m",
 )
-FACTOR_NAMES = (*LEGACY_FACTOR_NAMES, "accident_dist_m")
+# 요인이 추가될 때마다 이전 버전 프로필(관리자가 저장한 것)도 그대로 받아들인다.
+ACCIDENT_FACTOR_NAMES = (*LEGACY_FACTOR_NAMES, "accident_dist_m")
+# night_floating_pop: 밤(22~05시) 평균 유동인구 — KT 통신 데이터, 경기도 참여 16개 시·군만 있다.
+FACTOR_NAMES = (*ACCIDENT_FACTOR_NAMES, "night_floating_pop")
 
 
 @dataclass(frozen=True)
@@ -28,7 +31,7 @@ def _readonly_weights(weights: dict[Period, dict[str, float]]) -> Mapping[Period
 
 
 DEFAULT_SCORING_PROFILE = ScoringProfile(
-    version="default-v2",
+    version="default-v3",
     weights=_readonly_weights(
         {
             "day": {
@@ -39,15 +42,17 @@ DEFAULT_SCORING_PROFILE = ScoringProfile(
                 "store_count": 0.15,
                 "bell_dist_m": 0.10,
                 "accident_dist_m": 0.10,
+                "night_floating_pop": 0.0,
             },
             "night": {
                 "cctv_count": 0.15,
-                "streetlight_count": 0.30,
+                "streetlight_count": 0.25,
                 "crime_rate": 0.20,
                 "police_dist_m": 0.05,
                 "store_count": 0.05,
-                "bell_dist_m": 0.15,
+                "bell_dist_m": 0.10,
                 "accident_dist_m": 0.10,
+                "night_floating_pop": 0.10,
             },
         }
     ),
@@ -67,7 +72,7 @@ def validate_profile(profile: ScoringProfile) -> None:
 
     for period in ("day", "night"):
         weights = profile.weights[period]
-        if set(weights) not in (set(LEGACY_FACTOR_NAMES), set(FACTOR_NAMES)):
+        if set(weights) not in (set(LEGACY_FACTOR_NAMES), set(ACCIDENT_FACTOR_NAMES), set(FACTOR_NAMES)):
             raise ValueError("지원하지 않는 점수 요인이 있습니다")
         if not all(isinstance(weight, (int, float)) and isfinite(weight) and weight >= 0 for weight in weights.values()):
             raise ValueError("가중치는 0 이상인 숫자여야 합니다")
@@ -77,7 +82,7 @@ def validate_profile(profile: ScoringProfile) -> None:
 
 # 경로 간선의 동 점수에 남기는 요인. CCTV·보안등·상점·사고다발지역은 도로 구간 단위로
 # 따로 세므로(facility_density) 동 점수에도 넣으면 같은 데이터가 두 번 반영된다.
-ROUTE_ZONE_FACTORS = ("crime_rate", "police_dist_m", "bell_dist_m")
+ROUTE_ZONE_FACTORS = ("crime_rate", "police_dist_m", "bell_dist_m", "night_floating_pop")
 
 
 def route_zone_profile(profile: ScoringProfile) -> ScoringProfile:

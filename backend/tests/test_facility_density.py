@@ -44,13 +44,15 @@ def test_lights_matter_more_at_night_and_cctv_more_by_day():
     assert _score(cctv_only, "day") > _score(cctv_only, "night")
 
 
-def test_unknown_lights_area_is_neutral_between_dark_and_lit():
-    dark = build_facility_index(cctv=[], lights=[FAR])
-    lit = build_facility_index(cctv=[], lights=[NEAR] * LIGHT_SATURATION)
+def test_unknown_lights_area_is_judged_by_cctv_alone():
+    # 보안등 데이터가 없는 구간은 "깜깜함(0점)"도 "중간(50점)"도 아니다 — CCTV만으로 판단한다.
+    cctv_only = build_facility_index(cctv=[NEAR], lights=[])
 
-    unknown = edge_local_scores(dark, [ORIGIN], "night", lights_known=[False])[0]
+    unknown = edge_local_scores(cctv_only, [ORIGIN], "night", lights_known=[False])[0]
+    known_dark = edge_local_scores(cctv_only, [ORIGIN], "night", lights_known=[True])[0]
 
-    assert _score(dark, "night") < unknown < _score(lit, "night")
+    assert unknown == 100.0  # CCTV가 포화 → 그 부분 만점
+    assert known_dark < unknown  # 보안등이 정말 0개인 곳은 깎인다
 
 
 def test_unknown_lights_keep_the_cctv_part():
@@ -173,3 +175,22 @@ def test_index_loads_from_points_file(tmp_path):
 
     assert index is not None
     assert _score(index, "night") > 0
+
+
+def test_unsubmitted_cctv_area_is_judged_by_lights_alone():
+    lights_only = build_facility_index(cctv=[], lights=[NEAR] * LIGHT_SATURATION)
+
+    unknown = edge_local_scores(lights_only, [ORIGIN], "night", cctv_known=[False])[0]
+    known_none = edge_local_scores(lights_only, [ORIGIN], "night", cctv_known=[True])[0]
+
+    assert unknown == 100.0
+    assert known_none < unknown
+
+
+def test_when_neither_cctv_nor_lights_were_submitted_the_part_is_dropped():
+    # 둘 다 모르면 그 부분을 빼고 나머지(사고다발 등)만으로 판단한다 — 0점도 50점도 아니다.
+    index = build_facility_index(cctv=[], lights=[], accidents=[FAR])
+
+    score = edge_local_scores(index, [ORIGIN], "night", lights_known=[False], cctv_known=[False])[0]
+
+    assert score == 100.0  # 사고다발지역 근처가 아니라는 것만 안다

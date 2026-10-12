@@ -17,6 +17,9 @@ class SafetyZone(Base):
     streetlight_count: Mapped[int] = mapped_column(Integer, default=0)
     # False면 이 동이 속한 시·군·구가 보안등 데이터를 사실상 못 올린 곳 — 개수를 0으로 믿지 않고 점수에서 "모름"으로 본다.
     lights_known: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 지자체가 CCTV·비상벨 데이터를 공공데이터에 거의 안 올린 시의 동은 False — 그 요소를 빼고 계산한다.
+    cctv_known: Mapped[bool] = mapped_column(Boolean, default=True)
+    bell_known: Mapped[bool] = mapped_column(Boolean, default=True)
     crime_count: Mapped[int] = mapped_column(Integer, default=0)
     # 시·군·구 범죄 건수 ÷ 주민등록 인구 × 1만. None은 해당 지역의 범죄율을 알 수 없다는 뜻이다.
     crime_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -27,6 +30,8 @@ class SafetyZone(Base):
     bell_dist_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 동 중심에서 가장 가까운 교통사고 다발지역까지의 거리(m). None은 사고 데이터를 알 수 없다는 뜻이다.
     accident_dist_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 밤(22~05시) 시간당 평균 유동인구. 데이터를 제공하지 않는 시·군의 동은 None — 점수 계산에서 빠진다.
+    night_floating_pop: Mapped[float | None] = mapped_column(Float, nullable=True)
     safety_score: Mapped[float] = mapped_column(Float, default=0.0)
 
 

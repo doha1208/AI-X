@@ -15,3 +15,22 @@ def test_only_recent_accident_hotspots_are_used(tmp_path, monkeypatch):
     monkeypatch.setattr(ingest, "ACCIDENT_CSV", csv_path)
 
     assert list(ingest.iter_accident_points()) == [(37.3, 127.3), (37.4, 126.8)]
+
+
+def test_night_floating_population_averages_night_hours_per_dong(tmp_path):
+    import zipfile
+
+    header = "ADMI_CD,CTY_NM,ADMI_NM,TIME_CD,FORN_GB,M_20_CNT,F_20_CNT,ETL_YMD"
+    rows = [
+        "41117596,x,x,23,N,10,10,20260301",  # 밤 23시: 내국인 20 + 외국인 4 = 24
+        "41117596,x,x,23,F,2,2,20260301",
+        "41117596,x,x,2,N,3,3,20260302",  # 밤 2시: 6
+        "41117596,x,x,14,N,500,500,20260301",  # 낮 — 빠져야 한다
+    ]
+    archive = tmp_path / "유동인구_행정동 단위 집계_202603.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("T22_GG_ADMI_FLOWPOP_202603_x.csv", "\n".join([header, *rows]) + "\n")
+
+    result = ingest.parse_night_floating_population([archive])
+
+    assert result == {"4111759600": (24 + 6) / 2}

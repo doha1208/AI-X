@@ -23,6 +23,7 @@ ponytail: 범죄 통계는 구 단위가 공개 최소 단위라 같은 구의 �
     backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-points
 """
 import csv
+import io
 import json
 import re
 import sys
@@ -30,6 +31,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
+from collections import defaultdict
 from pathlib import Path
 
 from sqlalchemy import inspect, text
@@ -48,7 +51,7 @@ from app.services.poi_factors import (
     nearest_bell_distances_m,
     nearest_police_distances_m,
 )
-from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights
+from app.services.safety_score import compute_safety_scores, flag_unknown_streetlights, flag_unsubmitted
 from app.services.dong_area import estimate_dong_areas_km2
 
 HERE = Path(__file__).resolve().parent
@@ -59,6 +62,10 @@ CCTV_CSV = PROJECT_ROOT / "CCTV정보.csv"
 BELL_CSV = PROJECT_ROOT / "안전비상벨위치정보.csv"
 ACCIDENT_CSV = PROJECT_ROOT / "전국교통사고다발지역표준데이터.csv"
 ACCIDENT_RECENT_YEARS = 3  # 최신 사고연도 포함 최근 몇 년치 다발지역만 쓸지
+# 경기데이터드림 '유동인구_행정동 단위 집계' File 탭의 월별 zip(KT 통신 데이터). 프로젝트 루트에 둔다.
+# 참여한 시·군(2026년 기준 16곳)만 들어 있다 — 나머지 동은 이 요소 없이 점수를 계산한다.
+FLOWPOP_ZIP_GLOB = "유동인구_행정동 단위 집계_*.zip"
+NIGHT_HOURS = {22, 23, 0, 1, 2, 3, 4, 5}
 CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
 # 경기데이터드림 행정동 단위 시간대별 유동인구(구 단위로 합쳐 등록인구 대신/대체로 쓴다).
 FLOATING_POP_CSV = PROJECT_ROOT / "유동인구_행정동단위집계.csv"
@@ -358,6 +365,9 @@ def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None
     accident_points = dump_accident_points()
     accident_dists = nearest_accident_distances_m(centroids, accident_points)
     stores_by_dong = count_points_by_dong(pois["stores"], step, cells, bbox)
+    # 비상벨을 거의 안 올린 시는 "멀다(위험)"가 아니라 모름 — bell_known=False로 표시해 계산에서 뺀다.
+    unsubmitted = flag_unsubmitted(records, count_points_by_dong(bell_points, step, cells, bbox), "bell_known")
+    print(f"  비상벨 미제출로 보는 시·군 {len(unsubmitted)}곳: {unsubmitted}")
     for record, police_dist, bell_dist, accident_dist in zip(records, police_dists, bell_dists, accident_dists):
         record["police_dist_m"] = police_dist
         record["bell_dist_m"] = bell_dist
@@ -394,6 +404,41 @@ def load_floating_population() -> dict[str, float]:
     return parse_floating_population_csv(FLOATING_POP_CSV)
 
 
+def parse_night_floating_population(zip_paths: list[Path]) -> dict[str, float]:
+    """월별 zip 안의 시·군별 CSV -> {dong_code(10자리): 밤 시간대 시간당 평균 유동인구}.
+
+    각 행은 (행정동, 날짜, 시간, 내·외국인)별 성·연령 인구수다. 밤 시간대 행을 동별로 다 더한 뒤
+    (날짜, 시간) 조합 수로 나눈다 — 내국인·외국인 행은 같은 시간대라 합쳐진다.
+    ADMI_CD는 8자리 행정동 코드라 DB의 10자리 dong_code와 맞추려고 "00"을 붙인다.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    slots: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for zip_path in zip_paths:
+        with zipfile.ZipFile(zip_path) as archive:
+            for info in archive.infolist():
+                if not info.filename.lower().endswith(".csv"):
+                    continue
+                with archive.open(info) as raw:
+                    reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig", errors="replace"))
+                    count_cols = [c for c in reader.fieldnames or [] if c.endswith("_CNT")]
+                    for row in reader:
+                        if int(row["TIME_CD"]) not in NIGHT_HOURS:
+                            continue
+                        code = row["ADMI_CD"] + "00"
+                        totals[code] += sum(float(row[c] or 0) for c in count_cols)
+                        slots[code].add((row["ETL_YMD"], row["TIME_CD"]))
+    return {code: totals[code] / len(slots[code]) for code in totals}
+
+
+def add_night_floating_pop(records: list[dict]) -> None:
+    zips = sorted(PROJECT_ROOT.glob(FLOWPOP_ZIP_GLOB))
+    by_dong = parse_night_floating_population(zips) if zips else {}
+    for record in records:
+        record["night_floating_pop"] = by_dong.get(record["dong_code"])  # 없는 시·군은 None(계산에서 제외)
+    known = sum(r["night_floating_pop"] is not None for r in records)
+    print(f"  야간 유동인구: zip {len(zips)}개, {known}/{len(records)}개 동에 데이터")
+
+
 def add_crime_rate(records: list[dict], cells: dict, crime_by_gu: dict) -> None:
     """레코드에 시·군·구 단위로 맞춘 범죄 건수(crime_count)와 1만 명당 범죄율(crime_rate)을 채운다.
 
@@ -424,8 +469,11 @@ def ensure_new_columns() -> None:
         ("store_count", "INTEGER DEFAULT 0"),
         ("crime_rate", "FLOAT"),
         ("lights_known", "BOOLEAN DEFAULT TRUE"),
+        ("cctv_known", "BOOLEAN DEFAULT TRUE"),
+        ("bell_known", "BOOLEAN DEFAULT TRUE"),
         ("bell_dist_m", "FLOAT"),
         ("accident_dist_m", "FLOAT"),
+        ("night_floating_pop", "FLOAT"),
     )
     with engine.begin() as conn:
         for name, ddl in new_columns:
@@ -464,7 +512,10 @@ def refresh_derived_factors() -> None:
         print("Adding police/store factors and crime rate to existing dongs...")
         add_poi_factors(records, step, cells, bbox)
         add_crime_rate(records, cells, crime_by_gu)
+        add_night_floating_pop(records)
         flagged = flag_unknown_streetlights(records)
+        cctv_flagged = flag_unsubmitted(records, {r["dong_code"]: r["cctv_count"] for r in records}, "cctv_known")
+        print(f"  CCTV 미제출로 보는 시·군 {len(cctv_flagged)}곳: {cctv_flagged}")
         print(f"  보안등 데이터가 사실상 없어 '모름'으로 보는 시·군·구 {len(flagged)}곳: {flagged}")
         compute_safety_scores(records, area_by_dong=estimate_dong_areas_km2(step, cells))
         by_code = {r["dong_code"]: r for r in records}
@@ -473,9 +524,12 @@ def refresh_derived_factors() -> None:
             zone.cctv_count = rec["cctv_count"]
             zone.streetlight_count = rec["streetlight_count"]
             zone.lights_known = rec["lights_known"]
+            zone.cctv_known = rec["cctv_known"]
+            zone.bell_known = rec["bell_known"]
             zone.police_dist_m = rec["police_dist_m"]
             zone.bell_dist_m = rec["bell_dist_m"]
             zone.accident_dist_m = rec["accident_dist_m"]
+            zone.night_floating_pop = rec["night_floating_pop"]
             zone.store_count = rec["store_count"]
             zone.crime_count = rec["crime_count"]
             zone.crime_rate = rec["crime_rate"]
@@ -532,7 +586,10 @@ def ingest():
     print("Adding police/store factors and crime rate...")
     add_poi_factors(records, step, cells, bbox)
     add_crime_rate(records, cells, crime_by_gu)
+    add_night_floating_pop(records)
     flagged = flag_unknown_streetlights(records)
+    cctv_flagged = flag_unsubmitted(records, {r["dong_code"]: r["cctv_count"] for r in records}, "cctv_known")
+    print(f"  CCTV 미제출로 보는 시·군 {len(cctv_flagged)}곳: {cctv_flagged}")
     print(f"  보안등 데이터가 사실상 없어 '모름'으로 보는 시·군·구 {len(flagged)}곳: {flagged}")
     compute_safety_scores(records, area_by_dong=estimate_dong_areas_km2(step, cells))
 

@@ -155,10 +155,12 @@ def _artifact_score_map_for_zones(
 def _missing_route_data(zones: list[SafetyZone]) -> list[RouteMissingData]:
     checks = {
         "streetlight_data": lambda zone: not zone.lights_known,
+        "cctv_data": lambda zone: zone.cctv_known is False,
         "crime_rate": lambda zone: zone.crime_rate is None,
         "police_distance": lambda zone: zone.police_dist_m is None,
-        "emergency_bell_distance": lambda zone: zone.bell_dist_m is None,
+        "emergency_bell_distance": lambda zone: zone.bell_dist_m is None or zone.bell_known is False,
         "accident_hotspot_distance": lambda zone: zone.accident_dist_m is None,
+        "night_floating_population": lambda zone: zone.night_floating_pop is None,
     }
     return [
         RouteMissingData(factor=factor, affected_zone_count=sum(check(zone) for zone in zones))

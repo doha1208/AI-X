@@ -176,25 +176,29 @@ def _inside_any(tree: shapely.STRtree, midpoints) -> np.ndarray:
     return inside
 
 
-# 보안등 데이터를 못 받은 지역의 구간은 "0개=깜깜함"이 아니라 중간 점수로 본다.
-UNKNOWN_LIGHT_SCORE = 50.0
-
-
-def edge_local_scores(index: FacilityIndex, midpoints, period: Period, lights_known=None) -> list[float]:
+def edge_local_scores(
+    index: FacilityIndex, midpoints, period: Period, lights_known=None, cctv_known=None
+) -> list[float]:
     """각 (lat, lng) 구간 중간점 주변 시설로 0~100 점수를 준다.
 
     CCTV·보안등 개수, 반경 50m 상점 수(밤엔 편의점 수), 100m 안 교통사고 다발지점(있으면 그 부분 0점),
     공원·숲·하천변·공터 안인지와 50m 안 유흥·단란주점(둘 다 밤에만, 해당하면 그 부분 0점)을 섞는다.
     상점·사고다발·영역 데이터가 없으면 그 비중은 빼고 나머지로 다시 나눈다.
-    lights_known(구간마다 bool)이 False인 구간은 보안등 부분을 UNKNOWN_LIGHT_SCORE로 대신한다.
+    lights_known(구간마다 bool)이 False인 구간(보안등 데이터를 못 받은 지역)은 "0개=깜깜함"으로도,
+    중간 점수로도 보지 않고 보안등을 빼고 CCTV만으로 그 부분을 계산한다. cctv_known도 같다 — CCTV를
+    모르면 보안등만으로, 둘 다 모르면 그 부분을 통째로 빼고 나머지 부분만으로 계산한다.
     """
     meters = to_meters(midpoints)
     cctv = _saturating_score(index.cctv_tree, meters, CCTV_RADIUS_M, CCTV_SATURATION)
     light = _saturating_score(index.light_tree, meters, LIGHT_RADIUS_M, LIGHT_SATURATION)
-    if lights_known is not None:
-        light = np.where(lights_known, light, UNKNOWN_LIGHT_SCORE)
     w_cctv, w_light = _WEIGHTS[period]
-    parts = [(_PART_WEIGHTS[period][0], cctv * w_cctv + light * w_light)]
+    has_light = np.ones(len(meters), bool) if lights_known is None else np.asarray(lights_known, bool)
+    has_cctv = np.ones(len(meters), bool) if cctv_known is None else np.asarray(cctv_known, bool)
+    watch_weight = has_cctv * w_cctv + has_light * w_light
+    watch = np.divide(cctv * w_cctv * has_cctv + light * w_light * has_light, watch_weight,
+                      out=np.zeros(len(meters)), where=watch_weight > 0)
+    # 둘 다 모르는 구간은 이 부분의 비중을 0으로 — 나머지 부분만으로 다시 나눈다.
+    parts = [(np.where(watch_weight > 0, _PART_WEIGHTS[period][0], 0.0), watch)]
     store_part = _store_score(index, meters, period)
     if store_part is not None:
         parts.append((_PART_WEIGHTS[period][1], store_part))
@@ -207,4 +211,5 @@ def edge_local_scores(index: FacilityIndex, midpoints, period: Period, lights_kn
         near_bar = index.nightlife_tree.query_ball_point(meters, r=NIGHTLIFE_RADIUS_M, return_length=True) > 0
         parts.append((_PART_WEIGHTS[period][4], np.where(near_bar, 0.0, 100.0)))
     total = sum(w for w, _ in parts)
-    return (sum(w * score for w, score in parts) / total).tolist()
+    # ponytail: 모든 부분을 모르는 구간은 실데이터에 없다(사고다발·상점 데이터는 전 지역에 있다).
+    return np.divide(sum(w * score for w, score in parts), total, out=np.zeros(len(meters)), where=total > 0).tolist()
