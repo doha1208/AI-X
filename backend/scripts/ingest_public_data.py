@@ -42,7 +42,6 @@ from app.db.session import Base, SessionLocal, engine
 from app.models.safety_zone import SafetyZone
 from app.services.crime_rate import (
     crime_rate_per_10k,
-    parse_floating_population_csv,
     parse_population_csv,
     region_key_for,
 )
@@ -68,7 +67,6 @@ FLOWPOP_ZIP_GLOB = "유동인구_행정동 단위 집계_*.zip"
 NIGHT_HOURS = {22, 23, 0, 1, 2, 3, 4, 5}
 CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
 # 경기데이터드림 행정동 단위 시간대별 유동인구(구 단위로 합쳐 등록인구 대신/대체로 쓴다).
-FLOATING_POP_CSV = PROJECT_ROOT / "유동인구_행정동단위집계.csv"
 GRID_PATH = BACKEND_DIR / "app" / "data" / "dong_grid.json"
 ENV_PATH = BACKEND_DIR / ".env"
 # extract_safety_pois.py가 OSM PBF에서 뽑아둔 경찰서·상점 좌표.
@@ -397,12 +395,6 @@ def load_population() -> dict[str, float]:
     return population
 
 
-def load_floating_population() -> dict[str, float]:
-    """있으면 구 단위 평균 유동인구를, 없으면 빈 dict를 반환한다(등록인구로 전부 폴백)."""
-    if not FLOATING_POP_CSV.exists():
-        return {}
-    return parse_floating_population_csv(FLOATING_POP_CSV)
-
 
 def parse_night_floating_population(zip_paths: list[Path]) -> dict[str, float]:
     """월별 zip 안의 시·군별 CSV -> {dong_code(10자리): 밤 시간대 시간당 평균 유동인구}.
@@ -445,10 +437,9 @@ def add_crime_rate(records: list[dict], cells: dict, crime_by_gu: dict) -> None:
     범죄 통계는 시 단위("수원시")인데 동 격자는 구 단위("수원시 장안구")라, 같은 단위로 묶는다.
     이름이 안 맞으면 0건으로 두지 않고 KeyError로 멈춘다.
 
-    유동인구 데이터가 있는 구는 등록인구 대신 그 값으로 범죄율을 계산한다(더 실제에 가까움).
+    분모는 모든 지역에 주민등록인구를 쓴다 — 유동인구(KT 가입자 기준)와 섞으면 규모가 달라 왜곡된다.
     """
-    floating = load_floating_population()
-    population = {**load_population(), **floating}
+    population = load_population()
     known = set(crime_by_gu) & set(population)
     gu_by_dong = {cell["dong_code"]: cell["gu_name"] for cell in cells.values()}
     for record in records:
@@ -456,8 +447,7 @@ def add_crime_rate(records: list[dict], cells: dict, crime_by_gu: dict) -> None:
         record["crime_count"] = crime_by_gu[key]
         record["crime_rate"] = crime_rate_per_10k(crime_by_gu[key], population[key])
     print(
-        f"  crime rate assigned for {len(records)} dongs ({len(known)} regions, "
-        f"{len(set(floating) & known)} using floating population)"
+        f"  crime rate assigned for {len(records)} dongs ({len(known)} regions, registered population)"
     )
 
 
