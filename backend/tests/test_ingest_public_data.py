@@ -54,3 +54,20 @@ def test_store_extraction_keeps_street_level_food_and_retail_and_convenience():
 
     assert len(result["stores"]) == 3
     assert result["convenience"] == [[37.5, 127.0]]
+
+
+def test_police_points_keep_staffed_facilities_including_neighbouring_regions():
+    # 경계의 동은 가장 가까운 지구대가 서울·인천일 수 있어 지역으로 거르지 않는다.
+    from scripts.fetch_police_points import staffed_points
+
+    def row(sido, kind):
+        # EPSG:3857 좌표 — 수원시 장안구 근처
+        return {"STDG_CTPV_CD": sido, "FCLT_TYPE": kind, "XMAP_CRTS": 14137820.0, "YMAP_CRTS": 4479700.0}
+
+    rows = [row("41", "지구대"), row("41", "파출소"), row("41", "치안센터"), row("11", "경찰서")]
+
+    points = staffed_points(rows)
+
+    assert len(points) == 3  # 치안센터만 빠진다
+    lat, lng = points[0]
+    assert 37.2 < lat < 37.4 and 126.9 < lng < 127.1

@@ -16,7 +16,8 @@ const SOURCES = [
   { item: "상점·편의점", source: "소상공인시장진흥공단 상가(상권)정보", basis: "2026년 6월", note: "길가(1층·지하1층) 음식·소매 상점만 셈. 밤에는 편의점만 가점" },
   { item: "유흥주점·단란주점", source: "행정안전부 지방행정 인허가 (영업 중)", basis: "2026년 10월 수집", note: "밤에 근처 길은 감점" },
   { item: "야간 유동인구 (22~05시)", source: "경기데이터드림 유동인구_행정동 단위 집계 (KT 통신 데이터)", basis: "2026년 1~3월", note: "참여한 16개 시·군(367개 동)만 반영" },
-  { item: "경찰서·공원·하천, 보행 도로망", source: "OpenStreetMap", basis: "2026년 9월", note: "" },
+  { item: "경찰서·지구대·파출소", source: "행정안전부 공통POI(경찰) (재난안전데이터 공유플랫폼)", basis: "2024년 3월 갱신분", note: "치안센터·안심부스는 제외" },
+  { item: "공원·하천, 보행 도로망", source: "OpenStreetMap", basis: "2026년 9월", note: "" },
   { item: "행정동 경계", source: "통계청 SGIS 행정동 경계 (vuski/admdongkor 가공)", basis: "", note: "" },
 ];
 
