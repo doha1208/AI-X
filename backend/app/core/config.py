@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./app.db"
     tmap_app_key: str = ""
     security_light_api_key: str = ""
+    # safetydata.go.kr(재난안전데이터 공유플랫폼) 공통POI(경찰) API 키 — 지구대·파출소 위치용
+    safetydata_api_key: str = ""
     kakao_rest_api_key: str = ""
     # 쉼표로 구분된 관리자 이메일. 빈 값이면 관리자 API는 모든 사용자에게 거부된다.
     admin_emails: str = ""
