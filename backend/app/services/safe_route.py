@@ -22,6 +22,7 @@ from app.services.facility_density import (
     ACCIDENT_POINTS_PATH,
     FACILITY_POINTS_PATH,
     ISOLATED_AREAS_PATH,
+    NIGHT_PLACES_PATH,
     POIS_PATH,
     FacilityIndex,
     edge_local_scores,
@@ -398,14 +399,14 @@ def _edge_cost(length_m: float, safety_score: float) -> float:
 
 
 # 간선 점수 = 동 단위 점수(범죄율·경찰서·비상벨, route_zone_scores) + 도로 특성 점수(큰길/골목,
-# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 시설(CCTV·보안등·상점·사고다발·공원/하천변, facility_density)의
+# 막다른 길, OSM 가로등·인도 태그) + 구간 주변 시설(CCTV·보안등·상점·사고다발·공원/하천변·편의점/유흥업소, facility_density)의
 # 가중 평균. 도로 특성과 주변 시설은 같은 동 안에서도 구간마다 달라서 귀갓길 선택을 실제로 가른다.
 # ponytail: 실험(수원·안산·신림 90쌍) 기반 첫 값 — 비중은 실제 귀갓길 피드백으로 조정 필요.
 ZONE_SCORE_WEIGHT = 0.3
 ROAD_SCORE_WEIGHT = 0.3
 LOCAL_SCORE_WEIGHT = 0.4
 # 경로 점수 계산 방식이 바뀌면 올린다 — 이전 방식으로 만든 산출물이 최신으로 오인되지 않게.
-ROUTE_SCORING_VERSION = "segment-store-accident-isolation-v1"
+ROUTE_SCORING_VERSION = "segment-store-accident-isolation-v2-night-places"
 
 
 def route_zone_scores(
@@ -821,6 +822,7 @@ def route_input_data_version(
     pois_path: Path = POIS_PATH,
     accident_points_path: Path = ACCIDENT_POINTS_PATH,
     isolated_areas_path: Path = ISOLATED_AREAS_PATH,
+    night_places_path: Path = NIGHT_PLACES_PATH,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
@@ -829,6 +831,7 @@ def route_input_data_version(
         "pois": _file_sha256(pois_path),
         "accident_points": _file_sha256(accident_points_path),
         "isolated_areas": _file_sha256(isolated_areas_path),
+        "night_places": _file_sha256(night_places_path),
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
         "route_scoring": ROUTE_SCORING_VERSION,
     }

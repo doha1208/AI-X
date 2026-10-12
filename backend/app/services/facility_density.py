@@ -4,7 +4,10 @@
 1%도 안 돼서, 좌표가 있는 공공데이터를 구간 단위로 직접 센다.
 
 - CCTV·보안등: scripts/ingest_public_data.py --dump-points
-- 상점: scripts/extract_safety_pois.py (OSM) — 거리에 사람 눈이 있는지
+- 상점: scripts/extract_safety_pois.py (OSM) — 거리에 사람 눈이 있는지. 밤엔 문 연 편의점만 센다
+  (24시간 영업이고 여성안심지킴이집도 대부분 편의점이다)
+- 편의점·유흥주점·단란주점: scripts/fetch_night_places.py (행정안전부 인허가, 영업 중) — 밤에
+  편의점은 상점 자리에, 유흥업소 근처 구간은 감점
 - 교통사고 다발지역: ingest_public_data.py --refresh가 저장 — 근처 구간은 감점
 - 공원·숲·하천변·공터: scripts/extract_isolated_areas.py (OSM) — 밤에 그 안의 구간은 감점
 
@@ -34,23 +37,26 @@ POIS_PATH = OSM_DIR / "safety_pois.json"
 ACCIDENT_POINTS_PATH = OSM_DIR / "accident_points.json"
 ISOLATED_AREAS_PATH = OSM_DIR / "isolated_areas.json"
 ISOLATED_AREA_KINDS = ("park", "forest", "water", "vacant")
+NIGHT_PLACES_PATH = OSM_DIR / "night_places.json"
 
 CCTV_RADIUS_M = 60.0
 LIGHT_RADIUS_M = 40.0
 STORE_RADIUS_M = 50.0
 ACCIDENT_RADIUS_M = 100.0
+NIGHTLIFE_RADIUS_M = 50.0
 # 반경 안에 이 개수 이상이면 만점이다 — 더 많다고 계속 안전해지지는 않는다.
 CCTV_SATURATION = 1
 LIGHT_SATURATION = 2
 STORE_SATURATION = 3
+CONVENIENCE_SATURATION = 1
 
 # (cctv 비중, 보안등 비중) — 낮엔 방범 CCTV, 밤엔 즉시 시야를 확보해주는 보안등.
 _WEIGHTS: dict[Period, tuple[float, float]] = {"day": (0.7, 0.3), "night": (0.4, 0.6)}
-# 구간 점수 안에서 (CCTV·보안등, 상점, 사고다발, 인적 드문 영역) 비중. 밤엔 문 닫은 가게가 많아
-# 상점 비중을 낮추고, 낮엔 공원·하천변이 위험하지 않아 그 비중을 0으로 둔다.
-_PART_WEIGHTS: dict[Period, tuple[float, float, float, float]] = {
-    "day": (0.55, 0.25, 0.20, 0.0),
-    "night": (0.50, 0.10, 0.15, 0.25),
+# 구간 점수 안에서 (CCTV·보안등, 상점, 사고다발, 인적 드문 영역, 유흥업소) 비중. 밤엔 문 닫은 가게가
+# 많아 상점 비중을 낮추고, 낮엔 공원·하천변·유흥업소가 위험 요인이 아니라 그 비중을 0으로 둔다.
+_PART_WEIGHTS: dict[Period, tuple[float, float, float, float, float]] = {
+    "day": (0.55, 0.25, 0.20, 0.0, 0.0),
+    "night": (0.45, 0.10, 0.15, 0.20, 0.10),
 }
 
 
@@ -60,6 +66,8 @@ class FacilityIndex:
     light_tree: cKDTree | None
     store_tree: cKDTree | None = None
     accident_tree: cKDTree | None = None
+    convenience_tree: cKDTree | None = None
+    nightlife_tree: cKDTree | None = None
     isolated_tree: shapely.STRtree | None = None
 
 
@@ -73,12 +81,16 @@ def build_facility_index(
     stores: list[Point] = (),
     accidents: list[Point] = (),
     isolated_areas: list[shapely.Geometry] = (),
+    convenience: list[Point] = (),
+    nightlife: list[Point] = (),
 ) -> FacilityIndex:
     return FacilityIndex(
         cctv_tree=_tree(cctv),
         light_tree=_tree(lights),
         store_tree=_tree(stores),
         accident_tree=_tree(accidents),
+        convenience_tree=_tree(convenience),
+        nightlife_tree=_tree(nightlife),
         isolated_tree=shapely.STRtree(isolated_areas) if len(isolated_areas) else None,
     )
 
@@ -116,6 +128,7 @@ def load_facility_index(
     pois_path: Path = POIS_PATH,
     accident_path: Path = ACCIDENT_POINTS_PATH,
     isolated_path: Path = ISOLATED_AREAS_PATH,
+    night_places_path: Path = NIGHT_PLACES_PATH,
 ) -> FacilityIndex | None:
     """CCTV·보안등 좌표 파일이 없으면 None — 호출부가 구간별 밀도 없이(동 점수만으로) 계산하게 한다."""
     if not path.exists():
@@ -134,6 +147,8 @@ def load_facility_index(
         _optional_points(pois_path, "stores"),
         _optional_points(accident_path),
         _optional_areas(isolated_path),
+        _optional_points(night_places_path, "convenience"),
+        _optional_points(night_places_path, "nightlife"),
     )
 
 
@@ -142,6 +157,15 @@ def _saturating_score(tree: cKDTree | None, meters: np.ndarray, radius_m: float,
         return np.zeros(len(meters))
     counts = tree.query_ball_point(meters, r=radius_m, return_length=True)
     return np.minimum(counts / saturation, 1.0) * 100.0
+
+
+def _store_score(index: FacilityIndex, meters: np.ndarray, period: Period) -> np.ndarray | None:
+    """밤엔 편의점만(없으면 전체 상점으로 대신), 낮엔 전체 상점으로 '거리의 사람 눈'을 본다."""
+    if period == "night" and index.convenience_tree is not None:
+        return _saturating_score(index.convenience_tree, meters, STORE_RADIUS_M, CONVENIENCE_SATURATION)
+    if index.store_tree is not None:
+        return _saturating_score(index.store_tree, meters, STORE_RADIUS_M, STORE_SATURATION)
+    return None
 
 
 def _inside_any(tree: shapely.STRtree, midpoints) -> np.ndarray:
@@ -159,8 +183,8 @@ UNKNOWN_LIGHT_SCORE = 50.0
 def edge_local_scores(index: FacilityIndex, midpoints, period: Period, lights_known=None) -> list[float]:
     """각 (lat, lng) 구간 중간점 주변 시설로 0~100 점수를 준다.
 
-    CCTV·보안등 개수, 반경 50m 상점 수, 100m 안 교통사고 다발지점(있으면 그 부분 0점),
-    공원·숲·하천변·공터 안인지(밤에만, 안이면 그 부분 0점)를 섞는다.
+    CCTV·보안등 개수, 반경 50m 상점 수(밤엔 편의점 수), 100m 안 교통사고 다발지점(있으면 그 부분 0점),
+    공원·숲·하천변·공터 안인지와 50m 안 유흥·단란주점(둘 다 밤에만, 해당하면 그 부분 0점)을 섞는다.
     상점·사고다발·영역 데이터가 없으면 그 비중은 빼고 나머지로 다시 나눈다.
     lights_known(구간마다 bool)이 False인 구간은 보안등 부분을 UNKNOWN_LIGHT_SCORE로 대신한다.
     """
@@ -171,12 +195,16 @@ def edge_local_scores(index: FacilityIndex, midpoints, period: Period, lights_kn
         light = np.where(lights_known, light, UNKNOWN_LIGHT_SCORE)
     w_cctv, w_light = _WEIGHTS[period]
     parts = [(_PART_WEIGHTS[period][0], cctv * w_cctv + light * w_light)]
-    if index.store_tree is not None:
-        parts.append((_PART_WEIGHTS[period][1], _saturating_score(index.store_tree, meters, STORE_RADIUS_M, STORE_SATURATION)))
+    store_part = _store_score(index, meters, period)
+    if store_part is not None:
+        parts.append((_PART_WEIGHTS[period][1], store_part))
     if index.accident_tree is not None:
         near = index.accident_tree.query_ball_point(meters, r=ACCIDENT_RADIUS_M, return_length=True) > 0
         parts.append((_PART_WEIGHTS[period][2], np.where(near, 0.0, 100.0)))
     if index.isolated_tree is not None and _PART_WEIGHTS[period][3] > 0:
         parts.append((_PART_WEIGHTS[period][3], np.where(_inside_any(index.isolated_tree, midpoints), 0.0, 100.0)))
+    if index.nightlife_tree is not None and _PART_WEIGHTS[period][4] > 0:
+        near_bar = index.nightlife_tree.query_ball_point(meters, r=NIGHTLIFE_RADIUS_M, return_length=True) > 0
+        parts.append((_PART_WEIGHTS[period][4], np.where(near_bar, 0.0, 100.0)))
     total = sum(w for w, _ in parts)
     return (sum(w * score for w, score in parts) / total).tolist()

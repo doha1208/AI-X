@@ -77,6 +77,29 @@ def test_nearby_stores_raise_the_score():
     assert _score(shops, "day") > _score(empty, "day")
 
 
+def test_only_convenience_stores_count_at_night():
+    # 밤엔 일반 상점이 문을 닫는다 — 편의점(24시간, 대부분 여성안심지킴이집)만 사람 눈으로 본다.
+    shops_only = build_facility_index(cctv=[], lights=[], stores=[NEAR] * 3, convenience=[FAR])
+    convenience = build_facility_index(cctv=[], lights=[], stores=[NEAR] * 3, convenience=[NEAR])
+
+    assert _score(convenience, "night") > _score(shops_only, "night")
+    assert _score(convenience, "day") == _score(shops_only, "day")
+
+
+def test_night_falls_back_to_all_stores_without_convenience_data():
+    with_shops = build_facility_index(cctv=[], lights=[], stores=[NEAR] * 3)
+    empty = build_facility_index(cctv=[], lights=[], stores=[FAR])
+    assert _score(with_shops, "night") > _score(empty, "night")
+
+
+def test_nightlife_nearby_lowers_the_score_at_night_only():
+    bars = build_facility_index(cctv=[NEAR], lights=[NEAR], nightlife=[NEAR])
+    quiet = build_facility_index(cctv=[NEAR], lights=[NEAR], nightlife=[FAR])
+
+    assert _score(bars, "night") < _score(quiet, "night")
+    assert _score(bars, "day") == _score(quiet, "day")
+
+
 def test_nearby_accident_hotspot_lowers_the_score():
     hotspot = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[NEAR])
     clear = build_facility_index(cctv=[NEAR], lights=[NEAR], accidents=[FAR])
@@ -115,10 +138,13 @@ def test_store_and_accident_files_load_alongside_facilities(tmp_path):
     pois.write_text(json.dumps({"police": [], "stores": [list(NEAR)] * 3}))
     accidents = tmp_path / "accident_points.json"
     accidents.write_text(json.dumps([list(FAR)]))
+    night_places = tmp_path / "night_places.json"
+    night_places.write_text(json.dumps({"convenience": [list(NEAR)], "nightlife": [list(FAR)]}))
 
-    index = load_facility_index(facilities, pois, accidents)
+    index = load_facility_index(facilities, pois, accidents, tmp_path / "none.json", night_places)
 
     assert index.store_tree is not None and index.accident_tree is not None
+    assert index.convenience_tree is not None and index.nightlife_tree is not None
     assert _score(index, "day") > 0
 
 
