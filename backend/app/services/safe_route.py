@@ -204,17 +204,39 @@ def _alternatives_for(straight_km: float, k: int) -> int:
     return k if straight_km <= MAX_ALTERNATIVES_KM else 1
 
 
-# 대안 경로가 서로 거의 같은 골목 변형이 되지 않도록, 필요한 대안 수보다 더 많은 후보를
-# 살펴보고 겹치지 않는 것들을 고른다. k=1일 때는 다양성이 의미 없으니 넓히지 않는다
-# (긴 경로는 Yen's 알고리즘 자체가 느려서 후보를 늘리면 응답 시간이 커진다).
-ALT_SEARCH_MULTIPLIER = 4
-ALT_SEARCH_MAX = 12
+# 대안 경로는 페널티 방식으로 찾는다 — 이미 고른 경로의 도로 비용을 이 배수로 올려 다시 찾으면
+# 다른 길로 돌아간다. (k-최단경로는 후보가 골목 하나만 다른 변형뿐이라 같은 길이 반복됐다.)
+ALT_EDGE_PENALTY = 2.0
+ALT_SEARCH_ATTEMPTS_PER_ROUTE = 2
 # ponytail: 체감 기반 값 — 실제 지도에서 "이건 사실상 같은 길"로 보이는 비율 확인 후 조정.
 ROUTE_OVERLAP_MAX = 0.6
 
 
-def _search_budget(k: int) -> int:
-    return k if k <= 1 else min(k * ALT_SEARCH_MULTIPLIER, ALT_SEARCH_MAX)
+def _penalized_alternatives(graph: nx.DiGraph, origin: int, destination: int, k: int) -> list[list[int]]:
+    """가장 안전한 경로 1개 + 그와 ROUTE_OVERLAP_MAX 이하로 겹치는 대안을 최대 k-1개 찾는다.
+
+    겹치는 대안밖에 없으면 그 수만큼 덜 돌려준다 — 같은 길을 대안이라고 보여주지 않는다.
+    """
+    best = nx.shortest_path(graph, origin, destination, weight="safety_cost")
+    routes = [best]
+    used = set(_path_edges(best))
+    selected_edges = set(used)
+
+    def penalized(u, v, data):
+        cost = data["safety_cost"]
+        return cost * ALT_EDGE_PENALTY if (u, v) in used or (v, u) in used else cost
+
+    for _ in range((k - 1) * ALT_SEARCH_ATTEMPTS_PER_ROUTE):
+        if len(routes) >= k:
+            break
+        path = nx.shortest_path(graph, origin, destination, weight=penalized)
+        edges = _path_edges(path)
+        used |= edges  # 거절된 경로도 다음 탐색에서 피하게 해 같은 후보가 반복되지 않게 한다
+        if path in routes or _overlap_fraction(graph, edges, selected_edges) > ROUTE_OVERLAP_MAX:
+            continue
+        routes.append(path)
+        selected_edges |= edges
+    return routes
 
 
 def _path_edges(path: list[int]) -> frozenset[tuple[int, int]]:
@@ -234,25 +256,6 @@ def _overlap_fraction(graph: nx.DiGraph, edges: frozenset, selected_edges: set) 
     return overlap / total if total else 0.0
 
 
-def _diverse_routes(graph: nx.DiGraph, candidates: list[tuple[list[int], dict]], k: int) -> list[dict]:
-    """candidates는 비용 오름차순(가장 안전한 순)이라고 가정한다. 이미 고른 경로들과 많이
-    겹치는 후보는 일단 미루고, 그래도 k개를 못 채우면 미뤄둔 것부터 순서대로 채운다 —
-    다양성이 없는 것보다 대안이 아예 없는 게 더 나쁘다."""
-    selected: list[dict] = []
-    selected_edges: set[tuple[int, int]] = set()
-    leftover: list[dict] = []
-    for path, summary in candidates:
-        edges = _path_edges(path)
-        if selected and _overlap_fraction(graph, edges, selected_edges) > ROUTE_OVERLAP_MAX:
-            leftover.append(summary)
-            continue
-        selected.append(summary)
-        selected_edges |= edges
-    for summary in leftover:
-        if len(selected) >= k:
-            break
-        selected.append(summary)
-    return selected[:k]
 
 _graph_cache: dict[tuple[float, float, float, float], nx.MultiDiGraph] = {}
 
@@ -475,7 +478,7 @@ def _build_scored_graph(
     facilities: FacilityIndex | None = None,
 ) -> nx.DiGraph:
     """안전점수 배정(KD-tree 최근접 질의)과 평행 간선 단순화(대안 경로 탐색인
-    `shortest_simple_paths`는 MultiDiGraph를 지원하지 않음)를 한 번에 한다.
+    대안 경로 탐색은 MultiDiGraph의 평행 간선을 다루기 번거로움)를 한 번에 한다.
 
     간선 점수는 동 점수에 도로 특성 점수(road_score)와 구간 주변 시설 밀도를 섞어
     구간별로 다르게 준다. facilities가 없으면 밀도 자리에 동 점수를 그대로 쓴다.
@@ -719,14 +722,9 @@ class RouteArtifactRuntime:
                     metrics.record_route_cache("hit")
                     return cached
             metrics.record_route_cache("miss")
-            paths = nx.shortest_simple_paths(graph, origin, destination, weight="safety_cost")
-            search_budget = _search_budget(k)
-            candidates: list[tuple[list[int], dict]] = []
-            for path in paths:
-                candidates.append((path, _summarize_path(graph, path)))
-                if len(candidates) >= search_budget:
-                    break
-            routes = _diverse_routes(graph, candidates, k)
+            paths = _penalized_alternatives(graph, origin, destination, k)
+            # 대안은 실제(페널티 없는) 비용이 낮은 순 — 첫 번째는 언제나 가장 안전한 경로다.
+            routes = [_summarize_path(graph, path) for path in paths]
             with self._lock:
                 if self._artifact is artifact:
                     self._result_cache[cache_key] = routes

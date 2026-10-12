@@ -162,4 +162,5 @@ def test_alternatives_prefer_genuinely_different_routes_over_near_duplicates():
 
     routes = runtime.find_routes(37.501, 127.001, 37.509, 127.009, period="day", k=3)
 
-    assert [round(r["distance_m"]) for r in routes] == [300, 330, 305]
+    # 골목 하나만 다른 변형(305·306·307)은 대안으로 채우지 않는다 — 같은 길을 세 번 보여주게 된다.
+    assert [round(r["distance_m"]) for r in routes] == [300, 330]
