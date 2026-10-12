@@ -26,6 +26,17 @@ _HIGHWAY_SCORE: dict[str, float] = {
     "steps": 35,
     "path": 30,
     "track": 20,
+    # 아래는 보행망에 드물게 나오는 종류 — 점수표에 없으면 기본값(50)을 받아서 하나씩 정해 둔다.
+    "busway": 70,  # 버스 전용 도로 — 큰길 옆이라 통행이 많다
+    "corridor": 70,  # 건물·지하상가 안 통로
+    "crossing": 70,  # 횡단보도
+    "bus_stop": 65,
+    "elevator": 60,
+    "road": 55,  # 아직 분류되지 않은 도로 — unclassified와 같게
+    "escape": 40,  # 비상 대피 차로
+    "emergency_bay": 40,
+    "bridleway": 30,  # 승마로 — path와 같게
+    "disused": 20,  # 폐도로
 }
 
 # (yes 보너스, no 페널티) — 가로등은 밤에만 크게 작용한다.

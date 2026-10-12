@@ -55,3 +55,15 @@ def test_ordinary_streets_and_roads_with_sidewalks_stay_walkable():
 def test_unknown_tags_are_neutral_and_score_stays_in_range():
     assert 0 <= road_safety_score({}, "day") <= 100
     assert 0 <= road_safety_score({"highway": "track", "lit": "no"}, "night", dead_end=True) <= 100
+
+
+def test_every_highway_type_in_the_walk_network_has_its_own_score():
+    # 점수표에 없는 종류는 기본값(50)을 받는다 — 실제 보행망에 나오는 종류는 모두 점수표에 있어야 한다.
+    from app.services.road_score import _HIGHWAY_SCORE
+
+    seen_in_network = {
+        "service", "residential", "footway", "track", "unclassified", "tertiary", "path", "secondary",
+        "primary", "living_street", "steps", "trunk", "pedestrian", "busway", "corridor", "road",
+        "elevator", "escape", "bus_stop", "bridleway", "disused", "crossing", "emergency_bay",
+    }
+    assert seen_in_network <= set(_HIGHWAY_SCORE)
