@@ -180,7 +180,7 @@ def test_route_rejects_coordinates_outside_the_gyeonggi_service_area():
     assert response.status_code == 422
     assert response.json()["detail"] == {
         "reason": "outside_service_area",
-        "action": "현재 길찾기는 서울·경기 지역에서만 지원합니다.",
+        "action": "현재 길찾기는 경기도 지역에서만 지원합니다.",
         "points": ["start", "end"],
     }
 

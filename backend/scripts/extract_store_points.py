@@ -1,4 +1,4 @@
-"""소상공인시장진흥공단 상가(상권)정보에서 서울·경기의 길가 상점·편의점 좌표를 뽑아 JSON으로 저장한다.
+"""소상공인시장진흥공단 상가(상권)정보에서 경기도의 길가 상점·편의점 좌표를 뽑아 JSON으로 저장한다.
 
 ingest_public_data.py(동별 상점 수)와 facility_density.py(도로 구간 주변 상점, 밤 편의점)가 읽는다.
 OSM 상점은 사람이 지도에 직접 입력한 것이라 빠진 곳이 많아, 영업 중 상가 전수 데이터로 바꾼다.
@@ -24,7 +24,7 @@ BACKEND_DIR = HERE.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 ZIP_GLOB = "소상공인시장진흥공단_상가(상권)정보_*.zip"
 OUTPUT_JSON = BACKEND_DIR / "data" / "osm" / "store_points.json"
-SIDOS = ("서울", "경기")
+SIDOS = "경기"
 STREET_CATEGORIES = {"음식", "소매"}
 GROUND_FLOORS = {"", "1", "지", "B1"}  # 층 정보가 없거나 1층·지하1층
 
