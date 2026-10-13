@@ -1,8 +1,8 @@
 """적재된 안전 데이터와 로컬 OSM 도로망으로 경로 산출물을 게시한다.
 
 사용법:
-    backend/.venv/Scripts/python.exe scripts/build_route_artifacts.py
-    backend/.venv/Scripts/python.exe scripts/build_route_artifacts.py --region seoul-gyeonggi
+    backend/.venv/Scripts/python.exe -m scripts.build_route_artifacts
+    backend/.venv/Scripts/python.exe -m scripts.build_route_artifacts --region seoul-gyeonggi
 
 공공데이터 적재가 성공한 뒤 실행한다. 산출물 생성에 실패하면 기존 current 매니페스트는
 그대로 유지되므로, API 워커는 직전에 검증된 산출물을 계속 사용한다.

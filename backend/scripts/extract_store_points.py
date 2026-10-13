@@ -1,4 +1,4 @@
-"""소상공인시장진흥공단 상가(상권)정보에서 경기도의 길가 상점·편의점 좌표를 뽑아 JSON으로 저장한다.
+"""소상공인시장진흥공단 상가(상권)정보에서 서울·경기의 길가 상점·편의점 좌표를 뽑아 JSON으로 저장한다.
 
 ingest_public_data.py(동별 상점 수)와 facility_density.py(도로 구간 주변 상점, 밤 편의점)가 읽는다.
 OSM 상점은 사람이 지도에 직접 입력한 것이라 빠진 곳이 많아, 영업 중 상가 전수 데이터로 바꾼다.
@@ -24,7 +24,7 @@ BACKEND_DIR = HERE.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 ZIP_GLOB = "소상공인시장진흥공단_상가(상권)정보_*.zip"
 OUTPUT_JSON = BACKEND_DIR / "data" / "osm" / "store_points.json"
-SIDO = "경기"
+SIDOS = ("서울", "경기")
 STREET_CATEGORIES = {"음식", "소매"}
 GROUND_FLOORS = {"", "1", "지", "B1"}  # 층 정보가 없거나 1층·지하1층
 
@@ -56,10 +56,17 @@ def main() -> None:
     if not zips:
         raise SystemExit(f"프로젝트 루트에 {ZIP_GLOB} 파일이 없어요")
     source = zips[-1]
+    points = {"stores": [], "convenience": []}
     with zipfile.ZipFile(source, metadata_encoding="cp949") as archive:
-        name = next(i.filename for i in archive.infolist() if f"_{SIDO}_" in i.filename)
-        rows = csv.DictReader(io.StringIO(archive.read(name).decode("utf-8-sig")))
-        points = extract(rows)
+        names = [item.filename for item in archive.infolist()]
+        for sido in SIDOS:
+            name = next((name for name in names if f"_{sido}_" in name), None)
+            if name is None:
+                raise SystemExit(f"{source.name}에 {sido} 상가정보가 없어요")
+            with archive.open(name) as raw, io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text:
+                region_points = extract(csv.DictReader(text))
+            for kind in points:
+                points[kind].extend(region_points[kind])
     payload = {"source": source.name, **points}
     OUTPUT_JSON.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     print(f"완료: 길가 상점 {len(points['stores'])}곳, 편의점 {len(points['convenience'])}곳 -> {OUTPUT_JSON}")

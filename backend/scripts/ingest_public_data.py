@@ -16,11 +16,11 @@ ponytail: 범죄 통계는 구 단위가 공개 최소 단위라 같은 구의 �
 매 실행마다 safety_zones 테이블을 통째로 다시 계산해 덮어쓴다(증분 아님).
 
 사용법:
-    backend/.venv/Scripts/python.exe scripts/ingest_public_data.py
+    backend/.venv/Scripts/python.exe -m scripts.ingest_public_data
     # 보안등 API를 다시 받지 않고 경찰서·상점·1만 명당 범죄율만 기존 DB에 다시 계산:
-    backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --refresh
+    backend/.venv/Scripts/python.exe -m scripts.ingest_public_data --refresh
     # 도로 구간별 밀도용 CCTV·보안등 좌표만 저장(API ~1,900회, 수 분~수십 분):
-    backend/.venv/Scripts/python.exe scripts/ingest_public_data.py --dump-points
+    backend/.venv/Scripts/python.exe -m scripts.ingest_public_data --dump-points
 """
 import csv
 import io

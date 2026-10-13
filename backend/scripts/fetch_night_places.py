@@ -1,4 +1,4 @@
-"""행정안전부 지방행정 인허가 API에서 경기도의 영업 중인 편의점·유흥업소 좌표를 받아 JSON으로 저장한다.
+"""행정안전부 지방행정 인허가 API에서 서울·경기의 영업 중인 편의점·유흥업소 좌표를 받아 JSON으로 저장한다.
 
 facility_density.py가 이 파일을 읽는다 — 밤에 편의점(24시간, 여성안심지킴이집 대부분)은
 가점, 유흥주점·단란주점 근처 구간은 감점.
@@ -12,7 +12,7 @@ facility_density.py가 이 파일을 읽는다 — 밤에 편의점(24시간, �
     python scripts/fetch_night_places.py
 
 ponytail: API의 주소 LIKE 조건이 서버 오류(HTTP_ERROR)를 내서, 영업 중인 전국 업소를 다 받은 뒤
-주소로 경기도만 거른다(휴게음식점 약 2,000번 호출 — 개발계정 하루 한도 10,000건 안).
+주소로 서울·경기만 거른다(휴게음식점 약 2,000번 호출 — 개발계정 하루 한도 10,000건 안).
 """
 
 import json
@@ -32,7 +32,7 @@ OUTPUT_JSON = BACKEND_DIR / "data" / "osm" / "night_places.json"
 API_ROOT = "https://apis.data.go.kr/1741000"
 PAGE_SIZE = 100  # API 최대값
 WORKERS = 8
-SERVICE_AREA = "경기도"
+SERVICE_AREAS = ("서울특별시", "경기도")
 
 # 인허가 좌표계: 보정계수 없는 Bessel 중부원점TM(EPSG:5174) → WGS84
 _TO_WGS84 = Transformer.from_crs("EPSG:5174", "EPSG:4326", always_xy=True)
@@ -93,7 +93,7 @@ def fetch_service(service: str, key: str, keep=lambda item: True) -> list[list[f
     points = []
     for item in (i for body in bodies for i in _items(body)):
         address = item.get("ROAD_NM_ADDR") or item.get("LOTNO_ADDR") or ""
-        if address.startswith(SERVICE_AREA) and keep(item):
+        if address.startswith(SERVICE_AREAS) and keep(item):
             point = _to_point(item)
             if point:
                 points.append(point)
@@ -106,7 +106,7 @@ def _is_convenience(item: dict) -> bool:
 
 def main() -> None:
     key = _api_key()
-    print("인허가 API에서 경기도 편의점·유흥업소 받는 중... (수 분 소요)")
+    print("인허가 API에서 서울·경기 편의점·유흥업소 받는 중... (수 분 소요)")
     convenience = fetch_service("rest_cafes", key, keep=_is_convenience)
     nightlife = fetch_service("entertainment_bars", key) + fetch_service("singing_bars", key)
     payload = {

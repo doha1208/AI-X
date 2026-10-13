@@ -21,9 +21,8 @@ class Settings(BaseSettings):
     # 콤마로 구분된 허용 origin 목록. 개발 중 터널(cloudflared 등)로 외부 공유할 때
     # 여기에 프론트 공개 주소를 추가한다. "*"를 쓰면 모든 origin을 허용한다(테스트용).
     cors_allow_origins: str = "http://localhost:3000"
-    # 서비스 지역(dong_code 접두사). 프로젝트 범위는 경기도("41")만이다 — .env가 없거나
-    # 비어 있어도 서울이 섞이지 않게 기본값으로 둔다. 적재(ingest)도 이 접두사의 동만 저장한다.
-    region_scope_prefix: str = "41"
+    # 서비스 지역(dong_code 접두사). 빈 값이면 서울·경기 전체를 사용한다.
+    region_scope_prefix: str = ""
     # 공공데이터 적재 후 배치가 만드는 신뢰 가능한 경로 산출물 디렉터리.
     route_artifact_dir: str = "data/route_artifacts"
     # 산출물 버전별 경로 결과 LRU 캐시와 매니페스트 재확인 주기.
