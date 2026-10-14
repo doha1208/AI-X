@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import RoutePage from "./page";
 
 const routeSafety = vi.fn();
+const searchAddressSuggestions = vi.fn();
+
+vi.mock("@/lib/place", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/place")>(),
+  searchAddressSuggestions: (...args: unknown[]) => searchAddressSuggestions(...args),
+}));
 
 vi.mock("@/lib/api", () => ({
   routeSafety: (...args: unknown[]) => routeSafety(...args),
@@ -39,6 +45,24 @@ vi.mock("@/components/SafetyMap", async () => {
 });
 
 describe("RoutePage responsive presentation", () => {
+  it("uses the chosen destination coordinates when finding a route", async () => {
+    searchAddressSuggestions.mockImplementation((query: string) => Promise.resolve(query.includes("팔달구")
+      ? [{ label: "경기도 수원시 팔달구 인계동", lat: 37.2, lng: 127 }]
+      : [{ label: "경기도 수원시 영통구 망포동", lat: 37.24, lng: 127.06 }]));
+    routeSafety.mockRejectedValue(new Error("경로를 찾지 못했어요"));
+    render(<RoutePage />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "출발지 주소" }), { target: { value: "수원시 팔달구 인계" } });
+    fireEvent.click(await screen.findByRole("option", { name: "경기도 수원시 팔달구 인계동" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "도착지 주소" }), { target: { value: "수원시 영통구 망포" } });
+    fireEvent.click(await screen.findByRole("option", { name: "경기도 수원시 영통구 망포동" }));
+    expect(screen.getByRole("combobox", { name: "출발지 주소" })).toHaveValue("경기도 수원시 팔달구 인계동");
+    expect(screen.getByRole("combobox", { name: "도착지 주소" })).toHaveValue("경기도 수원시 영통구 망포동");
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
+
+    await waitFor(() => expect(routeSafety).toHaveBeenCalledWith(37.2, 127, 37.24, 127.06, expect.any(Object)));
+  });
+
   it("keeps one map and exposes route results through the adaptive sheet", () => {
     render(<RoutePage />);
 

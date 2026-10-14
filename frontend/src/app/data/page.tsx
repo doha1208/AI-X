@@ -18,6 +18,7 @@ const SOURCES = [
   { item: "야간 유동인구 (22~05시)", source: "경기데이터드림 유동인구_행정동 단위 집계 (KT 통신 데이터)", basis: "2026년 1~3월", note: "참여한 16개 시·군(367개 동)만 반영" },
   { item: "경찰서·지구대·파출소", source: "행정안전부 공통POI(경찰) (재난안전데이터 공유플랫폼)", basis: "2024년 3월 갱신분", note: "치안센터·안심부스는 제외" },
   { item: "공원·하천, 보행 도로망", source: "OpenStreetMap", basis: "2026년 9월", note: "" },
+  { item: "주소 검색의 경기도 역 이름·위치", source: "OpenStreetMap", basis: "로컬 OSM 원본 추출", note: "초성 검색 후보에 사용" },
   { item: "행정동 경계", source: "통계청 SGIS 행정동 경계 (vuski/admdongkor 가공)", basis: "", note: "" },
 ];
 

@@ -13,6 +13,7 @@ import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { RoutePeek, type RoutePeekItem } from "@/components/RoutePeek";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
@@ -280,7 +281,7 @@ function RoutePage({ search }: { search: string }) {
           <div className={styles.mobileEditor}>
             <button type="button" className={styles.mobileBack} onClick={() => setMobileEditing(null)}>← 취소</button>
             <h1>{mobileEditing === "start" ? "출발지 입력" : "도착지 입력"}</h1>
-            <input autoFocus className={styles.mobileInput} value={texts[mobileEditing]} onChange={(e) => editText(mobileEditing, e.target.value)} placeholder="주소 또는 장소를 입력하세요" />
+            <AddressSearchInput autoFocus className={styles.mobileInput} containerClassName={styles.mobileAddressInput} value={texts[mobileEditing]} onChange={(value) => editText(mobileEditing, value)} onSelect={(place) => setPlace(mobileEditing, place)} placeholder="주소 또는 장소를 입력하세요" ariaLabel={mobileEditing === "start" ? "출발지 주소" : "도착지 주소"} />
             <div className={styles.mobileActions}>
               {mobileEditing === "start" && <button type="button" onClick={setStartToCurrentLocation}>현재 위치</button>}
               <button type="button" onClick={() => { setPicking(mobileEditing); setMobileEditing(null); }}>지도에서 선택</button>
@@ -324,12 +325,13 @@ function RoutePage({ search }: { search: string }) {
                   {fields.map(({ key, placeholder, dot }) => (
                     <div key={key} className={styles.field}>
                       <span className={`${styles.dot} ${dot}`} aria-hidden />
-                      <input
+                      <AddressSearchInput
                         className={styles.input}
                         value={texts[key]}
-                        onChange={(e) => editText(key, e.target.value)}
+                        onChange={(value) => editText(key, value)}
+                        onSelect={(place) => setPlace(key, place)}
                         placeholder={placeholder}
-                        aria-label={placeholder}
+                        ariaLabel={placeholder}
                         required
                       />
                       <button

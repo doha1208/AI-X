@@ -130,6 +130,8 @@
   outline: none;
 }
 
+.mobileAddressInput { flex: 0 0 auto; }
+
 .pickButton {
   display: grid;
   place-items: center;
