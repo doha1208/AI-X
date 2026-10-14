@@ -1,7 +1,7 @@
 import scripts.ingest_public_data as ingest
 
 
-def test_store_extraction_reads_seoul_and_gyeonggi_from_archive(tmp_path, monkeypatch):
+def test_store_extraction_reads_only_gyeonggi_from_archive(tmp_path, monkeypatch):
     import csv
     import io
     import json
@@ -25,11 +25,11 @@ def test_store_extraction_reads_seoul_and_gyeonggi_from_archive(tmp_path, monkey
     extract_store_points.main()
 
     points = json.loads(output.read_text(encoding="utf-8"))
-    assert points["stores"] == [[37.55, 127.0], [37.3, 127.0]]
+    assert points["stores"] == [[37.3, 127.0]]
     assert points["convenience"] == points["stores"]
 
 
-def test_night_places_include_seoul_and_gyeonggi(monkeypatch):
+def test_night_places_include_only_gyeonggi(monkeypatch):
     from scripts import fetch_night_places
 
     items = [
@@ -40,7 +40,7 @@ def test_night_places_include_seoul_and_gyeonggi(monkeypatch):
     monkeypatch.setattr(fetch_night_places, "_fetch_page", lambda *_: {"totalCount": 3, "items": {"item": items}})
     monkeypatch.setattr(fetch_night_places, "_to_point", lambda item: [item["lat"], 127.0])
 
-    assert fetch_night_places.fetch_service("rest_cafes", "key") == [[37.57, 127.0], [37.28, 127.0]]
+    assert fetch_night_places.fetch_service("rest_cafes", "key") == [[37.28, 127.0]]
 
 
 def test_only_recent_accident_hotspots_are_used(tmp_path, monkeypatch):

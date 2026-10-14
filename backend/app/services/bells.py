@@ -6,6 +6,7 @@ ponytail: nearby_zones(app/api/safety.py)와 같은 방식(리스트 전체를 h
 """
 import json
 from pathlib import Path
+from typing import Callable
 
 from app.services.geo import haversine_km
 
@@ -32,10 +33,22 @@ def load_bell_points(path: Path = BELL_POINTS_PATH) -> list[Point]:
 
 
 def nearby_bells(
-    lat: float, lng: float, radius_km: float, points: list[Point] | None = None, limit: int = DEFAULT_BELL_LIMIT
+    lat: float,
+    lng: float,
+    radius_km: float,
+    points: list[Point] | None = None,
+    limit: int = DEFAULT_BELL_LIMIT,
+    allowed: Callable[[float, float], bool] | None = None,
 ) -> list[dict]:
     """중심점 반경 안의 비상벨 좌표를, 가까운 순으로 최대 limit개까지 {lat, lng} 목록으로 돌려준다."""
     candidates = load_bell_points() if points is None else points
     with_dist = ((haversine_km(lat, lng, p_lat, p_lng), p_lat, p_lng) for p_lat, p_lng in candidates)
-    within_radius = sorted((item for item in with_dist if item[0] <= radius_km), key=lambda item: item[0])
+    within_radius = sorted(
+        (
+            item
+            for item in with_dist
+            if item[0] <= radius_km and (allowed is None or allowed(item[1], item[2]))
+        ),
+        key=lambda item: item[0],
+    )
     return [{"lat": p_lat, "lng": p_lng} for _, p_lat, p_lng in within_radius[:limit]]

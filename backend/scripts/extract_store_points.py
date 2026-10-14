@@ -24,7 +24,7 @@ BACKEND_DIR = HERE.parent
 PROJECT_ROOT = BACKEND_DIR.parent
 ZIP_GLOB = "소상공인시장진흥공단_상가(상권)정보_*.zip"
 OUTPUT_JSON = BACKEND_DIR / "data" / "osm" / "store_points.json"
-SIDOS = "경기"
+SIDOS = ("경기",)
 STREET_CATEGORIES = {"음식", "소매"}
 GROUND_FLOORS = {"", "1", "지", "B1"}  # 층 정보가 없거나 1층·지하1층
 
