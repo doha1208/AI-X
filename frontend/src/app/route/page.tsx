@@ -281,7 +281,7 @@ function RoutePage({ search }: { search: string }) {
           <div className={styles.mobileEditor}>
             <button type="button" className={styles.mobileBack} onClick={() => setMobileEditing(null)}>← 취소</button>
             <h1>{mobileEditing === "start" ? "출발지 입력" : "도착지 입력"}</h1>
-            <AddressSearchInput autoFocus className={styles.mobileInput} containerClassName={styles.mobileAddressInput} value={texts[mobileEditing]} onChange={(value) => editText(mobileEditing, value)} onSelect={(place) => setPlace(mobileEditing, place)} placeholder="주소 또는 장소를 입력하세요" ariaLabel={mobileEditing === "start" ? "출발지 주소" : "도착지 주소"} />
+            <AddressSearchInput autoFocus inlineResults className={styles.mobileInput} containerClassName={styles.mobileAddressInput} value={texts[mobileEditing]} onChange={(value) => editText(mobileEditing, value)} onSelect={(place) => setPlace(mobileEditing, place)} placeholder="주소 또는 장소를 입력하세요" ariaLabel={mobileEditing === "start" ? "출발지 주소" : "도착지 주소"} />
             <div className={styles.mobileActions}>
               {mobileEditing === "start" && <button type="button" onClick={setStartToCurrentLocation}>현재 위치</button>}
               <button type="button" onClick={() => { setPicking(mobileEditing); setMobileEditing(null); }}>지도에서 선택</button>

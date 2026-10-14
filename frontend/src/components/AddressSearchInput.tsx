@@ -14,9 +14,10 @@ type Props = {
   containerClassName?: string;
   autoFocus?: boolean;
   required?: boolean;
+  inlineResults?: boolean;
 };
 
-export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, placeholder, className, containerClassName, autoFocus, required }: Props) {
+export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, placeholder, className, containerClassName, autoFocus, required, inlineResults = false }: Props) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedLabel = useRef<string | null>(null);
@@ -76,19 +77,22 @@ export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, place
         aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
       />
       {places.length > 0 && (
-        <div className={styles.list} id={listId} role="listbox" aria-label={`${ariaLabel} 후보`}>
-          {places.map((place, index) => (
-            <button
-              key={`${place.label}-${place.lat}-${place.lng}`}
-              id={`${listId}-${index}`}
-              type="button"
-              role="option"
-              aria-selected={index === active}
-              className={styles.option}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => choose(place)}
-            >{place.label}</button>
-          ))}
+        <div className={`${styles.list} ${inlineResults ? styles.listInline : ""}`}>
+          <div className={styles.listHeading} aria-hidden="true">검색 결과</div>
+          <div id={listId} role="listbox" aria-label={`${ariaLabel} 후보`}>
+            {places.map((place, index) => (
+              <button
+                key={`${place.label}-${place.lat}-${place.lng}`}
+                id={`${listId}-${index}`}
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                className={styles.option}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(place)}
+              >{place.label}</button>
+            ))}
+          </div>
         </div>
       )}
     </div>

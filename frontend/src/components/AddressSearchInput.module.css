@@ -23,6 +23,27 @@
   box-shadow: var(--shadow-card);
 }
 
+.listInline {
+  position: static;
+  margin-top: 8px;
+  max-height: min(220px, 32dvh);
+  padding: 0;
+  background: var(--page-bg);
+  box-shadow: none;
+}
+
+.listHeading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .option {
   display: block;
   width: 100%;
@@ -34,6 +55,11 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.listInline .option {
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
 }
 
 .option:hover,
