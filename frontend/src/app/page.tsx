@@ -18,6 +18,7 @@ import {
 import { useMyLocation } from "@/lib/useMyLocation";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { SafetyMap, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapContextMenu, MapControls, MapLegend, useMapContextMenu } from "@/components/MapOverlays";
@@ -64,6 +65,7 @@ function ResidencePage({ search }: { search: string }) {
   const [settings] = useState(loadSettings);
   const [initialNear] = useState(() => placeFromQuery(search, "near"));
   const [query, setQuery] = useState(initialNear?.label ?? "");
+  const [selectedQueryPlace, setSelectedQueryPlace] = useState<Place | null>(initialNear);
   const [allRanking, setAllRanking] = useState<SafetyZone[] | null>(null);
   const [nearby, setNearby] = useState<Nearby | null>(null);
   const [scope, setScope] = useState<"nearby" | "all">(initialNear ? "nearby" : "all");
@@ -141,7 +143,7 @@ function ResidencePage({ search }: { search: string }) {
 
   async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const place = await resolvePlace(query);
+    const place = selectedQueryPlace?.label === query ? selectedQueryPlace : await resolvePlace(query);
     if (!place) {
       setError("주소를 찾을 수 없어요. 정확한 주소를 입력하거나 지도에서 선택해주세요");
       return;
@@ -206,12 +208,13 @@ function ResidencePage({ search }: { search: string }) {
 
         <form className={styles.searchBar} onSubmit={handleSearch} role="search">
           <SearchIcon size={18} className={styles.searchIcon} />
-          <input
+          <AddressSearchInput
             className={styles.searchInput}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(value) => { setQuery(value); setSelectedQueryPlace(null); }}
+            onSelect={(place) => { setQuery(place.label); setSelectedQueryPlace(place); }}
             placeholder="동네나 주소를 검색하세요 (예: 수원시 영통구 망포동)"
-            aria-label="주소 검색"
+            ariaLabel="주소 검색"
           />
           <button
             type="button"

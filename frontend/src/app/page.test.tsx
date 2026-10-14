@@ -5,6 +5,12 @@ import ResidencePage from "./page";
 
 const residenceRecommend = vi.fn();
 const nearbyZones = vi.fn();
+const searchAddressSuggestions = vi.fn();
+
+vi.mock("@/lib/place", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/place")>(),
+  searchAddressSuggestions: (...args: unknown[]) => searchAddressSuggestions(...args),
+}));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -83,5 +89,19 @@ describe("ResidencePage responsive presentation", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "알림 닫기" }));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("searches at the address explicitly chosen from partial matches", async () => {
+    searchAddressSuggestions.mockResolvedValue([
+      { label: "경기도 수원시 영통구 망포동", lat: 37.24, lng: 127.06 },
+    ]);
+    nearbyZones.mockResolvedValue([]);
+    render(<ResidencePage />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "주소 검색" }), { target: { value: "수원시 영통구 망포" } });
+    fireEvent.click(await screen.findByRole("option", { name: "경기도 수원시 영통구 망포동" }));
+    fireEvent.submit(screen.getByRole("search"));
+
+    await waitFor(() => expect(nearbyZones).toHaveBeenCalledWith(37.24, 127.06, 5));
   });
 });
