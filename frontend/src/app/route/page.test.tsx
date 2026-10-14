@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import RoutePage from "./page";
 
@@ -45,6 +45,20 @@ vi.mock("@/components/SafetyMap", async () => {
 });
 
 describe("RoutePage responsive presentation", () => {
+  it("shows a failed route search error in the mobile search screen", async () => {
+    routeSafety.mockReset();
+    routeSafety.mockRejectedValue(new Error("직선거리 10km를 초과하는 보행 경로는 지원하지 않습니다"));
+    searchAddressSuggestions.mockResolvedValue([]);
+    render(<RoutePage />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "출발지 주소" }), { target: { value: "37.302813, 126.866778" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "도착지 주소" }), { target: { value: "37.566500, 126.978000" } });
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
+
+    expect(await within(screen.getByRole("region", { name: "길찾기" })).findByRole("alert"))
+      .toHaveTextContent("직선거리 10km를 초과하는 보행 경로는 지원하지 않습니다");
+  });
+
   it("uses the chosen destination coordinates when finding a route", async () => {
     searchAddressSuggestions.mockImplementation((query: string) => Promise.resolve(query.includes("팔달구")
       ? [{ label: "경기도 수원시 팔달구 인계동", lat: 37.2, lng: 127 }]

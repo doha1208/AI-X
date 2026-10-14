@@ -300,6 +300,12 @@ function RoutePage({ search }: { search: string }) {
             {history?.items.map((item) => <button key={`${item.start.lat}-${item.end.lat}`} type="button" className={styles.historyItem} onClick={() => { setPlace("start", item.start); setPlace("end", item.end); }}>{item.start.label} → {item.end.label}</button>)}
           </div>
         )}
+        {error && (
+          <p className={styles.error} role="alert">
+            <AlertIcon size={16} />
+            {error}
+          </p>
+        )}
       </section>
 
       <div ref={layoutRef} className={styles.layout} data-sheet-snap={sheetSnap} data-has-route={Boolean(route || picking)} data-picking={picking ?? undefined}>
