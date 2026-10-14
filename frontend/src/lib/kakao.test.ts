@@ -22,3 +22,12 @@ it("returns named Kakao places with coordinates and a distinguishing address", a
     { name: "상록수역", label: "상록수역 · 경기 안산시 상록구", lat: 37.302, lng: 126.846 },
   ]);
 });
+
+it("filters Kakao keyword search to subway stations when requested", async () => {
+  const keywordSearch = vi.fn((_query, callback: (results: unknown[], status: string) => void) => callback([], "OK"));
+  window.kakao = { maps: { Map: class {}, services: { Status: { OK: "OK" }, Places: class { keywordSearch = keywordSearch; } } } } as unknown as KakaoSdk;
+
+  await searchKakaoPlaces("상", 2, "SW8");
+
+  expect(keywordSearch).toHaveBeenCalledWith("상", expect.any(Function), { page: 2, size: 15, category_group_code: "SW8" });
+});

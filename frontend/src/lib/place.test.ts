@@ -56,14 +56,45 @@ it("checks a completed-syllable prefix when Kakao does not recognize mixed input
   ]);
 });
 
-it("matches consonant-only input against the local station index", async () => {
-  expect(await searchAddressSuggestions("ㅅㄹㅅ")).toContainEqual({
-    label: "상록수역", lat: 37.302813, lng: 126.866778,
-  });
+it("matches consonant-only input only when Kakao supplies a matching place", async () => {
+  searchKakaoPlaces.mockResolvedValue([
+    { name: "상록수역", label: "상록수역 · 경기 안산시", lat: 37.3028, lng: 126.8668 },
+  ]);
+  expect(await searchAddressSuggestions("ㅅㄹㅅ")).toEqual([
+    { label: "상록수역 · 경기 안산시", lat: 37.3028, lng: 126.8668 },
+  ]);
 });
 
-it("offers the bundled 상록수 station for 상ㄹ even when Kakao returns nothing", async () => {
-  expect(await searchAddressSuggestions("상ㄹ")).toContainEqual({
-    label: "상록수역", lat: 37.302813, lng: 126.866778,
-  });
+it("does not fabricate a station when Kakao returns no matching candidate", async () => {
+  expect(await searchAddressSuggestions("상ㄹ")).toEqual([]);
+});
+
+it("uses a station name only to fetch the same Kakao place for mixed and completed input", async () => {
+  const kakaoPlace = { name: "상록수역 4호선", label: "상록수역 4호선 · 경기 안산시 본오동", lat: 37.3028, lng: 126.8668 };
+  searchKakaoPlaces.mockImplementation((query: string, page: number, category?: string) => Promise.resolve(
+    query === "상록수역" && category === "SW8" && page === 1 ? [kakaoPlace] : []
+  ));
+
+  const mixed = await searchAddressSuggestions("상ㄹ");
+  const completed = await searchAddressSuggestions("상록");
+  const expected = [{ label: kakaoPlace.label, lat: kakaoPlace.lat, lng: kakaoPlace.lng }];
+
+  expect(mixed).toEqual(expected);
+  expect(completed).toEqual(expected);
+  expect(searchKakaoPlaces).toHaveBeenCalledWith("상록수역", 1, "SW8");
+});
+
+it("keeps a Kakao station visible when a completed query has five other matches", async () => {
+  const station = { name: "상록수역 4호선", label: "상록수역 4호선 · 경기 안산시", lat: 37.3028, lng: 126.8668 };
+  const otherPlaces = Array.from({ length: 5 }, (_, index) => ({
+    name: `상록 상점 ${index}`, label: `상록 상점 ${index} · 경기`, lat: 37.3 + index / 100, lng: 126.8,
+  }));
+  searchKakaoPlaces.mockImplementation((query: string, _page: number, category?: string) => Promise.resolve(
+    query === "상록수역" && category === "SW8" ? [station] : query === "상록" ? otherPlaces : []
+  ));
+
+  const suggestions = await searchAddressSuggestions("상록");
+
+  expect(suggestions).toHaveLength(5);
+  expect(suggestions[0]).toEqual({ label: station.label, lat: station.lat, lng: station.lng });
 });

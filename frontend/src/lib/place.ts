@@ -36,20 +36,16 @@ function matchesQuery(text: string, query: string): boolean {
 export async function searchAddressSuggestions(text: string): Promise<Place[]> {
   const query = text.trim().replace(/\s+/g, " ");
   if (query.length < 2 || /^[-\d.,\s]+$/.test(query)) return [];
-  const hasInitial = [...query].some((char) => INITIALS.includes(char));
-  const stations = hasInitial ? stationIndex.stations
+  const stationNames = [...new Set(stationIndex.stations
     .filter((station) => matchesQuery(station.name, query))
-    .map((station) => ({
-      label: station.name.endsWith("역") ? station.name : `${station.name}역`,
-      lat: station.lat,
-      lng: station.lng,
-    })) : [];
-  if (stations.length) return stations.slice(0, 5);
-  const collect = (results: PromiseSettledResult<Place[]>[], placeResults: PromiseSettledResult<(Place & { name: string })[]>[]): Place[] => {
+    .map((station) => station.name.endsWith("역") ? station.name : `${station.name}역`))].slice(0, 5);
+  const collect = (results: PromiseSettledResult<Place[]>[], placeResults: PromiseSettledResult<(Place & { name: string })[]>[], priorityResults: PromiseSettledResult<(Place & { name: string })[]>[] = []): Place[] => {
     const addresses = results.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     const places = placeResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    const priorityPlaces = priorityResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
     const seen = new Set<string>();
     return [
+      ...priorityPlaces.filter((place) => matchesQuery(place.name, query)),
       ...addresses.filter((place) => matchesQuery(place.label, query)),
       ...places.filter((place) => matchesQuery(place.name, query)),
     ].filter((place) => {
@@ -60,22 +56,25 @@ export async function searchAddressSuggestions(text: string): Promise<Place[]> {
     }).map(({ label, lat, lng }) => ({ label, lat, lng })).slice(0, 5);
   };
 
-  const [addresses, places] = await Promise.all([
+  const [addresses, places, stationPlaces] = await Promise.all([
     Promise.allSettled([searchKakaoAddresses(query)]),
     Promise.allSettled([searchKakaoPlaces(query, 1)]),
+    Promise.allSettled(stationNames.map(async (name) => (await searchKakaoPlaces(name, 1, "SW8"))
+      .filter((place) => place.name.startsWith(name)))),
   ]);
-  const direct = collect(addresses, places);
+  const direct = collect(addresses, places, stationPlaces);
   const firstConsonant = [...query].findIndex((char) => INITIALS.includes(char));
   if (direct.length || firstConsonant < 1) return direct;
 
   // 카카오가 혼합 입력을 직접 찾지 못한 경우, 완성형 접두어 검색 결과도 검사한다.
   const prefix = query.slice(0, firstConsonant).trim();
   if (!prefix) return direct;
-  const [prefixAddresses, prefixPlaces] = await Promise.all([
+  const [prefixAddresses, prefixPlaces, prefixStations] = await Promise.all([
     Promise.allSettled([searchKakaoAddresses(prefix)]),
     Promise.allSettled([1, 2, 3].map((page) => searchKakaoPlaces(prefix, page))),
+    Promise.allSettled([1, 2, 3].map((page) => searchKakaoPlaces(prefix, page, "SW8"))),
   ]);
-  return collect(prefixAddresses, prefixPlaces);
+  return collect(prefixAddresses, [...prefixStations, ...prefixPlaces]);
 }
 
 function validLatLng(lat: number, lng: number): boolean {

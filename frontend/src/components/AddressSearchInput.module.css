@@ -28,7 +28,7 @@
   margin-top: 8px;
   max-height: min(220px, 32dvh);
   padding: 0;
-  background: var(--page-bg);
+  background: var(--surface);
   box-shadow: none;
 }
 
