@@ -34,7 +34,7 @@ def run_worker(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Process score-profile artifact builds")
     parser.add_argument("--directory", type=Path, default=Path(settings.route_artifact_dir))
-    parser.add_argument("--region", default="seoul-gyeonggi")
+    parser.add_argument("--region", default="gyeonggi")
     parser.add_argument("--poll-seconds", type=int, default=settings.builder_poll_seconds)
     parser.add_argument(
         "--refresh-seconds", type=int, default=settings.builder_data_refresh_seconds

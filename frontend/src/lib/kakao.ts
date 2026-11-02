@@ -41,10 +41,18 @@ export type KakaoMouseEvent = {
 };
 
 type KakaoAddressResult = {
+  address_name?: string;
   x: string;
   y: string;
   road_address?: { address_name?: string };
   address?: { address_name?: string };
+};
+
+type KakaoPlaceResult = {
+  place_name: string;
+  address_name: string;
+  x: string;
+  y: string;
 };
 
 export type KakaoSdk = {
@@ -66,8 +74,11 @@ export type KakaoSdk = {
     };
     services: {
       Status: { OK: string };
+      Places: new () => {
+        keywordSearch(keyword: string, callback: (result: KakaoPlaceResult[], status: string) => void, options?: { page?: number; size?: number; category_group_code?: string }): void;
+      };
       Geocoder: new () => {
-        addressSearch(address: string, callback: (result: KakaoAddressResult[], status: string) => void): void;
+        addressSearch(address: string, callback: (result: KakaoAddressResult[], status: string) => void, options?: { size?: number; analyze_type?: "EXACT" | "SIMILAR" }): void;
         coord2Address(lng: number, lat: number, callback: (result: KakaoAddressResult[], status: string) => void): void;
       };
     };
@@ -112,7 +123,38 @@ export async function geocodeAddress(address: string): Promise<LatLng | null> {
       } else {
         resolve(null);
       }
-    });
+    }, { analyze_type: "EXACT" });
+  });
+}
+
+export async function searchKakaoAddresses(query: string): Promise<{ label: string; lat: number; lng: number }[]> {
+  await loadKakaoSdk();
+  const { kakao } = window;
+  return new Promise((resolve) => {
+    new kakao.maps.services.Geocoder().addressSearch(query, (results, status) => {
+      if (status !== kakao.maps.services.Status.OK) return resolve([]);
+      resolve(results.map((result) => ({
+        label: result.address_name ?? result.road_address?.address_name ?? result.address?.address_name ?? "",
+        lat: Number(result.y),
+        lng: Number(result.x),
+      })));
+    }, { size: 10 });
+  });
+}
+
+export async function searchKakaoPlaces(query: string, page = 1, categoryGroupCode?: "SW8"): Promise<{ name: string; label: string; lat: number; lng: number }[]> {
+  await loadKakaoSdk();
+  const { kakao } = window;
+  return new Promise((resolve) => {
+    new kakao.maps.services.Places().keywordSearch(query, (results, status) => {
+      if (status !== kakao.maps.services.Status.OK) return resolve([]);
+      resolve(results.map((result) => ({
+        name: result.place_name,
+        label: result.address_name ? `${result.place_name} · ${result.address_name}` : result.place_name,
+        lat: Number(result.y),
+        lng: Number(result.x),
+      })));
+    }, { page, size: 15, ...(categoryGroupCode ? { category_group_code: categoryGroupCode } : {}) });
   });
 }
 

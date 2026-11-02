@@ -1,6 +1,48 @@
 import scripts.ingest_public_data as ingest
 
 
+def test_store_extraction_reads_only_gyeonggi_from_archive(tmp_path, monkeypatch):
+    import csv
+    import io
+    import json
+    import zipfile
+
+    from scripts import extract_store_points
+
+    source = tmp_path / "소상공인시장진흥공단_상가(상권)정보_20260630.zip"
+    fields = ["상권업종대분류명", "상권업종소분류명", "층정보", "위도", "경도"]
+    with zipfile.ZipFile(source, "w") as archive:
+        for region, lat in (("서울", "37.55"), ("경기", "37.30"), ("부산", "35.18")):
+            content = io.StringIO()
+            writer = csv.DictWriter(content, fieldnames=fields)
+            writer.writeheader()
+            writer.writerow({"상권업종대분류명": "소매", "상권업종소분류명": "편의점", "층정보": "1", "위도": lat, "경도": "127.0"})
+            archive.writestr(f"상가_{region}_202606.csv", content.getvalue())
+    output = tmp_path / "store_points.json"
+    monkeypatch.setattr(extract_store_points, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(extract_store_points, "OUTPUT_JSON", output)
+
+    extract_store_points.main()
+
+    points = json.loads(output.read_text(encoding="utf-8"))
+    assert points["stores"] == [[37.3, 127.0]]
+    assert points["convenience"] == points["stores"]
+
+
+def test_night_places_include_only_gyeonggi(monkeypatch):
+    from scripts import fetch_night_places
+
+    items = [
+        {"ROAD_NM_ADDR": "서울특별시 종로구", "lat": 37.57},
+        {"ROAD_NM_ADDR": "경기도 수원시", "lat": 37.28},
+        {"ROAD_NM_ADDR": "부산광역시 중구", "lat": 35.1},
+    ]
+    monkeypatch.setattr(fetch_night_places, "_fetch_page", lambda *_: {"totalCount": 3, "items": {"item": items}})
+    monkeypatch.setattr(fetch_night_places, "_to_point", lambda item: [item["lat"], 127.0])
+
+    assert fetch_night_places.fetch_service("rest_cafes", "key") == [[37.28, 127.0]]
+
+
 def test_only_recent_accident_hotspots_are_used(tmp_path, monkeypatch):
     csv_path = tmp_path / "accidents.csv"
     rows = [

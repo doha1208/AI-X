@@ -147,7 +147,6 @@ def test_nearby_zones_use_the_current_kst_period(monkeypatch):
 
 
 def test_service_area_defaults_to_gyeonggi_only():
-    # 테스트는 conftest에서 지역 필터를 끄지만, .env에 설정이 없을 때 기본값은 경기도다.
     from app.core.config import Settings
 
     assert Settings.model_fields["region_scope_prefix"].default == "41"
@@ -350,6 +349,39 @@ def test_nearby_bells_limit_query_param_is_honored():
         assert len(res.json()) == 3
     finally:
         bells_module._cached_points = None
+
+
+def test_nearby_bells_excludes_seoul_with_gyeonggi_scope(monkeypatch):
+    from app.core.config import settings
+    from app.services import bells as bells_module
+
+    monkeypatch.setattr(settings, "region_scope_prefix", "41")
+    monkeypatch.setattr(bells_module, "_cached_points", [(37.4842, 126.9297)])
+
+    res = client.get(
+        "/safety/bells",
+        params={"lat": 37.4842, "lng": 126.9297, "radius_km": 1},
+    )
+
+    assert res.status_code == 200
+    assert res.json() == []
+
+
+def test_nearby_bells_excludes_seoul_points_near_gyeonggi(monkeypatch):
+    from app.core.config import settings
+    from app.services import bells as bells_module
+
+    gyeonggi_bell = (37.451, 126.92)
+    monkeypatch.setattr(settings, "region_scope_prefix", "41")
+    monkeypatch.setattr(bells_module, "_cached_points", [(37.47, 126.91), gyeonggi_bell])
+
+    res = client.get(
+        "/safety/bells",
+        params={"lat": 37.45, "lng": 126.92, "radius_km": 5, "limit": 2},
+    )
+
+    assert res.status_code == 200
+    assert res.json() == [{"lat": gyeonggi_bell[0], "lng": gyeonggi_bell[1]}]
 
 
 def test_route_safety_includes_shortest_route_field(monkeypatch):

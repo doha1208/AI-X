@@ -204,9 +204,9 @@ def nearby_zones(
 ):
     """반경 안의 동을 찾아 반환한다.
 
-    점수는 조회된(scoped) 동 전체를 기준으로 그때그때 다시 정규화한다 — DB에 저장된
-    safety_score 컬럼은 ingest 시점의 전체(서울+경기) 범위로 정규화돼 있어, REGION_SCOPE_PREFIX로
-    경기도만 보여줄 때 그 컬럼을 그대로 쓰면 경기도 안에서의 상대 순위와 어긋날 수 있다.
+    점수는 조회된(scoped) 동 전체를 기준으로 그때그때 다시 정규화한다. DB의
+    safety_score는 적재 시점 범위를 기준으로 계산되므로, 조회 범위나 점수 프로필이
+    달라지면 저장된 값을 그대로 사용하는 대신 현재 범위의 점수를 계산한다.
     """
     zones = scoped_zones_query(db).all()
     period = period_for()
@@ -227,7 +227,17 @@ def nearby_bells_endpoint(
     limit을 넉넉하게 올려 받은 뒤 프론트에서 실제 경로 선 근처만 다시 거르는
     용도(귀갓길)로도 쓴다 — le=1000은 그 상한.
     """
-    return nearby_bells(lat, lng, radius_km, limit=limit)
+    if not is_in_service_area(lat, lng, region_scope_prefix=settings.region_scope_prefix):
+        return []
+    return nearby_bells(
+        lat,
+        lng,
+        radius_km,
+        limit=limit,
+        allowed=lambda bell_lat, bell_lng: is_in_service_area(
+            bell_lat, bell_lng, region_scope_prefix=settings.region_scope_prefix
+        ),
+    )
 
 
 @router.get("/residence-recommend", response_model=list[SafetyZoneOut])

@@ -11,8 +11,9 @@ services:
       DATABASE_URL: sqlite:////data/app.db
       ROUTE_ARTIFACT_DIR: /artifacts
     volumes:
-      - app_data:/data
-      - route_artifacts:/artifacts
+      - ./backend/data/production:/data
+      - ./backend/data/production/route_artifacts:/artifacts
+      - ./backend/data/osm:/app/data/osm:ro
 
   artifact-builder:
     build: ./backend
@@ -25,10 +26,6 @@ services:
       DATABASE_URL: sqlite:////data/app.db
       ROUTE_ARTIFACT_DIR: /artifacts
     volumes:
-      - app_data:/data
-      - route_artifacts:/artifacts
+      - ./backend/data/production:/data
+      - ./backend/data/production/route_artifacts:/artifacts
       - ./backend/data/osm:/app/data/osm:ro
-
-volumes:
-  app_data:
-  route_artifacts:

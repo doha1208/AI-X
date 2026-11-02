@@ -50,6 +50,8 @@ Thumbs.db
 /*.mp4
 /*.zip
 /양식_원본백업/
+/개발 외 자료
+/영상_음성샘플
 
 # Codex planning and design notes are local working material, not project deliverables.
 /docs/superpowers/
