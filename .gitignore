@@ -20,6 +20,7 @@ backend/data/
 /전국교통사고다발지역표준데이터.csv
 /유동인구_행정동단위집계.csv
 /유입생활이동인구.csv
+/csv파일 모음/
 
 # Node / Next.js
 frontend/node_modules/
