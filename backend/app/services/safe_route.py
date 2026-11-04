@@ -6,6 +6,7 @@ import pickle
 import socket
 import threading
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from collections import OrderedDict
 from functools import lru_cache
@@ -470,6 +471,26 @@ def _edge_score(zone_score: float, road_score: float, local_score: float) -> flo
     )
 
 
+def _build_environment_graph(graph: nx.MultiDiGraph) -> nx.DiGraph:
+    """Independent walkable graph; parallel edges reduce by actual length, never legacy scores.
+
+    This is a bounded candidate generator, not a guarantee of retaining every parallel geometry.
+    """
+    simple = nx.DiGraph()
+    simple.add_nodes_from(graph.nodes(data=True))
+    for u, v, data in graph.edges(data=True):
+        if is_car_only(data):
+            continue
+        if simple.has_edge(u, v) and simple[u][v].get("length", 0) <= data.get("length", 0):
+            continue
+        attributes = {k: value for k, value in data.items() if k not in {"edge_score", "safety_cost"}}
+        if simple.has_edge(u, v):
+            simple[u][v].clear()
+        simple.add_edge(u, v, **attributes)
+    _keep_largest_walk_network(simple)
+    return simple
+
+
 def _build_scored_graph(
     graph: nx.MultiDiGraph,
     zones: list[SafetyZone],
@@ -591,6 +612,12 @@ def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
     return {"points": points, "score": avg_score, "distance_m": total_length}
 
 
+@dataclass(frozen=True)
+class EnvironmentSnapshot:
+    artifact: RouteArtifact
+    node_tree: cKDTree
+
+
 class RouteArtifactRuntime:
     """HTTP 요청이 읽기 전용 경로 산출물만 조회하도록 하는 런타임 보관소."""
 
@@ -641,6 +668,41 @@ class RouteArtifactRuntime:
             scores = self._artifact.score_by_period.get(period)
             return dict(scores) if scores is not None else None
 
+    def environment_snapshot(self):
+        """Return one immutable artifact reference for the whole request, including reload races."""
+        from app.services.route_environment_policy import EnvironmentPolicy
+        with self._lock:
+            artifact, tree = self._artifact, self._tree
+            if artifact is None or tree is None or artifact.schema_version != 3 or artifact.environment_model_version != "facility-access-v1":
+                return None
+            if artifact.environment_policy_fingerprint != EnvironmentPolicy().fingerprint():
+                return None
+            if artifact.environment_graph is None:
+                return None
+            return EnvironmentSnapshot(artifact, tree)
+
+    def find_environment_candidates(self, start, end, *, at, policy, snapshot=None):
+        from app.services.route_environment_search import find_candidates
+
+        snapshot = snapshot if snapshot is not None else self.environment_snapshot()
+        if snapshot is None or snapshot.artifact.environment_index is None:
+            return None
+        artifact = snapshot.artifact
+        graph = artifact.environment_graph
+        # Use this snapshot's node index; a concurrent reload cannot mix graph/node IDs.
+        tree = snapshot.node_tree
+        _, a = tree.query((start[0], start[1] * _LNG_SCALE))
+        _, b = tree.query((end[0], end[1] * _LNG_SCALE))
+        origin, destination = artifact.node_ids[int(a)], artifact.node_ids[int(b)]
+        for point, node in ((start, origin), (end, destination)):
+            if haversine_km(*point, graph.nodes[node]["y"], graph.nodes[node]["x"]) > MAX_ROUTE_NODE_SNAP_KM:
+                return None
+        try:
+            return find_candidates(graph, origin, destination, at=at, policy=policy, indexes=artifact.environment_index,
+                                   straight_km=haversine_km(*start, *end), edge_points=_edge_points)
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return None
+
     def load(self, directory: Path) -> bool:
         artifact = load_current_artifact(directory)
         if artifact is None:
@@ -672,7 +734,15 @@ class RouteArtifactRuntime:
         except OSError:
             return False
         if manifest_mtime_ns == current_mtime_ns:
-            return False
+            # Atomic replacements can share one Windows timestamp tick. Version identity,
+            # not mtime alone, determines whether the currently loaded immutable artifact changed.
+            try:
+                manifest_version = json.loads((directory / "current.json").read_text(encoding="utf-8")).get("version")
+            except (OSError, ValueError, AttributeError):
+                return False
+            with self._lock:
+                if self._artifact is not None and self._artifact.version == manifest_version:
+                    return False
 
         artifact = load_current_artifact(directory)
         if artifact is None:
@@ -761,6 +831,14 @@ def build_route_artifact(
     # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
     # 빌드마다 파일에서 다시 읽는다.
     facilities = load_facility_index()
+    from app.services.route_environment_policy import EnvironmentPolicy
+    from app.services.route_environment_sources import build_environment_index, load_environment_sources
+    from app.services.route_environment_search import annotate_environment_graph
+    environment_policy = EnvironmentPolicy()
+    environment_index = build_environment_index(load_environment_sources(Path(settings.route_environment_sources_path)))
+    environment_graph = _build_environment_graph(graph)
+    if environment_index.sources:
+        annotate_environment_graph(environment_graph, environment_index, environment_policy)
     graph_by_period: dict[Period, nx.DiGraph] = {}
     score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
@@ -771,7 +849,7 @@ def build_route_artifact(
         )
 
     # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
-    walk_graph = graph_by_period["day"]
+    walk_graph = environment_graph
     node_ids = list(walk_graph.nodes)
     node_points = np.array(
         [(walk_graph.nodes[node_id]["y"], walk_graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
@@ -785,6 +863,11 @@ def build_route_artifact(
         profile_version=profile.version,
         data_version=route_input_data_version(zones),
         score_by_period=score_by_period,
+        environment_model_version="facility-access-v1",
+        policy_version=environment_policy.version,
+        environment_index=environment_index,
+        environment_policy_fingerprint=environment_policy.fingerprint(),
+        environment_graph=environment_graph,
     )
 
 
@@ -839,6 +922,13 @@ def route_input_data_version(
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
         "route_scoring": ROUTE_SCORING_VERSION,
     }
+    from app.services.route_environment_policy import EnvironmentPolicy
+    from app.services.route_environment_sources import load_environment_sources
+    source_path = Path(settings.route_environment_sources_path)
+    payload["environment_policy"] = EnvironmentPolicy().fingerprint()
+    payload["environment_graph_preparation"] = "walk-length-parallel-v1"
+    payload["environment_manifest"] = _file_sha256(source_path)
+    payload["environment_verified_files"] = [(s.source_id, s.sha256) for s in load_environment_sources(source_path)]
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

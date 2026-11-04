@@ -70,9 +70,10 @@ class RoutePoint(BaseModel):
 
 class RouteAlternative(BaseModel):
     route_points: list[RoutePoint]
-    safety_score: float
+    safety_score: float | None
     distance_m: float
     zones_passed: list[SafetyZoneOut]
+    environment_assessment: "RouteEnvironmentAssessment | None" = None
 
 
 class RouteMissingData(BaseModel):
@@ -95,8 +96,31 @@ class RouteDataDisclosure(BaseModel):
     fallback: RouteFallback
 
 
+class RouteEnvironmentAssessment(BaseModel):
+    model_version: str
+    policy_version: str
+    status: Literal["available", "degraded", "unavailable"]
+    period: Period
+    distance_m: float
+    score: float | None
+    active_factors: list[str]
+    used_factors: list[str]
+    excluded_factors: dict[str, str]
+    factor_coverage: dict[str, float]
+    data_factor_availability_ratio: float
+    longest_support_gap_m: float | None
+    total_support_gap_m: float | None
+    gap_intervals: list[dict[str, float]]
+    source_versions: dict[str, str]
+    comparison_group_id: str
+    per_factor_gaps: dict[str, list[dict[str, float]]] = Field(default_factory=dict)
+
+
+RouteAlternative.model_rebuild()
+
+
 class RouteResponse(BaseModel):
-    safety_score: float
+    safety_score: float | None
     zones_passed: list[SafetyZoneOut]
     route_points: list[RoutePoint]
     mode: RouteMode
@@ -109,3 +133,7 @@ class RouteResponse(BaseModel):
     shortest_route_points: list[RoutePoint] | None = None
     # 최단경로가 지나는 동 — 길안내에서 안전 경로와 최단 경로를 같은 기준(동 안전지수)으로 비교하게 한다.
     shortest_zones_passed: list[SafetyZoneOut] | None = None
+    environment_assessment: RouteEnvironmentAssessment | None = None
+    comparison_environment_assessment: RouteEnvironmentAssessment | None = None
+    environment_model_applied: bool = False
+    baseline_source: Literal["tmap", "osm_shortest"] | None = None

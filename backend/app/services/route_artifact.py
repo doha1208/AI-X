@@ -15,7 +15,7 @@ from app.services.safety_score import Period
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 ARTIFACT_FILENAME = "route-artifact.pickle"
 CURRENT_MANIFEST_FILENAME = "current.json"
 
@@ -34,6 +34,12 @@ class RouteArtifact:
     score_by_period: dict[Period, dict[str, float]] = field(
         default_factory=lambda: {"day": {}, "night": {}}
     )
+    schema_version: int = SCHEMA_VERSION
+    environment_model_version: str | None = None
+    policy_version: str | None = None
+    environment_index: object | None = None
+    environment_policy_fingerprint: str | None = None
+    environment_graph: nx.DiGraph | None = None
 
 
 def _validate_version(version: str) -> None:
@@ -62,6 +68,11 @@ def _relative_artifact_path(version: str) -> Path:
 
 def _validate_artifact(artifact: RouteArtifact, manifest: dict) -> bool:
     if not isinstance(artifact, RouteArtifact):
+        return False
+    actual_schema = artifact.__dict__.get("schema_version", 2)
+    if actual_schema != manifest["schema_version"]:
+        return False
+    if actual_schema == 2 and artifact.__dict__.get("environment_model_version"):
         return False
     if artifact.version != manifest["version"] or artifact.region != manifest["region"]:
         return False
@@ -99,7 +110,7 @@ def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
         _write_json(
             temporary_dir / "metadata.json",
             {
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": artifact.schema_version,
                 "version": artifact.version,
                 "region": artifact.region,
                 "artifact_file": str(relative_path).replace("\\", "/"),
@@ -114,7 +125,7 @@ def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
         _write_json(
             manifest_tmp,
             {
-                "schema_version": SCHEMA_VERSION,
+                "schema_version": artifact.schema_version,
                 "version": artifact.version,
                 "region": artifact.region,
                 "artifact_file": str(relative_path).replace("\\", "/"),
@@ -148,7 +159,7 @@ def load_current_artifact(directory: Path) -> RouteArtifact | None:
         }
         if not isinstance(manifest, dict) or set(manifest) != required:
             raise ValueError("Route artifact manifest fields are invalid")
-        if manifest["schema_version"] != SCHEMA_VERSION:
+        if manifest["schema_version"] not in (2, SCHEMA_VERSION):
             raise ValueError("Route artifact manifest schema is unsupported")
         if not all(isinstance(manifest[field], str) and manifest[field] for field in required - {"schema_version"}):
             raise ValueError("Route artifact manifest values are invalid")
@@ -167,6 +178,7 @@ def load_current_artifact(directory: Path) -> RouteArtifact | None:
             artifact = pickle.load(f)
         if not _validate_artifact(artifact, manifest):
             raise ValueError("Route artifact contents do not match its manifest")
+        object.__setattr__(artifact, "schema_version", manifest["schema_version"])
         return artifact
     except (OSError, ValueError, TypeError, AttributeError, ImportError, IndexError, EOFError, pickle.PickleError):
         logger.warning("Current route artifact is unavailable or invalid: %s", manifest_path, exc_info=True)

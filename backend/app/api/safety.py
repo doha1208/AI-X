@@ -1,6 +1,7 @@
 import asyncio
 import math
 import time
+from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -30,6 +31,10 @@ from app.services.time_period import period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
 from app.observability import log_route, metrics
+from app.services.route_environment import RouteCandidate, evaluate_route_group
+from app.services.route_environment_policy import EnvironmentPolicy
+from app.services.route_environment_sources import EnvironmentIndex
+from app.services.route_environment_service import calculate_environment_routes
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
@@ -312,6 +317,39 @@ async def route_safety(
     score_maps, artifact_scores_used = _period_score_maps(zones)
     score_map = score_maps[period]
 
+    if settings.route_environment_model_enabled:
+        result = await calculate_environment_routes(payload, runtime=route_artifact_runtime, tmap_provider=get_pedestrian_route)
+        if result is None:
+            metrics.record_route(status_code=503, duration_seconds=time.perf_counter() - started_at, mode="failed", fallback_reason="tmap_unavailable")
+            raise HTTPException(status_code=503, detail={"reason": "pedestrian_route_unavailable", "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요."})
+        best = result.selected[0]
+        mode = "safety_weighted" if best.candidate.source == "osm" else "tmap"
+        def zone_outputs(points):
+            return [_zone_out(z, score_maps, period) for z in _zones_passed(points, zones)]
+        alternatives = [RouteAlternative(route_points=[RoutePoint(lat=a, lng=b) for a, b in r.candidate.points],
+                                         safety_score=None, distance_m=r.assessment.distance_m,
+                                         zones_passed=zone_outputs(r.candidate.points), environment_assessment=asdict(r.assessment)) for r in result.selected]
+        comparison = result.comparison
+        response = RouteResponse(safety_score=None, route_points=alternatives[0].route_points, zones_passed=alternatives[0].zones_passed,
+                                 mode=mode, period=period, alternatives=alternatives,
+                                 environment_assessment=asdict(best.assessment),
+                                 comparison_environment_assessment=asdict(comparison.assessment) if comparison else None,
+                                 environment_model_applied=True, baseline_source=result.baseline_source,
+                                 shortest_route_points=[RoutePoint(lat=a, lng=b) for a, b in comparison.candidate.points] if comparison else None,
+                                 shortest_zones_passed=zone_outputs(comparison.candidate.points) if comparison else None,
+                                 data_disclosure=_route_data_disclosure(mode=mode, zones_passed=_zones_passed(best.candidate.points,zones), artifact_used=result.artifact_used))
+        # Administrative scores remain residence metadata, never environment evidence.
+        response.data_disclosure.data_basis = ["osm_walking_network" if mode == "safety_weighted" else "tmap_pedestrian_route"]
+        if best.assessment.used_factors:
+            response.data_disclosure.data_basis.append("facility_density")
+        response.data_disclosure.missing_data = []
+        if mode == "tmap" and result.osm_available:
+            response.data_disclosure.fallback = RouteFallback(applied=False, mode="tmap", reason="none")
+        reason = "safe_route_unavailable" if response.data_disclosure.fallback.applied else "none"
+        metrics.record_route(status_code=200, duration_seconds=time.perf_counter() - started_at, mode=mode, fallback_reason=reason)
+        log_route(status_code=200, duration_seconds=time.perf_counter() - started_at, mode=mode, fallback_reason=reason)
+        return response
+
     safe_route_task = asyncio.to_thread(
         find_safe_routes,
         payload.start_lat,
@@ -381,23 +419,33 @@ async def route_safety(
             }
         ]
 
+    # Shadow assessment never reorders legacy candidates. Both engines share the frozen factor set.
+    snapshot = route_artifact_runtime.environment_snapshot()
+    indexes = snapshot.artifact.environment_index if snapshot is not None else EnvironmentIndex()
+    shadow_candidates = [RouteCandidate(str(i), c["points"], "osm" if mode == "safety_weighted" else "tmap") for i, c in enumerate(candidates)]
+    if tmap_points and mode == "safety_weighted":
+        shadow_candidates.append(RouteCandidate("comparison", tmap_points, "tmap"))
+    assessed = await asyncio.to_thread(evaluate_route_group, shadow_candidates, at=payload.at, policy=EnvironmentPolicy(), indexes=indexes)
     best = candidates[0]
     passed = [_zone_out(z, score_maps, period) for z in _zones_passed(best["points"], zones)]
     alternatives = [
         RouteAlternative(
             route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
             safety_score=c["score"],
+            environment_assessment=asdict(assessed[i].assessment),
             distance_m=c["distance_m"],
             zones_passed=[
                 _zone_out(z, score_maps, period)
                 for z in _zones_passed(c["points"], zones)
             ],
         )
-        for c in candidates
+        for i, c in enumerate(candidates)
     ]
 
     response = RouteResponse(
         safety_score=best["score"],
+        environment_assessment=asdict(assessed[0].assessment),
+        comparison_environment_assessment=asdict(assessed[-1].assessment) if len(assessed) > len(candidates) else None,
         zones_passed=passed,
         route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
         mode=mode,
