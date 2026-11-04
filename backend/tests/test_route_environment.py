@@ -57,6 +57,33 @@ def test_unverified_hours_and_cctv_purpose_are_excluded():
     assert result.score is None
 
 
+def test_partial_coordinates_are_observed_without_inventing_composite_scores():
+    bell = source("bell", [(37.5009, 127)])
+    bell.completeness = "partial"
+    shop = source("open_store", [(37.5009, 127)])
+    shop.opening_hours_evidence = None
+    result = evaluate([bell, shop])[0].assessment
+    assert result.score is None
+    assert result.observed_facility_counts["bell"] == 1
+    assert result.observed_facility_counts["store"] == 1
+    assert result.observed_factor_coverage["bell"] == 1
+    assert "open_store" not in result.observed_factor_coverage
+    assert result.excluded_factors["bell"] == "coverage_unverified"
+    assert result.excluded_factors["open_store"] == "opening_hours_unverified"
+
+
+def test_published_schedule_subset_is_reported_without_asserting_current_opening():
+    shop = source("open_store", [(37.5009, 127)])
+    shop.completeness = "partial"
+    shop.opening_hours = None
+    shop.schedule_status = "published_schedule"
+    shop.staffing_status = "unverified"
+    result = evaluate([shop, source("bell", [(37.5009, 127)])])[0].assessment
+    assert result.observed_facility_counts["store_with_published_hours"] == 1
+    assert result.score is None and "open_store" not in result.used_factors
+    assert result.longest_support_gap_m is None
+
+
 def test_closed_store_is_not_replaced_by_general_shops():
     shop = source("open_store", [(37.5009, 127)])
     shop.opening_hours = {str(d): [[600, 1200]] for d in range(7)}

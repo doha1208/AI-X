@@ -42,6 +42,8 @@ class EnvironmentAssessment:
     source_versions: dict[str, str]
     comparison_group_id: str
     per_factor_gaps: dict[str, list[dict]] = field(default_factory=dict)
+    observed_facility_counts: dict[str, int] = field(default_factory=dict)
+    observed_factor_coverage: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -96,10 +98,32 @@ def evaluate_route_environment(points, *, at, policy, indexes, sources=None, com
     score = 100 * sum(coverage.values()) / len(coverage) if len(coverage) >= 2 and length else None
     active = list(policy.active_factors(period))
     gaps = summarize_gaps(cells, observations, period=period, common_factors=common_factors)
+    observed_counts, observed_coverage = {}, {}
+    # Partial coordinates prove presence only. They never enter the composite score or gap ranking.
+    for factor in sorted({e.source.factor for e in indexes.sources}):
+        hits, schedule_hits, present = set(), set(), np.zeros(len(cells), dtype=bool)
+        for entry in indexes.sources:
+            if entry.source.factor != factor or entry.tree is None or not cells:
+                continue
+            if factor == "open_store" and entry.source.opening_hours_evidence and entry.source.opening_hours and not entry.source.is_open(at):
+                continue
+            found = entry.tree.query_ball_point(meters, r=policy.radius(factor))
+            for i, numbers in enumerate(found):
+                present[i] |= bool(numbers)
+                hits.update(entry.source.points[n] for n in numbers)
+                if entry.source.schedule_status == "published_schedule":
+                    schedule_hits.update(entry.source.points[n] for n in numbers)
+        key = "store" if factor == "open_store" else factor
+        observed_counts[key] = len(hits)
+        if factor == "open_store" and any(e.source.schedule_status == "published_schedule" for e in indexes.sources):
+            observed_counts["store_with_published_hours"] = len(schedule_hits)
+        if factor != "open_store":
+            observed_coverage[factor] = sum((c.end_m - c.start_m) for c, p in zip(cells, present) if p) / length if length else 0.0
     return EnvironmentAssessment(MODEL_VERSION, policy.version, "available" if score is not None and len(coverage) == len(active) else "degraded" if score is not None else "unavailable",
                                  period, length, score, active, sorted(common_factors), excluded_factors or {}, coverage,
                                  len(common_factors) / len(active), source_versions={e.source.source_id: e.source.sha256 for e in indexes.sources if e.source.factor in common_factors and e.source.eligible()},
-                                 comparison_group_id=comparison_group_id, **gaps)
+                                 comparison_group_id=comparison_group_id, observed_facility_counts=observed_counts,
+                                 observed_factor_coverage=observed_coverage, **gaps)
 
 
 def evaluate_route_group(candidates, *, at, policy, indexes: EnvironmentIndex) -> list[EvaluatedRoute]:

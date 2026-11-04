@@ -47,3 +47,14 @@ def test_area_filter_applies_before_result_limit():
     )
 
     assert result == [{"lat": gyeonggi_bell[0], "lng": gyeonggi_bell[1]}]
+
+
+def test_map_bells_use_the_same_published_snapshot_as_route_assessment(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import bells, safe_route
+    from app.services.route_environment_sources import build_environment_index
+    from test_route_environment import source
+    index = build_environment_index([source("bell", [NEAR])])
+    snapshot = SimpleNamespace(artifact=SimpleNamespace(version="unified-fixture", environment_index=index))
+    monkeypatch.setattr(safe_route.route_artifact_runtime, "environment_snapshot", lambda: snapshot)
+    assert bells.load_bell_points() == [NEAR]

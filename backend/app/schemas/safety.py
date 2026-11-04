@@ -158,6 +158,8 @@ class RouteEnvironmentAssessment(BaseModel):
     source_versions: dict[str, str]
     comparison_group_id: str
     per_factor_gaps: dict[str, list[dict[str, float]]] = Field(default_factory=dict)
+    observed_facility_counts: dict[str, int] = Field(default_factory=dict)
+    observed_factor_coverage: dict[str, float] = Field(default_factory=dict)
 
 
 RouteAlternative.model_rebuild()
