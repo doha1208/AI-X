@@ -5,6 +5,7 @@ DEFAULT_SECRET_KEY = "change-me-in-.env"
 
 
 class Settings(BaseSettings):
+
     app_env: str = "development"
     secret_key: str = DEFAULT_SECRET_KEY
     algorithm: str = "HS256"
@@ -30,9 +31,11 @@ class Settings(BaseSettings):
     region_scope_prefix: str = "41"
     # 공공데이터 적재 후 배치가 만드는 신뢰 가능한 경로 산출물 디렉터리.
     route_artifact_dir: str = "data/route_artifacts"
-    # Prototype stays in shadow mode until source completeness and route comparisons are verified.
     route_environment_model_enabled: bool = False
-    route_environment_sources_path: str = "data/osm/environment_sources.json"
+    route_environment_sources_path: str = "data/production/route_sources/environment_sources.json"
+    route_source_catalog_path: str = "data/route_source_catalog.json"
+    route_builder_auto_start: bool = True
+    route_validation_cases_path: str = "data/route_validation_cases.json"
     # 산출물 버전별 경로 결과 LRU 캐시와 매니페스트 재확인 주기.
     route_result_cache_size: int = 2048
     route_artifact_reload_seconds: int = 60

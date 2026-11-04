@@ -63,10 +63,11 @@ LOCAL_WALK_GRAPH_CACHE_PATH = LOCAL_WALK_NETWORK_PATH.with_suffix(".graph.pickle
 
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
+_local_graph_fingerprint: str | None = None
 _local_graph_lock = threading.Lock()
 
 
-def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
+def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> bool:
     # 저장 도중 죽어도 기존 캐시가 깨지지 않게 임시 파일에 쓴 뒤 교체한다.
     # 캐시 저장 실패는 치명적이지 않다 — 다음 시작에 XML을 다시 파싱하면 된다.
     tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
@@ -74,9 +75,11 @@ def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
         with tmp.open("wb") as f:
             pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
         tmp.replace(cache_path)
+        return True
     except Exception:
         logger.warning("Failed to write graph cache %s", cache_path, exc_info=True)
         tmp.unlink(missing_ok=True)
+        return False
 
 
 def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiDiGraph:
@@ -86,14 +89,24 @@ def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiD
     ponytail: 이 프로젝트가 직접 만든 로컬 파일만 읽는다(pickle은 신뢰할 수 없는
     파일을 열면 위험) — 사용자 업로드 경로에는 절대 쓰지 말 것.
     """
-    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime:
+    from app.services.route_environment_inputs import atomic_json
+    fingerprint = _file_sha256(xml_path)
+    source_path = cache_path.with_suffix(cache_path.suffix + ".source.json")
+    try:
+        recorded = json.loads(source_path.read_text(encoding="utf-8")).get("sha256")
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime and recorded == fingerprint:
         try:
             with cache_path.open("rb") as f:
-                return pickle.load(f)
+                graph = pickle.load(f)
+            atomic_json(source_path, {"sha256": fingerprint})
+            return graph
         except Exception:
             logger.warning("Graph cache unreadable, re-parsing XML: %s", cache_path, exc_info=True)
     graph = parse_xml(xml_path)
-    _write_graph_cache(graph, cache_path)
+    if _write_graph_cache(graph, cache_path):
+        atomic_json(source_path, {"sha256": fingerprint})
     return graph
 
 
@@ -101,13 +114,15 @@ def _load_local_graph() -> nx.MultiDiGraph | None:
     """서울+경기 보행자 도로망(약 400MB XML) 파싱에 수 분이 걸린다. 플래그만으로
     가드하면 로딩 중 들어온 동시 요청이 아직 None인 _local_graph를 받아
     Overpass 실시간 폴백으로 새 지연을 겪는다 — 락으로 대기시켜 막는다."""
-    global _local_graph, _local_graph_attempted
-    if _local_graph_attempted:
+    global _local_graph, _local_graph_attempted, _local_graph_fingerprint
+    fingerprint = _file_sha256(LOCAL_WALK_NETWORK_PATH)
+    if _local_graph_attempted and _local_graph_fingerprint == fingerprint:
         return _local_graph
     with _local_graph_lock:
-        if _local_graph_attempted:
+        if _local_graph_attempted and _local_graph_fingerprint == fingerprint:
             return _local_graph
         _local_graph_attempted = True
+        _local_graph_fingerprint = fingerprint
         if not LOCAL_WALK_NETWORK_PATH.exists():
             return None
         try:
@@ -861,7 +876,7 @@ def build_route_artifact(
         node_ids=node_ids,
         node_points=node_points,
         profile_version=profile.version,
-        data_version=route_input_data_version(zones),
+        data_version=route_input_data_version(zones, profile=profile),
         score_by_period=score_by_period,
         environment_model_version="facility-access-v1",
         policy_version=environment_policy.version,
@@ -909,6 +924,8 @@ def route_input_data_version(
     isolated_areas_path: Path = ISOLATED_AREAS_PATH,
     night_places_path: Path = NIGHT_PLACES_PATH,
     store_points_path: Path = STORE_POINTS_PATH,
+    graph_path: Path | None = None,
+    profile: ScoringProfile = DEFAULT_SCORING_PROFILE,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
@@ -921,6 +938,9 @@ def route_input_data_version(
         "store_points": _file_sha256(store_points_path),
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
         "route_scoring": ROUTE_SCORING_VERSION,
+        "route_engine": "facility-only-v1",
+        "walking_network": _file_sha256(graph_path or LOCAL_WALK_NETWORK_PATH),
+        "profile": {"version": profile.version, "weights": {k: dict(v) for k, v in profile.weights.items()}, "unknown_score": profile.unknown_score},
     }
     from app.services.route_environment_policy import EnvironmentPolicy
     from app.services.route_environment_sources import load_environment_sources

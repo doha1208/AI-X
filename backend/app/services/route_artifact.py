@@ -87,7 +87,7 @@ def _validate_artifact(artifact: RouteArtifact, manifest: dict) -> bool:
     return artifact.node_points.ndim == 2 and artifact.node_points.shape[1] == 2
 
 
-def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
+def publish_artifact(artifact: RouteArtifact, directory: Path, *, validation_report: dict | None = None) -> Path:
     """완성된 산출물을 먼저 저장하고 마지막에 current 매니페스트를 바꾼다."""
 
     _validate_version(artifact.version)
@@ -107,6 +107,8 @@ def publish_artifact(artifact: RouteArtifact, directory: Path) -> Path:
             os.fsync(f.fileno())
 
         checksum = _sha256(temporary_artifact)
+        if validation_report is not None:
+            _write_json(temporary_dir / "validation.json", validation_report)
         _write_json(
             temporary_dir / "metadata.json",
             {
