@@ -31,3 +31,19 @@ def test_result_is_capped_to_the_closest_points():
 def test_default_limit_is_a_small_positive_number():
     # 상수 자체가 합리적인 값인지(0이거나 터무니없이 크지 않은지) 확인.
     assert 0 < DEFAULT_BELL_LIMIT <= 200
+
+
+def test_area_filter_applies_before_result_limit():
+    center = (37.45, 126.92)
+    seoul_bell = center
+    gyeonggi_bell = (37.451, 126.92)
+
+    result = nearby_bells(
+        *center,
+        radius_km=1.0,
+        points=[seoul_bell, gyeonggi_bell],
+        limit=1,
+        allowed=lambda lat, lng: (lat, lng) == gyeonggi_bell,
+    )
+
+    assert result == [{"lat": gyeonggi_bell[0], "lng": gyeonggi_bell[1]}]

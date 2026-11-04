@@ -46,6 +46,7 @@ import { SafetyAlerts } from "@/components/SafetyAlerts";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { RoutePeek } from "@/components/RoutePeek";
 import { ChoicePanel, choiceTitle } from "./ChoicePanel";
@@ -154,6 +155,7 @@ function NavigatePage({ search }: { search: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [watchKey, setWatchKey] = useState(0);
   const [query, setQuery] = useState("");
+  const [chosenAddress, setChosenAddress] = useState<Place | null>(null);
   const [picking, setPicking] = useState(false);
   const [chooseError, setChooseError] = useState<string | null>(null);
   const inFlightRef = useRef(false);
@@ -421,7 +423,7 @@ function NavigatePage({ search }: { search: string }) {
   }
 
   async function chooseByText(text: string) {
-    const place = await resolvePlace(text);
+    const place = chosenAddress?.label === text ? chosenAddress : await resolvePlace(text);
     if (place) startTo(place);
     else setChooseError("주소를 찾을 수 없어요. 정확한 주소를 입력하거나 지도에서 선택해주세요");
   }
@@ -812,12 +814,13 @@ function NavigatePage({ search }: { search: string }) {
               }}
             >
               <SearchIcon size={18} className={styles.searchIcon} />
-              <input
+              <AddressSearchInput
                 className={styles.searchInput}
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(value) => { setQuery(value); setChosenAddress(null); }}
+                onSelect={(place) => { setQuery(place.label); setChosenAddress(place); }}
                 placeholder="도착지 주소를 입력하세요"
-                aria-label="도착지 주소"
+                ariaLabel="도착지 주소"
                 required
               />
               <button type="submit" className={styles.startButton}>
