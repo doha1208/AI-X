@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { routeSafety, type RoutePeriod, type SafetyZone } from "@/lib/api";
+import { routeSafety, type RoutePeriod } from "@/lib/api";
+import { RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
 import {
@@ -32,7 +33,7 @@ import {
   nextTurn,
   progressAlong,
   walkingMinutes,
-  zoneSummary,
+  environmentPeekText,
   type GuideKind,
   type GuideOption,
   type TurnDirection,
@@ -73,8 +74,6 @@ const REROUTE_MIN_INTERVAL_MS = 5000;
 const TOAST_MS = 2500;
 // 목적지까지 이보다 가까워지면 한 번 "곧 도착"을 안내한다(30m 도착 안내와는 별개).
 const NEAR_ARRIVAL_M = 100;
-// 이 점수 미만이면 scoreLevel()이 "주의"로 분류한다 — 새로 진입할 때 한 번 음성으로 알린다.
-const CAUTION_SCORE = 40;
 // 경로 칩 + 안내 시작 버튼이 접힌 시트 안에 들어가는 높이(손잡이 44 + 칩 약 87 + 버튼 44 + 여백, 실측 기준).
 const PEEK_SHEET_HEIGHT = 204;
 // 안내 중에는 위쪽 방향 안내 카드(다음 회전)가 항상 보여야 한다 — 시트를 맨 위로 올려도 카드 아래에서 멈추게 한다.
@@ -83,19 +82,6 @@ const GUIDING_SHEET_TOP_GAP = 100;
 const SNAP_TO_ROUTE_M = 25;
 
 const TURN_TEXT: Record<TurnDirection, string> = { left: "좌회전", right: "우회전", arrive: "앞 목적지" };
-
-function scoreLevel(score: number): { label: string; tone: string } {
-  if (score >= 70) return { label: "안전", tone: styles.toneSafe };
-  if (score >= CAUTION_SCORE) return { label: "보통", tone: styles.toneCaution };
-  return { label: "주의", tone: styles.toneWarning };
-}
-
-function nearestZone(zones: SafetyZone[], here: LatLng): SafetyZone | null {
-  return zones.reduce<SafetyZone | null>(
-    (best, z) => (!best || haversineMeters(here, z) < haversineMeters(here, best) ? z : best),
-    null
-  );
-}
 
 function speak(text: string, volume: number) {
   if (!("speechSynthesis" in window)) return;
@@ -172,7 +158,6 @@ function NavigatePage({ search }: { search: string }) {
     return {
       progress,
       turn: nextTurn(guided.points, position, progress.index),
-      zone: nearestZone(guided.zones, position),
     };
   }, [guided, position]);
 
@@ -188,7 +173,7 @@ function NavigatePage({ search }: { search: string }) {
       });
       const found = guideOptions(result);
       if (purpose === "options") {
-        setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted", period: result.period });
+        setChoice({ options: found, safetyWeighted: result.environment_model_applied ? result.environment_assessment?.score != null : result.mode === "safety_weighted", period: result.period });
         // 지도앱처럼 시트는 접어 두고(경로 칩만 보임) 지도를 넓게 보여준다.
         setSheetSnap("collapsed");
       } else {
@@ -290,21 +275,6 @@ function NavigatePage({ search }: { search: string }) {
     }
     wasReroutingRef.current = rerouting;
   }, [rerouting, settings.voiceOn, settings.voiceVolume]);
-
-  const cautionZoneCode = guidance?.zone && guidance.zone.safety_score < CAUTION_SCORE ? guidance.zone.dong_code : null;
-  useEffect(() => {
-    if (!cautionZoneCode || !settings.voiceOn) return;
-    speak("주의 구역에 들어섰어요", settings.voiceVolume);
-    // 같은 주의 구역 안에서 위치가 갱신될 때마다 다시 말하지 않도록 동 코드가 바뀔 때만 반응한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cautionZoneCode, settings.voiceOn]);
-
-  // 소리를 끄고 걷는 사람도 알 수 있게 음성과 함께 화면 배너로도 바로 알린다. 음성 설정이 바뀔 때 다시 뜨지 않도록 동 코드에만 반응한다.
-  const cautionZoneName = guidance?.zone?.dong_name;
-  useEffect(() => {
-    if (cautionZoneCode) showToast(`주의 구역에 들어섰어요: ${cautionZoneName}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cautionZoneCode]);
 
   const announcedNearArrivalRef = useRef(false);
   const onRouteOnceRef = useRef(false);
@@ -469,7 +439,6 @@ function NavigatePage({ search }: { search: string }) {
   const progressPct = guidance
     ? Math.min(100, Math.max(0, Math.round((1 - guidance.progress.remainingM / Math.max(1, guidance.progress.totalM)) * 100)))
     : 0;
-  const zoneLevel = guidance?.zone ? scoreLevel(guidance.zone.safety_score) : null;
 
   return (
     <main className={styles.page}>
@@ -614,19 +583,9 @@ function NavigatePage({ search }: { search: string }) {
               </p>
             )}
 
-            {guidance?.zone && zoneLevel && (
-              <section className={styles.zoneCard} aria-label="현재 구간 안전도">
-                <p className={styles.zoneLabel}>현재 구간 안전도</p>
-                <p className={`${styles.zoneScore} ${zoneLevel.tone}`}>
-                  {guidance.zone.safety_score.toFixed(0)}
-                  <small>점</small>
-                </p>
-                <p className={styles.zoneName}>
-                  {guidance.zone.dong_name} · <span className={zoneLevel.tone}>{zoneLevel.label}</span>
-                </p>
-                <div className={styles.meter}>
-                  <span className={`${styles.meterFill} ${zoneLevel.tone}`} style={{ width: `${guidance.zone.safety_score}%` }} />
-                </div>
+            {guided && (
+              <section className={styles.zoneCard} aria-label="선택 경로 시설 정보">
+                <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
               </section>
             )}
 
@@ -671,17 +630,15 @@ function NavigatePage({ search }: { search: string }) {
                 </button>
               </div>
               <div className={styles.progressLabels}>
-                <span className={zoneLevel?.tone}>{zoneLevel ? `${zoneLevel.label} 구역 통과 중` : "안내 준비 중"}</span>
+                <span>{guidance ? "선택 경로 안내 중" : "안내 준비 중"}</span>
                 <span>{progressPct}% 이동</span>
               </div>
               <div className={styles.progress}>
                 <span className={styles.progressFill} style={{ width: `${progressPct}%` }} />
               </div>
-              {guidance?.zone && zoneLevel && (
-                <div className={styles.mobileZoneDetail} aria-label="현재 구간 안전 안내">
-                  <span>현재 구간</span>
-                  <strong className={zoneLevel.tone}>{guidance.zone.dong_name} · {guidance.zone.safety_score.toFixed(0)}점</strong>
-                  <span className={zoneLevel.tone}>{zoneLevel.label} 구역을 통과하고 있어요</span>
+              {guided && (
+                <div className={styles.mobileZoneDetail} aria-label="선택 경로 시설 정보">
+                  <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
                 </div>
               )}
               <div className={styles.mobileGuidanceActions}>
@@ -706,13 +663,12 @@ function NavigatePage({ search }: { search: string }) {
             summary={choice && previewOption ? (
               <RoutePeek
                 items={choice.options.map((option) => {
-                  const average = zoneSummary(option.zones).average;
                   return {
                     key: option.kind,
                     label: choiceTitle(option, choice, safeOption),
                     minutes: walkingMinutes(option.distanceM),
                     distance: formatDistance(option.distanceM),
-                    score: average === null ? undefined : `평균 ${average.toFixed(0)}점`,
+                    score: environmentPeekText(option.environmentAssessment),
                     active: option === previewOption,
                   };
                 })}

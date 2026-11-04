@@ -43,7 +43,7 @@ export type RouteDataDisclosure = {
 };
 
 export type RouteResult = {
-  safety_score: number;
+  safety_score: number | null;
   zones_passed: SafetyZone[];
   route_points: { lat: number; lng: number }[];
   mode: RouteMode;
@@ -53,13 +53,37 @@ export type RouteResult = {
   alternatives: RouteAlternative[];
   shortest_route_points: { lat: number; lng: number }[] | null;
   shortest_zones_passed?: SafetyZone[] | null;
+  environment_assessment?: RouteEnvironmentAssessment | null;
+  comparison_environment_assessment?: RouteEnvironmentAssessment | null;
+  environment_model_applied?: boolean;
+  baseline_source?: "tmap" | "osm_shortest" | null;
 };
 
 export type RouteAlternative = {
   route_points: { lat: number; lng: number }[];
-  safety_score: number;
+  safety_score: number | null;
   distance_m: number;
   zones_passed: SafetyZone[];
+  environment_assessment?: RouteEnvironmentAssessment | null;
+};
+
+export type RouteEnvironmentAssessment = {
+  model_version: string;
+  policy_version: string;
+  status: "available" | "degraded" | "unavailable";
+  period: RoutePeriod;
+  distance_m: number;
+  score: number | null;
+  active_factors: string[];
+  used_factors: string[];
+  excluded_factors: Record<string, string>;
+  factor_coverage: Record<string, number>;
+  data_factor_availability_ratio: number;
+  longest_support_gap_m: number | null;
+  total_support_gap_m: number | null;
+  gap_intervals: { start_m: number; end_m: number }[];
+  source_versions: Record<string, string>;
+  comparison_group_id: string;
 };
 
 export type User = { id: number; email: string };

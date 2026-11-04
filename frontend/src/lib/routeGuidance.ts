@@ -1,4 +1,4 @@
-import type { RouteResult, SafetyZone } from "./api";
+import type { RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
 import { haversineMeters } from "./geo";
 import type { LatLng } from "./kakao";
 
@@ -93,7 +93,21 @@ export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): Nex
 }
 
 export type GuideKind = "safe" | "shortest";
-export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number };
+export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number; environmentAssessment?: RouteEnvironmentAssessment | null };
+
+export function supportedEnvironment(value?: RouteEnvironmentAssessment | null): RouteEnvironmentAssessment | null {
+  return value?.model_version === "facility-access-v1" && value.policy_version === "environment-v1-draft" ? value : null;
+}
+
+export function environmentScoreText(value?: RouteEnvironmentAssessment | null): string | undefined {
+  const assessment = supportedEnvironment(value);
+  return assessment?.score != null && Number.isFinite(assessment.score) ? `${assessment.score.toFixed(0)}점` : undefined;
+}
+
+export function environmentPeekText(value?: RouteEnvironmentAssessment | null): string {
+  const score = environmentScoreText(value);
+  return score ? `시설 ${score}` : "시설 평가 데이터 부족";
+}
 
 // 길안내에서 고를 수 있는 경로: 안전 경로(가장 안전한 대안)와, 있으면 최단 경로.
 export function guideOptions(result: RouteResult): GuideOption[] {
@@ -104,18 +118,12 @@ export function guideOptions(result: RouteResult): GuideOption[] {
       points: best?.route_points ?? result.route_points,
       zones: best?.zones_passed ?? result.zones_passed,
       distanceM: best?.distance_m ?? pathLength(result.route_points),
+      environmentAssessment: supportedEnvironment(best?.environment_assessment ?? result.environment_assessment),
     },
   ];
   const shortest = result.shortest_route_points;
   if (shortest && shortest.length > 1) {
-    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest) });
+    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), environmentAssessment: supportedEnvironment(result.comparison_environment_assessment) });
   }
   return options;
-}
-
-// 두 경로를 같은 기준으로 비교한다: 지나는 동의 평균 안전지수와 "주의"(40점 미만) 동의 수.
-export function zoneSummary(zones: SafetyZone[]): { average: number | null; cautionCount: number } {
-  if (zones.length === 0) return { average: null, cautionCount: 0 };
-  const total = zones.reduce((sum, z) => sum + z.safety_score, 0);
-  return { average: total / zones.length, cautionCount: zones.filter((z) => z.safety_score < 40).length };
 }

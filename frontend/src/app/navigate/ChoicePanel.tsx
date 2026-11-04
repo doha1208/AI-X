@@ -1,16 +1,11 @@
 "use client";
 
 import type { Place } from "@/lib/place";
-import { formatDistance, walkingMinutes, zoneSummary, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
+import { formatDistance, walkingMinutes, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
+import { RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import type { RoutePeriod } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
 import styles from "./navigate.module.css";
-
-function scoreTone(score: number): string {
-  if (score >= 70) return styles.toneSafe;
-  if (score >= 40) return styles.toneCaution;
-  return styles.toneWarning;
-}
 
 export type Choice = { options: GuideOption[]; safetyWeighted: boolean; period: RoutePeriod };
 
@@ -81,7 +76,6 @@ export function ChoicePanel({
         <>
           <div className={styles.choiceList}>
             {choice.options.map((option) => {
-              const summary = zoneSummary(option.zones);
               const isSafe = option.kind === "safe";
               const title = choiceTitle(option, choice, safeOption);
               const selected = option === previewOption;
@@ -102,10 +96,7 @@ export function ChoicePanel({
                       {walkingMinutes(option.distanceM)}분 <small>{formatDistance(option.distanceM)}</small>
                     </span>
                     <span className={styles.choiceMeta}>
-                      {summary.average !== null && (
-                        <span className={scoreTone(summary.average)}>지나는 동 평균 {summary.average.toFixed(0)}점</span>
-                      )}
-                      <span>{summary.cautionCount > 0 ? `주의 구역 ${summary.cautionCount}곳` : "주의 구역 없음"}</span>
+                      <RouteEnvironmentSummary assessment={option.environmentAssessment} />
                     </span>
                     {!selected && <span className={styles.choiceHint}>눌러서 지도에서 보기</span>}
                   </button>

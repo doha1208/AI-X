@@ -8,7 +8,8 @@ import type { LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { loadSettings, routeTimeFor } from "@/lib/preferences";
 import { saveHandoff } from "@/lib/guideHandoff";
-import { formatDistance, guideOptions, walkingMinutes, zoneSummary, type GuideOption } from "@/lib/routeGuidance";
+import { formatDistance, guideOptions, walkingMinutes, environmentPeekText, type GuideOption } from "@/lib/routeGuidance";
+import { RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
@@ -46,16 +47,10 @@ function routeLegend(compareSelected: boolean, compareName: string): LegendItem[
   ];
 }
 
-function scoreTone(score: number): string {
-  if (score >= 70) return styles.scoreSafe;
-  if (score >= 40) return styles.scoreCaution;
-  return styles.scoreWarning;
-}
-
 const DATA_BASIS_LABEL: Record<RouteDataBasis, string> = {
   zone_safety_indicators: "행정동 공개 안전지표",
   osm_walking_network: "OSM 보행로 특성",
-  facility_density: "경로 주변 CCTV·보안등 밀도",
+  facility_density: "경로 주변 시설 자료",
   tmap_pedestrian_route: "Tmap 보행 경로",
 };
 
@@ -119,13 +114,12 @@ function RoutePage({ search }: { search: string }) {
   const activeOption: GuideOption | undefined =
     selected === "shortest"
       ? shortestOption
-      : activeAlt && { kind: "safe", points: activeAlt.route_points, zones: activeAlt.zones_passed, distanceM: activeAlt.distance_m };
+      : activeAlt && { kind: "safe", points: activeAlt.route_points, zones: activeAlt.zones_passed, distanceM: activeAlt.distance_m, environmentAssessment: activeAlt.environment_assessment };
   const activePoints = activeOption?.points;
   // 지도에는 고른 경로를 실선으로, 비교할 다른 경로(최단 ↔ 추천 안전)를 점선으로 그린다.
   const comparePoints = selected === "shortest" ? route?.alternatives[0]?.route_points : shortestOption?.points;
   const routeBells = useRouteBells(settings.showBells ? activePoints : undefined);
   const shortestM = shortestOption?.distanceM ?? null;
-  const shortestSummary = shortestOption ? zoneSummary(shortestOption.zones) : null;
   // 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
   const safeM = route?.alternatives[0]?.distance_m;
   const compareName = shortestM !== null && (safeM === undefined || shortestM < safeM) ? "최단 경로" : "일반 도보 경로";
@@ -134,10 +128,10 @@ function RoutePage({ search }: { search: string }) {
     ? [
         ...route.alternatives.map((alt, i) => ({
           key: String(i),
-          label: i === 0 ? "추천" : `대안 ${i}`,
+          label: i === 0 ? (route.environment_model_applied && alt.environment_assessment?.score == null ? "도보" : "추천") : `대안 ${i}`,
           minutes: walkingMinutes(alt.distance_m),
           distance: formatDistance(alt.distance_m),
-          score: `${alt.safety_score.toFixed(0)}점`,
+          score: environmentPeekText(alt.environment_assessment),
           active: alt === activeAlt,
         })),
         ...(shortestOption && shortestM !== null
@@ -147,7 +141,7 @@ function RoutePage({ search }: { search: string }) {
                 label: compareName,
                 minutes: walkingMinutes(shortestM),
                 distance: formatDistance(shortestM),
-                score: shortestSummary?.average != null ? `평균 ${shortestSummary.average.toFixed(0)}점` : undefined,
+                score: environmentPeekText(shortestOption.environmentAssessment),
                 active: selected === "shortest",
               },
             ]
@@ -430,7 +424,9 @@ function RoutePage({ search }: { search: string }) {
                     <dd>{fallbackLabel(route.data_disclosure.fallback.mode)}</dd>
                   </div>
                 </dl>
-                {route.data_disclosure.missing_data.length > 0 ? (
+                {route.environment_model_applied ? (
+                  <p className={styles.disclosureNote}>시설 지표의 사용·제외 항목은 각 경로의 시설 평가에 표시돼요. 설치 좌표의 접근성이 실제 밝기나 안전을 보장하지는 않아요.</p>
+                ) : route.data_disclosure.missing_data.length > 0 ? (
                   <ul className={styles.missingData}>
                     {route.data_disclosure.missing_data.map(({ factor, affected_zone_count }) => (
                       <li key={factor}>{MISSING_DATA_LABEL[factor]} 데이터: {affected_zone_count}개 경유 동에서 확인할 수 없음</li>
@@ -443,7 +439,7 @@ function RoutePage({ search }: { search: string }) {
                   확인할 수 없는 지표는 점수 계산에서 빼고 나머지 지표로 계산해요. <Link href="/data">데이터 출처와 기준</Link>
                 </p>
               </details>
-              {route.mode !== "safety_weighted" && (
+              {route.data_disclosure.fallback.applied && (
                 <p className={styles.fallback}>
                   <InfoIcon size={14} />
                   데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로 안내해요
@@ -461,15 +457,13 @@ function RoutePage({ search }: { search: string }) {
                   >
                     <button type="button" className={styles.routeCardMain} onClick={() => setSelected(i)}>
                       <span className={`${styles.tag} ${i === 0 ? styles.tagBest : ""}`}>
-                        {i === 0 ? "추천 1순위" : `대안 ${i}`}
+                        {i === 0 ? (route.environment_model_applied && alt.environment_assessment?.score == null ? "일반 도보 경로" : "추천 1순위") : `대안 ${i}`}
                       </span>
                       <span className={styles.routeTime}>
                         {walkingMinutes(alt.distance_m)}분 <small>{formatDistance(alt.distance_m)}</small>
                       </span>
                       <span className={styles.routeMeta}>
-                        <span className={`${styles.scoreBadge} ${scoreTone(alt.safety_score)}`}>
-                          참고 안전지수 {alt.safety_score.toFixed(0)}점
-                        </span>
+                        <RouteEnvironmentSummary assessment={alt.environment_assessment} />
                         {passed && <span className={styles.passed}>지나가는 동: {passed}</span>}
                       </span>
                     </button>
@@ -509,16 +503,7 @@ function RoutePage({ search }: { search: string }) {
                       {walkingMinutes(shortestM)}분 <small>{formatDistance(shortestM)}</small>
                     </span>
                     <span className={styles.routeMeta}>
-                      {shortestSummary?.average != null && (
-                        <span className={`${styles.scoreBadge} ${scoreTone(shortestSummary.average)}`}>
-                          지나는 동 평균 {shortestSummary.average.toFixed(0)}점
-                        </span>
-                      )}
-                      <span className={styles.passed}>
-                        {shortestSummary && shortestSummary.cautionCount > 0
-                          ? `주의 구역 ${shortestSummary.cautionCount}곳`
-                          : "주의 구역 없음"}
-                      </span>
+                      <RouteEnvironmentSummary assessment={shortestOption.environmentAssessment} />
                     </span>
                   </button>
                   {selected === "shortest" && (

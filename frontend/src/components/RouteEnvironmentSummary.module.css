@@ -1,0 +1,14 @@
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text, #26334d);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+.detail {
+  font-size: 12px;
+  color: var(--text-muted, #687386);
+  overflow-wrap: anywhere;
+}

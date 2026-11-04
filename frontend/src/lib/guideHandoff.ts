@@ -1,5 +1,6 @@
 import type { LatLng } from "./kakao";
 import type { GuideOption } from "./routeGuidance";
+import { supportedEnvironment } from "./routeGuidance";
 
 // 길찾기 탭에서 고른 경로를 길안내 탭으로 넘긴다. URL에 좌표 수백 개를 싣지 않으려고 sessionStorage를 쓴다.
 const KEY = "guide-handoff";
@@ -27,7 +28,11 @@ export function loadHandoff(end: LatLng, now = Date.now()): GuideOption | null {
       Math.abs(saved.end.lat - end.lat) < SAME_PLACE_DEG && Math.abs(saved.end.lng - end.lng) < SAME_PLACE_DEG;
     const fresh = now - saved.savedAt <= MAX_AGE_MS;
     const valid = Array.isArray(saved.option?.points) && saved.option.points.length > 1;
-    return samePlace && fresh && valid ? saved.option : null;
+    if (!(samePlace && fresh && valid)) return null;
+    if (saved.option.environmentAssessment) {
+      saved.option.environmentAssessment = supportedEnvironment(saved.option.environmentAssessment);
+    }
+    return saved.option;
   } catch {
     return null;
   }
