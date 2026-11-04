@@ -127,3 +127,49 @@ def test_overnight_hours_use_previous_weekday_after_midnight():
     shop.opening_hours = {"2": [[1320, 120]]}  # Wed 22:00 to Thu 02:00
     result = evaluate([shop, source("bell")], at=datetime(2026, 11, 5, 1, tzinfo=KST))[0].assessment
     assert result.factor_coverage["open_store"] > 0
+
+
+def test_single_verified_factor_provides_named_reference_without_composite_score():
+    result = evaluate([source("bell", [(37.5009, 127)])])[0].assessment
+    assert result.score is None
+    assert result.reference_score == 100
+    assert result.reference_factor == "bell"
+    assert result.evaluation_basis == "single_factor"
+
+
+def test_known_zero_single_factor_is_reference_zero_not_missing():
+    result = evaluate([source("bell")])[0].assessment
+    assert result.reference_score == 0
+    assert result.evaluation_basis == "single_factor"
+
+
+def test_partial_route_reports_bounds_and_verified_extent_instead_of_guessing_zero():
+    cctv = source("cctv", [(37.5009, 127)])
+    cctv.coverage_geometry = {"type": "Polygon", "coordinates": [[[126.9,37.4],[127.0002,37.4],[127.0002,37.6],[126.9,37.6],[126.9,37.4]]]}
+    result = evaluate([cctv])[0].assessment
+    assert result.score is None and result.reference_score is None
+    assert result.evaluation_basis == "partial_coverage"
+    assert 0 < result.score_bounds["lower"] < result.score_bounds["upper"] <= 100
+    assert 0 < result.factor_evaluation_ratio["cctv"] < 1
+    assert result.source_versions["cctv"] == cctv.sha256
+
+
+def test_unverified_legacy_coordinates_do_not_produce_reference_scores_or_bounds():
+    partial = source("bell", [(37.5009,127)])
+    partial.completeness = "partial"
+    result = evaluate([partial])[0].assessment
+    assert result.score is None and result.reference_score is None and result.score_bounds is None
+    assert result.evaluation_basis == "observed_only"
+
+
+def test_official_missing_coordinates_can_prove_presence_without_proving_absence():
+    partial = source("lighting", [(37.5,127)])
+    partial.completeness = "partial"
+    partial.coverage_basis = "declared_agency_boundary"
+    partial.collection_evidence = {"status":"complete","method":"official_api","response_pages":[{}],
+        "received_records":2,"expected_records":2,"coordinate_missing":1,"date_missing":0,
+        "scope":{"agency_code":"test"},"original_sha256":"a"*64}
+    result = evaluate([partial])[0].assessment
+    assert result.evaluation_basis == "partial_coverage"
+    assert result.reference_score is None
+    assert 0 < result.score_bounds["lower"] < result.score_bounds["upper"] == 100

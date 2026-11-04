@@ -160,6 +160,13 @@ class RouteEnvironmentAssessment(BaseModel):
     per_factor_gaps: dict[str, list[dict[str, float]]] = Field(default_factory=dict)
     observed_facility_counts: dict[str, int] = Field(default_factory=dict)
     observed_factor_coverage: dict[str, float] = Field(default_factory=dict)
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"] = "unavailable"
+    reference_score: float | None = None
+    reference_factor: str | None = None
+    score_bounds: dict[str, float] | None = None
+    factor_evaluation_ratio: dict[str, float] = Field(default_factory=dict)
+    verified_distance_ratio: float = 0.0
+    evidence_factors: list[str] = Field(default_factory=list)
 
 
 RouteAlternative.model_rebuild()

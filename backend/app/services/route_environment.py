@@ -44,6 +44,13 @@ class EnvironmentAssessment:
     per_factor_gaps: dict[str, list[dict]] = field(default_factory=dict)
     observed_facility_counts: dict[str, int] = field(default_factory=dict)
     observed_factor_coverage: dict[str, float] = field(default_factory=dict)
+    evaluation_basis: str = "unavailable"
+    reference_score: float | None = None
+    reference_factor: str | None = None
+    score_bounds: dict[str, float] | None = None
+    factor_evaluation_ratio: dict[str, float] = field(default_factory=dict)
+    verified_distance_ratio: float = 0.0
+    evidence_factors: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -96,6 +103,10 @@ def evaluate_route_environment(points, *, at, policy, indexes, sources=None, com
         observations[factor] = present.tolist()
         coverage[factor] = sum((c.end_m - c.start_m) for c, p in zip(cells, present) if p) / length if length else 0.0
     score = 100 * sum(coverage.values()) / len(coverage) if len(coverage) >= 2 and length else None
+    reference_factor = next(iter(coverage)) if len(coverage) == 1 and length else None
+    reference_score = 100 * coverage[reference_factor] if reference_factor else None
+    from app.services.route_environment_evidence import assess_available_evidence
+    evidence = assess_available_evidence(cells, at=at, period=period, policy=policy, indexes=indexes)
     active = list(policy.active_factors(period))
     gaps = summarize_gaps(cells, observations, period=period, common_factors=common_factors)
     observed_counts, observed_coverage = {}, {}
@@ -119,17 +130,22 @@ def evaluate_route_environment(points, *, at, policy, indexes, sources=None, com
             observed_counts["store_with_published_hours"] = len(schedule_hits)
         if factor != "open_store":
             observed_coverage[factor] = sum((c.end_m - c.start_m) for c, p in zip(cells, present) if p) / length if length else 0.0
-    return EnvironmentAssessment(MODEL_VERSION, policy.version, "available" if score is not None and len(coverage) == len(active) else "degraded" if score is not None else "unavailable",
+    basis = "multi_factor" if score is not None else "single_factor" if reference_score is not None else "partial_coverage" if evidence["bounds"] else "observed_only" if any(observed_counts.values()) else "unavailable"
+    return EnvironmentAssessment(MODEL_VERSION, policy.version, "available" if score is not None and len(coverage) == len(active) else "degraded" if basis in {"multi_factor", "single_factor", "partial_coverage"} else "unavailable",
                                  period, length, score, active, sorted(common_factors), excluded_factors or {}, coverage,
-                                 len(common_factors) / len(active), source_versions={e.source.source_id: e.source.sha256 for e in indexes.sources if e.source.factor in common_factors and e.source.eligible()},
+                                 len(common_factors) / len(active), source_versions={e.source.source_id: e.source.sha256 for e in indexes.sources if e.source.factor in set(evidence["evidence_factors"]) and e.source.presence_eligible()},
                                  comparison_group_id=comparison_group_id, observed_facility_counts=observed_counts,
-                                 observed_factor_coverage=observed_coverage, **gaps)
+                                 observed_factor_coverage=observed_coverage, evaluation_basis=basis,
+                                 reference_score=reference_score, reference_factor=reference_factor,
+                                 score_bounds=evidence["bounds"] if basis == "partial_coverage" else None,
+                                 factor_evaluation_ratio=evidence["factor_evaluation_ratio"],
+                                 verified_distance_ratio=evidence["verified_distance_ratio"], evidence_factors=evidence["evidence_factors"], **gaps)
 
 
 def evaluate_route_group(candidates, *, at, policy, indexes: EnvironmentIndex) -> list[EvaluatedRoute]:
     at = at or datetime.now(KST)
     common, excluded = eligible_factors(indexes, [c.points for c in candidates], period_for(at), policy)
-    identity = dict(policy=policy.fingerprint(), at=at.isoformat(), factors=sorted(common),
+    identity = dict(policy=policy.fingerprint(), assessment="evidence-fallback-v1", at=at.isoformat(), factors=sorted(common),
                     sources=sorted((e.source.source_id, e.source.sha256) for e in indexes.sources))
     group_id = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
     return [EvaluatedRoute(c, evaluate_route_environment(c.points, at=at, policy=policy, indexes=indexes, common_factors=common,

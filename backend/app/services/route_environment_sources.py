@@ -51,14 +51,15 @@ class FacilitySource:
     schedule_status: str | None = None
     staffing_status: str | None = None
 
-    def collection_verified(self) -> bool:
+    def collection_verified(self, *, allow_missing_coordinates=False) -> bool:
         evidence = self.collection_evidence or {}
         received = evidence.get("received_records", 0)
         return (self.coverage_basis == "declared_agency_boundary" and evidence.get("status") == "complete"
                 and evidence.get("method") in {"official_api", "official_csv"}
                 and (evidence.get("method") != "official_api" or bool(evidence.get("response_pages")))
                 and isinstance(received, int) and received > 0 and evidence.get("expected_records") == received
-                and evidence.get("coordinate_missing") == 0 and evidence.get("date_missing") == 0
+                and isinstance(evidence.get("coordinate_missing"), int) and evidence["coordinate_missing"] >= 0
+                and (allow_missing_coordinates or evidence["coordinate_missing"] == 0) and evidence.get("date_missing") == 0
                 and bool(evidence.get("scope", {}).get("agency_code"))
                 and len(evidence.get("original_sha256", "")) == 64)
 
@@ -67,6 +68,15 @@ class FacilitySource:
         return (self.factor in FACTORS and complete
                 and bool(self.coverage_geometry) and self.coordinate_crs == "EPSG:4326"
                 and bool(self.source_url) and bool(self.observed_at) and bool(self.retrieved_at) and bool(self.sha256)
+                and (self.factor != "cctv" or self.purpose == "crime_prevention")
+                and (self.factor != "open_store" or bool(self.opening_hours_evidence and self.opening_hours)))
+
+    def presence_eligible(self) -> bool:
+        """Verified positions can prove presence even when other positions are missing."""
+        if self.eligible():
+            return True
+        return (self.factor in FACTORS and self.collection_verified(allow_missing_coordinates=True)
+                and self.coordinate_crs == "EPSG:4326" and bool(self.source_url and self.observed_at and self.retrieved_at and self.sha256)
                 and (self.factor != "cctv" or self.purpose == "crime_prevention")
                 and (self.factor != "open_store" or bool(self.opening_hours_evidence and self.opening_hours)))
 
@@ -92,6 +102,16 @@ class SourceIndex:
 @dataclass
 class EnvironmentIndex:
     sources: list[SourceIndex] = field(default_factory=list)
+    coverage_by_factor: dict | None = None
+
+
+def verified_factor_coverage(indexes: EnvironmentIndex, factor: str):
+    if indexes.coverage_by_factor is None:
+        indexes.coverage_by_factor = {}
+    if factor not in indexes.coverage_by_factor:
+        areas = [e.coverage for e in indexes.sources if e.source.factor == factor and e.source.eligible() and e.coverage is not None]
+        indexes.coverage_by_factor[factor] = unary_union(areas) if areas else None
+    return indexes.coverage_by_factor[factor]
 
 
 def _project_geometry(geometry):
@@ -118,7 +138,7 @@ def eligible_factors(indexes: EnvironmentIndex, route_geometries, period, policy
     used, excluded = set(), {}
     for factor in policy.active_factors(period):
         entries = [e for e in indexes.sources if e.source.factor == factor and e.source.eligible()]
-        covered = unary_union([e.coverage for e in entries]) if entries else None
+        covered = verified_factor_coverage(indexes, factor)
         if covered is not None and routes and all(covered.covers(g.buffer(policy.radius(factor))) for g in routes):
             used.add(factor)
         else:

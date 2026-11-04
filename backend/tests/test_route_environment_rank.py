@@ -46,3 +46,27 @@ def test_cannot_mix_different_comparison_groups():
     import pytest
     with pytest.raises(ValueError, match="comparison"):
         rank_environment_routes(values, baseline_distance_m=670, policy=EnvironmentPolicy())
+
+
+def test_candidate_outside_scope_does_not_remove_baseline_verified_factors():
+    from test_route_environment import source, POINTS, NIGHT
+    from app.services.route_environment_sources import build_environment_index
+    from app.services.route_environment_rank import assess_and_select
+    cctv = source("cctv", [(37.5009,127)])
+    cctv.coverage_geometry = {"type":"Polygon","coordinates":[[[126.9,37.4],[127.00072,37.4],[127.00072,37.6],[126.9,37.6],[126.9,37.4]]]}
+    baseline = RouteCandidate("baseline",POINTS,"tmap")
+    outside = RouteCandidate("outside",[POINTS[0],(37.5009,127.00012),POINTS[-1]],"osm")
+    selected, evaluated, _ = assess_and_select([baseline,outside],baseline_id="baseline",at=NIGHT,policy=EnvironmentPolicy(),indexes=build_environment_index([cctv,source("bell")]))
+    assert selected[0].assessment.score is not None
+    assert selected[0].assessment.used_factors == ["bell","cctv"]
+    assert len(evaluated) == 1
+
+
+def test_single_factor_references_use_the_same_five_point_band():
+    values = [route("best",None,None,10),route("within",None,None,10),route("outside",None,None,10)]
+    for value, score in zip(values,[80,75,74.99]):
+        value.assessment.evaluation_basis = "single_factor"
+        value.assessment.reference_factor = "bell"
+        value.assessment.reference_score = score
+    result = rank_environment_routes(values,baseline_distance_m=670,policy=EnvironmentPolicy())
+    assert [r.candidate.candidate_id for r in result] == ["best","within"]
