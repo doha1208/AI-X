@@ -2,7 +2,7 @@
 
 import type { Place } from "@/lib/place";
 import { formatDistance, walkingMinutes, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
-import { RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
+import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import type { RoutePeriod } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
 import styles from "./navigate.module.css";
@@ -29,7 +29,7 @@ type Props = {
   onCancel: () => void;
 };
 
-// 길안내에서 목적지를 정한 뒤 "안전 경로 vs 최단 경로"를 비교해 고르는 화면.
+// 비교용 일반 경로는 별도 선택 카드로 만들지 않는다.
 export function ChoicePanel({
   destination,
   choice,
@@ -75,7 +75,7 @@ export function ChoicePanel({
       ) : (
         <>
           <div className={styles.choiceList}>
-            {choice.options.map((option) => {
+            {choice.options.filter((option) => option.kind !== "shortest").map((option) => {
               const isSafe = option.kind === "safe";
               const title = choiceTitle(option, choice, safeOption);
               const selected = option === previewOption;
@@ -101,6 +101,9 @@ export function ChoicePanel({
                     {!selected && <span className={styles.choiceHint}>눌러서 지도에서 보기</span>}
                   </button>
                   {selected && (
+                    <RouteEnvironmentDetails assessment={option.environmentAssessment} />
+                  )}
+                  {selected && (
                     <button type="button" className={styles.choiceStart} onClick={() => onChoose(option)}>
                       이 길로 안내 시작
                     </button>
@@ -109,14 +112,9 @@ export function ChoicePanel({
               );
             })}
           </div>
-          {!choice.safetyWeighted ? (
-            <p className={styles.choiceNote}>데이터 기반 추천 경로를 찾지 못해 일반 도보 경로로만 안내할 수 있어요.</p>
-          ) : (
-            choice.options.length === 1 && (
-              <p className={styles.choiceNote}>최단 경로를 가져오지 못해 데이터 기반 추천 경로로만 안내할 수 있어요.</p>
-            )
+          {!choice.safetyWeighted && (
+            <p className={styles.choiceNote}>시설 기준 추천은 준비 중이에요. 현재는 보행 경로를 안내해요.</p>
           )}
-          <p className={styles.choiceNote}>공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요.</p>
         </>
       )}
     </div>

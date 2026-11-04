@@ -1,14 +1,35 @@
 .summary {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--text, #26334d);
-  font-size: 13px;
-  line-height: 1.5;
-  text-align: left;
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
 }
-.detail {
+.scored {
+  background: #edf3fa;
+  color: var(--brand, #26334d);
+}
+.pending {
+  background: var(--surface-muted, #f3f4f6);
+  color: var(--text-muted, #687386);
+}
+.details {
   font-size: 12px;
   color: var(--text-muted, #687386);
   overflow-wrap: anywhere;
 }
+.details summary {
+  width: fit-content;
+  padding: 8px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.content {
+  display: grid;
+  gap: 6px;
+  padding: 4px 0 10px;
+  line-height: 1.5;
+}
+.content p { margin: 0; }
+.content ul { margin: 0; padding-left: 18px; }

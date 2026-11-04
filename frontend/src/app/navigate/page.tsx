@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { routeSafety, type RoutePeriod } from "@/lib/api";
-import { RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
+import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
 import {
@@ -177,7 +177,7 @@ function NavigatePage({ search }: { search: string }) {
       });
       const found = guideOptions(result);
       if (purpose === "options") {
-        setChoice({ options: found, safetyWeighted: result.environment_model_applied ? result.environment_assessment?.score != null : result.mode === "safety_weighted", period: result.period });
+        setChoice({ options: found, safetyWeighted: result.environment_model_applied === true && result.environment_assessment?.score != null, period: result.period });
         // 지도앱처럼 시트는 접어 두고(경로 칩만 보임) 지도를 넓게 보여준다.
         setSheetSnap("collapsed");
       } else {
@@ -629,6 +629,7 @@ function NavigatePage({ search }: { search: string }) {
             {guided && (
               <section className={styles.zoneCard} aria-label="선택 경로 시설 정보">
                 <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
+                <RouteEnvironmentDetails assessment={guided.environmentAssessment} />
               </section>
             )}
 
@@ -682,6 +683,7 @@ function NavigatePage({ search }: { search: string }) {
               {guided && (
                 <div className={styles.mobileZoneDetail} aria-label="선택 경로 시설 정보">
                   <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
+                  <RouteEnvironmentDetails assessment={guided.environmentAssessment} />
                 </div>
               )}
               <div className={styles.mobileGuidanceActions}>
@@ -705,7 +707,7 @@ function NavigatePage({ search }: { search: string }) {
             collapsedHeight={choice ? PEEK_SHEET_HEIGHT : undefined}
             summary={choice && previewOption ? (
               <RoutePeek
-                items={choice.options.map((option) => {
+                items={choice.options.filter((option) => option.kind !== "shortest").map((option) => {
                   return {
                     key: option.kind,
                     label: choiceTitle(option, choice, safeOption),

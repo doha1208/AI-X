@@ -68,6 +68,8 @@ export type RouteAlternative = {
 };
 
 export type RouteEnvironmentAssessment = {
+  observed_facility_counts?: Record<string, number>;
+  observed_factor_coverage?: Record<string, number>;
   model_version: string;
   policy_version: string;
   status: "available" | "degraded" | "unavailable";

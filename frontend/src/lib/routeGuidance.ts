@@ -106,7 +106,7 @@ export function environmentScoreText(value?: RouteEnvironmentAssessment | null):
 
 export function environmentPeekText(value?: RouteEnvironmentAssessment | null): string {
   const score = environmentScoreText(value);
-  return score ? `시설 ${score}` : "시설 평가 데이터 부족";
+  return score ? `시설 ${score}` : "점수 미산정";
 }
 
 // 길안내에서 고를 수 있는 경로: 안전 경로(가장 안전한 대안)와, 있으면 최단 경로.
