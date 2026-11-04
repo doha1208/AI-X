@@ -1,10 +1,18 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 
 
 DEFAULT_SECRET_KEY = "change-me-in-.env"
 
 
 class Settings(BaseSettings):
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_retired_route_switch(cls, values):
+        # Only this retired key is accepted for migration; other unknown settings still fail.
+        if isinstance(values, dict):
+            return {key: value for key, value in values.items() if key.lower() != "route_environment_model_enabled"}
+        return values
 
     app_env: str = "development"
     secret_key: str = DEFAULT_SECRET_KEY
@@ -31,7 +39,7 @@ class Settings(BaseSettings):
     region_scope_prefix: str = "41"
     # 공공데이터 적재 후 배치가 만드는 신뢰 가능한 경로 산출물 디렉터리.
     route_artifact_dir: str = "data/route_artifacts"
-    route_environment_model_enabled: bool = False
+    # Route scoring always uses the facility-access model; residence scoring remains separate.
     route_environment_sources_path: str = "data/production/route_sources/environment_sources.json"
     route_source_catalog_path: str = "data/route_source_catalog.json"
     route_builder_auto_start: bool = True

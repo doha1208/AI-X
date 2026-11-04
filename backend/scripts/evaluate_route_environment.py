@@ -43,7 +43,8 @@ def evaluate_route_pairs(cases, *, runtime, policies):
         start, end = _point(case["start"]), _point(case["end"])
         at = datetime.fromisoformat(case["at"]) if case.get("at") else datetime.now(KST)
         raw = runtime.find_environment_candidates(start, end, at=at, policy=EnvironmentPolicy(), snapshot=snapshot) if snapshot else []
-        legacy = runtime.find_routes(*start, *end, period=period_for(at), k=1) or []
+        # Historical geometry is an explicit input, never a call back into the retired engine.
+        legacy = [{"points": [_point(p) for p in case["reference_points"]]}] if case.get("reference_points") else []
         general = case.get("general_points")
         if general:
             general = RouteCandidate("general", [_point(p) for p in general], "tmap")

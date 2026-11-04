@@ -59,8 +59,8 @@ def test_offline_uses_feasible_production_pool_before_freezing_common_factors():
         def find_environment_candidates(self,*a,**kw):
             return candidates
         def find_routes(self,*a,**kw):
-            return [{"points":detour,"score":99,"distance_m":4000}]
-    report = evaluate_route_pairs([{"id":"coverage","start":POINTS[0],"end":POINTS[-1],"at":"2026-11-04T23:00:00+09:00"}],runtime=Runtime(),policies=[EnvironmentPolicy()])
+            raise AssertionError("retired route engine must not run")
+    report = evaluate_route_pairs([{"id":"coverage","start":POINTS[0],"end":POINTS[-1],"at":"2026-11-04T23:00:00+09:00","reference_points":detour}],runtime=Runtime(),policies=[EnvironmentPolicy()])
     assert report["cases"][0]["new"]["score"] is not None
     assert report["cases"][0]["new"]["used_factors"] == ["bell","cctv"]
     assert report["cases"][0]["comparison"]["new"]["score"] is None

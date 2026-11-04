@@ -719,6 +719,11 @@ class RouteArtifactRuntime:
             return None
 
     def load(self, directory: Path) -> bool:
+        try:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") != 3:
+                return False
+        except (OSError, ValueError, AttributeError):
+            return False
         artifact = load_current_artifact(directory)
         if artifact is None:
             return False
@@ -746,7 +751,9 @@ class RouteArtifactRuntime:
             manifest_stat = (directory / "current.json").stat()
             manifest_mtime_ns = manifest_stat.st_mtime_ns
             published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
-        except OSError:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") != 3:
+                return False
+        except (OSError, ValueError, AttributeError):
             return False
         if manifest_mtime_ns == current_mtime_ns:
             # Atomic replacements can share one Windows timestamp tick. Version identity,
@@ -841,27 +848,20 @@ def build_route_artifact(
     if graph is None or graph.number_of_nodes() == 0:
         raise RuntimeError("Local walking graph is required to build a route artifact")
 
-    zone_index = _build_zone_index(zones)
-    # 산출물은 공공시설 좌표의 스냅샷이다. 장기 실행되는 빌더가 이전 KD-tree를
-    # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
-    # 빌드마다 파일에서 다시 읽는다.
-    facilities = load_facility_index()
     from app.services.route_environment_policy import EnvironmentPolicy
     from app.services.route_environment_sources import build_environment_index, load_environment_sources
     from app.services.route_environment_search import annotate_environment_graph
     environment_policy = EnvironmentPolicy()
     environment_index = build_environment_index(load_environment_sources(Path(settings.route_environment_sources_path)))
     environment_graph = _build_environment_graph(graph)
-    if environment_index.sources:
+    if any(entry.source.eligible() for entry in environment_index.sources):
         annotate_environment_graph(environment_graph, environment_index, environment_policy)
-    graph_by_period: dict[Period, nx.DiGraph] = {}
+    # Route graphs carry geometry/evidence only. Dong/road mixture costs are retired.
+    graph_by_period = {"day": environment_graph, "night": environment_graph}
     score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
-        # 화면에 보여줄 동 점수(전체 요인)와 간선에 섞을 동 점수(구간 단위 요인 제외)는 다르다.
+        # Residence endpoints may reuse these maps; route selection never reads them.
         score_by_period[period] = compute_zone_period_scores(zones, period, profile=profile)
-        graph_by_period[period] = _build_scored_graph(
-            graph, zones, route_zone_scores(zones, period, profile), zone_index, period, facilities
-        )
 
     # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
     walk_graph = environment_graph

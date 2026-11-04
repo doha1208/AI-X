@@ -16,7 +16,6 @@ from test_route_environment import source, POINTS
 
 @pytest.fixture(autouse=True)
 def environment_request(monkeypatch):
-    monkeypatch.setattr(settings, "route_environment_model_enabled", True)
     monkeypatch.setattr(api, "is_in_service_area", lambda *a, **kw: True)
     monkeypatch.setattr(api, "route_request_gate", RouteRequestGate(max_concurrent=2, ip_requests_per_minute=100, ip_burst=100, user_requests_per_minute=100, user_burst=100))
     with SessionLocal() as db:
@@ -37,7 +36,7 @@ def test_both_engines_use_one_group_and_do_not_publish_legacy_dong_score(monkeyp
         return POINTS
     monkeypatch.setattr(api, "get_pedestrian_route", tmap)
     # No call to the legacy safety-weighted engine is permitted in active mode.
-    monkeypatch.setattr(api, "find_safe_routes", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("legacy engine")))
+    monkeypatch.setattr(api, "_period_score_maps", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("route must not calculate dong scores")))
     response = TestClient(app).post("/safety/route", json=PAYLOAD)
     assert response.status_code == 200
     body = response.json()
