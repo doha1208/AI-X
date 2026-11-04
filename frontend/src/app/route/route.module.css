@@ -181,7 +181,7 @@
   color: #fff;
   font-size: 15px;
   font-weight: 800;
-  box-shadow: 0 4px 12px rgba(47, 107, 58, 0.25);
+  box-shadow: 0 4px 12px rgba(31, 58, 95, 0.25);
   cursor: pointer;
 }
 
@@ -393,7 +393,7 @@ div.routeCardMain {
 }
 
 .scoreSafe {
-  background: #e3f2e5;
+  background: var(--safe-light);
   color: var(--safe);
 }
 
