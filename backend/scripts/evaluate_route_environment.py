@@ -21,7 +21,7 @@ from app.services.time_period import KST, period_for
 def sensitivity_policies():
     base = EnvironmentPolicy()
     values = [base]
-    for name, choices in (("step_m", (10, 40)), ("score_tolerance", (0, 1, 5)), ("bell_radius_m", (100, 300)),
+    for name, choices in (("step_m", (10, 40)), ("score_tolerance", (0, 1, 3)), ("bell_radius_m", (100, 300)),
                           ("max_detour_ratio", (0.1, 0.3)), ("max_extra_minutes", (2, 5))):
         values.extend(replace(base, **{name: v}) for v in choices)
     for scale in (0.5, 1.5):

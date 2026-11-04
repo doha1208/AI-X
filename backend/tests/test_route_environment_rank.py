@@ -13,9 +13,16 @@ def route(name, score, gap, minutes):
 
 
 def test_chooses_shorter_gap_within_score_tolerance_and_detour_budget():
-    values = [route("best-score", 80, 400, 20), route("short-gap", 78, 100, 23), route("too-low", 76, 0, 20), route("too-long", 80, 0, 23.01)]
+    values = [route("best-score", 80, 400, 20), route("short-gap", 78, 100, 23), route("too-low", 74, 0, 20), route("too-long", 80, 0, 23.01)]
     result = rank_environment_routes(values, baseline_distance_m=1340, policy=EnvironmentPolicy())
     assert [r.candidate.candidate_id for r in result] == ["short-gap", "best-score"]
+
+
+def test_keeps_candidates_up_to_five_points_below_best_and_excludes_lower_scores():
+    values = [route("best", 80, 400, 10), route("four-below", 76, 100, 10),
+              route("five-below", 75, 50, 10), route("over-five", 74.99, 0, 10)]
+    result = rank_environment_routes(values, baseline_distance_m=670, policy=EnvironmentPolicy())
+    assert [r.candidate.candidate_id for r in result] == ["five-below", "four-below", "best"]
 
 
 def test_short_route_uses_ratio_limit_not_just_three_minutes():

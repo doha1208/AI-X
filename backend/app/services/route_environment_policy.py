@@ -14,7 +14,7 @@ class EnvironmentPolicy:
     bell_radius_m: float = 200.0
     max_detour_ratio: float = 0.20
     max_extra_minutes: float = 3.0
-    score_tolerance: float = 3.0
+    score_tolerance: float = 5.0
 
     def __post_init__(self):
         import math
