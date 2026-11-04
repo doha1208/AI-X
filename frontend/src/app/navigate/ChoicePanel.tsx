@@ -1,7 +1,7 @@
 "use client";
 
 import type { Place } from "@/lib/place";
-import { formatDistance, walkingMinutes, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
+import { environmentAssessmentNote, formatDistance, walkingMinutes, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
 import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import type { RoutePeriod } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
@@ -113,7 +113,7 @@ export function ChoicePanel({
             })}
           </div>
           {!choice.safetyWeighted && (
-            <p className={styles.choiceNote}>시설 기준 추천은 준비 중이에요. 현재는 보행 경로를 안내해요.</p>
+            <p className={styles.choiceNote}>{environmentAssessmentNote(safeOption?.environmentAssessment)}</p>
           )}
         </>
       )}

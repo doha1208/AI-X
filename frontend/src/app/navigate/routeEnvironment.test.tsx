@@ -15,6 +15,23 @@ const assessment = {
 } satisfies RouteEnvironmentAssessment;
 
 describe("route environment presentation", () => {
+  it("shows a named single-factor reference instead of hiding verified information", () => {
+    const value = {...assessment, score:null, used_factors:["bell"], evaluation_basis:"single_factor" as const,
+      reference_score:82, reference_factor:"bell", factor_evaluation_ratio:{bell:1,cctv:0.4}};
+    render(<><RouteEnvironmentSummary assessment={value}/><RouteEnvironmentDetails assessment={value}/></>);
+    expect(screen.getByText("비상벨 참고 82점")).toBeInTheDocument();
+    expect(screen.queryByText("점수 미산정")).not.toBeInTheDocument();
+    expect(screen.queryByText("시설 82점")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("평가 상세"));
+    expect(screen.getByText(/CCTV.*40%/)).toBeVisible();
+    expect(screen.getByText(/종합.*구분/)).toBeVisible();
+  });
+  it("keeps partial evidence as a range instead of inventing a composite point score", () => {
+    render(<RouteEnvironmentSummary assessment={{...assessment,score:null,used_factors:[],evaluation_basis:"partial_coverage",
+      score_bounds:{lower:20,upper:80},verified_distance_ratio:0.4}}/>);
+    expect(screen.getByText("부분자료 20~80점")).toBeInTheDocument();
+    expect(screen.queryByText("점수 미산정")).not.toBeInTheDocument();
+  });
   it("labels facility scores and missing evidence in the initially collapsed mobile choices", () => {
     render(<RoutePeek items={[
       {key:"a",label:"추천",minutes:10,distance:"670m",score:environmentPeekText(assessment),active:true},

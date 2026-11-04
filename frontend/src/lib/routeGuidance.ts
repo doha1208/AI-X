@@ -106,7 +106,30 @@ export function environmentScoreText(value?: RouteEnvironmentAssessment | null):
 
 export function environmentPeekText(value?: RouteEnvironmentAssessment | null): string {
   const score = environmentScoreText(value);
-  return score ? `시설 ${score}` : "점수 미산정";
+  if (score) return `시설 ${score}`;
+  const assessment = supportedEnvironment(value);
+  if (assessment?.evaluation_basis === "single_factor" && assessment.reference_score != null && Number.isFinite(assessment.reference_score)) {
+    return `${REFERENCE_FACTORS[assessment.reference_factor ?? ""] ?? "시설"} 참고 ${assessment.reference_score.toFixed(0)}점`;
+  }
+  const bounds = assessment?.score_bounds;
+  if (assessment?.evaluation_basis === "partial_coverage" && bounds && Number.isFinite(bounds.lower) && Number.isFinite(bounds.upper)) {
+    return `부분자료 ${Math.floor(bounds.lower)}~${Math.ceil(bounds.upper)}점`;
+  }
+  return "점수 미산정";
+}
+
+const REFERENCE_FACTORS: Record<string,string> = {bell:"비상벨",cctv:"CCTV",lighting:"보안등",open_store:"영업 확인 상점"};
+
+export function environmentAssessmentNote(value?: RouteEnvironmentAssessment | null): string {
+  if (environmentScoreText(value)) return "시설 접근성 지수는 공개 자료에서 확인된 시설과 경로의 가까운 정도예요.";
+  const assessment = supportedEnvironment(value);
+  if (assessment?.evaluation_basis === "single_factor" && assessment.reference_score != null) {
+    return `검증된 ${REFERENCE_FACTORS[assessment.reference_factor ?? ""] ?? "시설"} 지표 하나로 계산한 참고 점수이며, 종합 시설 점수와 구분해요.`;
+  }
+  if (assessment?.evaluation_basis === "partial_coverage" && assessment.score_bounds) {
+    return "일부 구간의 공개 자료로 계산한 접근성 범위예요. 미확인 부분은 시설이 없다고 처리하지 않아요.";
+  }
+  return "종합 점수를 계산할 검증 지표가 부족해요. 확인된 시설 좌표는 아래에 표시해요.";
 }
 
 // 길안내에서 고를 수 있는 경로: 안전 경로(가장 안전한 대안)와, 있으면 최단 경로.

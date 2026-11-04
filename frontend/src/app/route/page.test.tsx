@@ -45,6 +45,27 @@ vi.mock("@/components/SafetyMap", async () => {
 });
 
 describe("RoutePage responsive presentation", () => {
+  it("explains unknown portions as bounds for partial assessments", async () => {
+    routeSafety.mockReset();
+    searchAddressSuggestions.mockResolvedValue([]);
+    const points = [{lat:37.2636,lng:127.0286},{lat:37.2666,lng:127.0316}];
+    const assessment = {model_version:"facility-access-v1",policy_version:"environment-v1-draft",status:"degraded",period:"day",
+      distance_m:700,score:null,active_factors:["cctv","bell","open_store"],used_factors:[],excluded_factors:{},
+      factor_coverage:{},data_factor_availability_ratio:0,longest_support_gap_m:null,total_support_gap_m:null,
+      gap_intervals:[],source_versions:{},comparison_group_id:"test",evaluation_basis:"partial_coverage",score_bounds:{lower:20,upper:80}};
+    routeSafety.mockResolvedValueOnce({safety_score:null,zones_passed:[],route_points:points,mode:"tmap",period:"day",
+      environment_model_applied:true,environment_assessment:assessment,
+      data_disclosure:{data_basis:["tmap_pedestrian_route"],updated_at:null,missing_data:[],fallback:{applied:false,mode:"tmap",reason:"none"}},
+      alternatives:[{route_points:points,safety_score:null,distance_m:700,zones_passed:[],environment_assessment:assessment}]});
+    render(<RoutePage/>);
+    fireEvent.change(screen.getByLabelText("출발지 주소"),{target:{value:"37.2636, 127.0286"}});
+    fireEvent.change(screen.getByLabelText("도착지 주소"),{target:{value:"37.2666, 127.0316"}});
+    fireEvent.click(screen.getByRole("button",{name:"추천 경로 찾기"}));
+    await screen.findByLabelText("경로 검색 결과");
+    fireEvent.click(screen.getByText("경로 데이터 안내"));
+    expect(screen.getByText(/미확인 부분은 제외하지 않고/)).toBeVisible();
+    expect(screen.queryByText(/확인할 수 없는 지표는 점수 계산에서 빼고/)).not.toBeInTheDocument();
+  });
   it("removes the comparison card and chip while preserving the map comparison", async () => {
     routeSafety.mockReset();
     searchAddressSuggestions.mockResolvedValue([]);

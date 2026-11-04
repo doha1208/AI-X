@@ -1,5 +1,5 @@
 import type { RouteEnvironmentAssessment } from "@/lib/api";
-import { environmentScoreText, formatDistance, supportedEnvironment } from "@/lib/routeGuidance";
+import { environmentScoreText, environmentPeekText, environmentAssessmentNote, formatDistance, supportedEnvironment } from "@/lib/routeGuidance";
 import styles from "./RouteEnvironmentSummary.module.css";
 
 const FACTORS: Record<string, string> = { cctv: "CCTV", lighting: "보안등", open_store: "영업 확인 상점", store: "상점", bell: "비상벨", store_with_published_hours: "영업시간 자료가 있는 상점" };
@@ -15,7 +15,7 @@ const REASONS: Record<string, string> = {
 
 export function RouteEnvironmentSummary({ assessment }: { assessment?: RouteEnvironmentAssessment | null }) {
   const score = environmentScoreText(assessment);
-  return <span className={`${styles.summary} ${score ? styles.scored : styles.pending}`}>{score ? `시설 ${score}` : "점수 미산정"}</span>;
+  return <span className={`${styles.summary} ${score ? styles.scored : styles.pending}`}>{environmentPeekText(assessment)}</span>;
 }
 
 export function RouteEnvironmentDetails({ assessment }: { assessment?: RouteEnvironmentAssessment | null }) {
@@ -24,20 +24,18 @@ export function RouteEnvironmentDetails({ assessment }: { assessment?: RouteEnvi
     <details className={styles.details}>
       <summary>평가 상세</summary>
       <div className={styles.content}>
-        {environmentScoreText(value) ? (
-          <p>시설 접근성 지수는 공개 자료에서 확인된 시설과 경로의 가까운 정도예요.</p>
-        ) : (
-          <p>종합 점수를 계산할 검증 지표가 부족해요. 확인된 시설 좌표는 아래에 표시해요.</p>
-        )}
+        <p>{environmentAssessmentNote(value)}</p>
         {value && <>
           {Object.keys(value.observed_facility_counts ?? {}).length > 0 && (
             <p>자료에서 확인한 주변 시설 좌표: {Object.entries(value.observed_facility_counts ?? {}).map(([factor, count]) => `${FACTORS[factor] ?? factor} ${count}개`).join(" · ")}</p>
           )}
           {(value.observed_facility_counts?.store_with_published_hours ?? 0) > 0 && <p>영업시간 자료는 일부 매장만 포함하며 방문 시각의 영업·유인 여부와 달라요.</p>}
+          {Object.entries(value.factor_evaluation_ratio ?? {}).some(([,ratio]) => ratio > 0 && ratio < 1) && <p>부분 적용: {Object.entries(value.factor_evaluation_ratio ?? {}).filter(([,ratio]) => ratio > 0 && ratio < 1).map(([factor,ratio]) => `${FACTORS[factor] ?? factor} 평가 가능 구간 ${(ratio*100).toFixed(0)}%`).join(" · ")}</p>}
+          {value.evaluation_basis === "partial_coverage" && <p>시설 근거가 확인된 구간 {((value.verified_distance_ratio ?? 0)*100).toFixed(0)}% · 범위의 상한은 미확인 부분에도 시설이 있을 경우예요.</p>}
           <p>{value.longest_support_gap_m == null ? "시설 공백 확인 불가" : `최장 시설 공백 ${value.longest_support_gap_m === 0 ? "0m" : formatDistance(value.longest_support_gap_m)}`}</p>
           <p>사용 지표 {value.used_factors.length}/{value.active_factors.length}{value.used_factors.length > 0 ? ` · ${value.used_factors.map((k) => FACTORS[k] ?? k).join(", ")}` : ""}</p>
           {Object.keys(value.excluded_factors).length > 0 && <>
-            <p>평가 제외</p>
+            <p>전 구간 비교에서 제외</p>
             <ul>{Object.entries(value.excluded_factors).map(([factor, reason]) => (
               <li key={factor}>{FACTORS[factor] ?? factor}: {REASONS[reason] ?? "평가에 필요한 자료를 확인할 수 없어요."}</li>
             ))}</ul>

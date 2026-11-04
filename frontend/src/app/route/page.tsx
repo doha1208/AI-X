@@ -8,7 +8,7 @@ import type { LatLng } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { loadSettings, routeTimeFor } from "@/lib/preferences";
 import { saveHandoff } from "@/lib/guideHandoff";
-import { formatDistance, guideOptions, walkingMinutes, environmentPeekText, environmentScoreText, type GuideOption } from "@/lib/routeGuidance";
+import { formatDistance, guideOptions, walkingMinutes, environmentPeekText, environmentScoreText, environmentAssessmentNote, type GuideOption } from "@/lib/routeGuidance";
 import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
@@ -391,7 +391,7 @@ function RoutePage({ search }: { search: string }) {
               </p>
               <p className={styles.note}>
                 <InfoIcon size={14} />
-                {facilityRankingApplied ? "공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요." : "시설 기준 추천은 준비 중이에요. 현재는 보행 경로를 안내해요."}
+                {facilityRankingApplied ? "공개 데이터 기반 참고 정보이며, 실제 안전을 보장하지 않아요." : environmentAssessmentNote(route.environment_assessment)}
               </p>
               <details className={styles.dataDisclosure}>
                 <summary>경로 데이터 안내</summary>
@@ -422,7 +422,10 @@ function RoutePage({ search }: { search: string }) {
                   <p className={styles.disclosureNote}>경유 동 기준으로 확인된 누락 데이터가 없어요.</p>
                 )}
                 <p className={styles.disclosureNote}>
-                  확인할 수 없는 지표는 점수 계산에서 빼고 나머지 지표로 계산해요. <Link href="/data">데이터 출처와 기준</Link>
+                  {route.environment_assessment?.evaluation_basis === "partial_coverage"
+                    ? "미확인 부분은 제외하지 않고, 시설이 없는 경우와 있는 경우의 범위를 표시해요. "
+                    : "전 구간에서 확인된 지표로 계산하며, 단일 지표의 참고 점수는 종합 점수와 구분해요. "}
+                  <Link href="/data">데이터 출처와 기준</Link>
                 </p>
               </details>
               {route.data_disclosure.fallback.applied && (

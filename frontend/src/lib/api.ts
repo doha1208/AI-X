@@ -68,6 +68,13 @@ export type RouteAlternative = {
 };
 
 export type RouteEnvironmentAssessment = {
+  evaluation_basis?: "multi_factor" | "single_factor" | "partial_coverage" | "observed_only" | "unavailable";
+  reference_score?: number | null;
+  reference_factor?: string | null;
+  score_bounds?: {lower:number;upper:number} | null;
+  factor_evaluation_ratio?: Record<string,number>;
+  verified_distance_ratio?: number;
+  evidence_factors?: string[];
   observed_facility_counts?: Record<string, number>;
   observed_factor_coverage?: Record<string, number>;
   model_version: string;
