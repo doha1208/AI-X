@@ -88,3 +88,37 @@ def test_source_preparation_has_a_shared_writer_lock(tmp_path):
         assert acquired
         with pytest.raises(RuntimeError, match="source_preparation_already_running"):
             prepare_environment_inputs(raw, tmp_path / "catalog.json", output)
+
+
+def test_connects_official_evidence_without_promoting_legacy_files(tmp_path):
+    from scripts.collect_route_public_sources import publish_collection
+    from test_route_public_sources import AREA, csv_bytes, row
+    raw = tmp_path / "raw"
+    raw_files(raw)
+    directory = raw / "official_sources"
+    records = publish_collection(csv_bytes([row()]), factor="cctv", agencies={"4060000": ("파주시", AREA)}, directory=directory)
+    (directory / "environment_sources.json").write_text(json.dumps({"schema_version": 1, "sources": records}), encoding="utf-8")
+    result = prepare_environment_inputs(raw, tmp_path / "catalog.json", tmp_path / "prepared")
+    loaded = load_environment_sources(result.manifest_path)
+    official = next(s for s in loaded if s.source_id == "official-cctv-4060000")
+    assert official.eligible()
+    assert next(s for s in loaded if s.source_id == "local-cctv").completeness == "partial"
+    assert official.collection_evidence["real_world_completeness"] == "unknown"
+    assert next(s for s in loaded if s.source_id == "local-cctv").points == []
+
+
+def test_published_hours_are_connected_as_evidence_not_assumed_open_or_staffed(tmp_path):
+    raw = tmp_path / "raw"
+    raw_files(raw)
+    directory = raw / "store_hours"
+    directory.mkdir()
+    payload = {"source_url": "https://m.emart24.co.kr/store", "retrieved_at": "2026-11-04T09:00:00+00:00",
+               "reported_result_count": 2, "places": [{"hours_status": "published_schedule", "point": [37.5, 127]}, {"hours_status": "unknown", "point": [37.501, 127]}]}
+    (directory / "place_hours.json").write_text(json.dumps(payload), encoding="utf-8")
+    result = prepare_environment_inputs(raw, tmp_path / "catalog.json", tmp_path / "prepared")
+    sources = load_environment_sources(result.manifest_path)
+    supplement = next(s for s in sources if s.source_id == "published-hours-emart24")
+    assert supplement.schedule_status == "published_schedule"
+    assert supplement.staffing_status == "unverified"
+    assert supplement.points == [(37.5, 127.0)]
+    assert supplement.opening_hours is None and not supplement.eligible()
