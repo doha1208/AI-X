@@ -37,8 +37,12 @@ import {
   type GuideOption,
   type TurnDirection,
 } from "@/lib/routeGuidance";
+import { bestHaven, HAVEN_LABEL, LOW_SPOT_SCORE } from "@/lib/havens";
+import { useArrivalCheck } from "@/lib/useArrivalCheck";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useRouteBells } from "@/lib/useRouteBells";
+import { useSafeHaven } from "@/lib/useSafeHaven";
+import { SafetyAlerts } from "@/components/SafetyAlerts";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
@@ -304,6 +308,35 @@ function NavigatePage({ search }: { search: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cautionZoneCode]);
 
+  // 안심 거점 안내: 지금 자리의 구간 점수가 낮으면 가장 가까운 파출소·24시 편의점을 알려준다.
+  const guidingActive = mode !== null && guided !== null && destination !== null && !arrived;
+  const spot = useSafeHaven(position, guidingActive);
+  const lowSpot = spot?.here_score != null && spot.here_score < LOW_SPOT_SCORE;
+  const haven = lowSpot && spot ? bestHaven(spot.havens) : null;
+  useEffect(() => {
+    if (!lowSpot) return;
+    navigator.vibrate?.([200, 100, 200]);
+    if (settings.voiceOn) {
+      speak(
+        haven
+          ? `밝은 시설이 적은 길이에요. 가장 가까운 ${HAVEN_LABEL[haven.kind]}은 ${formatDistance(haven.distance_m)} 거리예요`
+          : "밝은 시설이 적은 길이에요. 큰길로 걸어 주세요",
+        settings.voiceVolume
+      );
+    }
+    // 낮은 구간에 새로 들어설 때만 한 번 알린다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lowSpot]);
+
+  // 귀가 완료 확인: 예상 시간을 넘겨도 도착하지 않으면 괜찮은지 묻는다.
+  const arrival = useArrivalCheck(guidingActive && settings.arrivalCheck, guided?.distanceM ?? 0);
+  useEffect(() => {
+    if (!arrival.overdue) return;
+    navigator.vibrate?.([400, 200, 400, 200, 400]);
+    if (settings.voiceOn) speak("예상 도착 시간이 지났어요. 괜찮으세요?", settings.voiceVolume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrival.overdue]);
+
   const announcedNearArrivalRef = useRef(false);
   const onRouteOnceRef = useRef(false);
   useEffect(() => {
@@ -424,7 +457,7 @@ function NavigatePage({ search }: { search: string }) {
 
   // 등록해 둔 보호자 번호로 현재 위치가 담긴 SMS 초안을 연다 — 실제 발송은 사용자가 문자
   // 앱에서 직접 눌러야 하고, 여기서 자동으로 보내지 않는다.
-  function smsGuardians() {
+  function smsGuardians(message = "[긴급] 도움이 필요해요.") {
     const here = position ?? location;
     if (!here) {
       showToast("현재 위치를 아직 찾지 못했어요");
@@ -435,7 +468,7 @@ function NavigatePage({ search }: { search: string }) {
       showToast("내 정보에서 긴급 연락처를 먼저 등록해주세요");
       return;
     }
-    const body = `[긴급] 도움이 필요해요. 지금 위치: ${locationLink(here)}`;
+    const body = `${message} 지금 위치: ${locationLink(here)}`;
     const numbers = contacts.map((c) => c.phone.replace(/[^\d+]/g, "")).join(",");
     // iOS는 전화번호 뒤에 ?가 아니라 &로 body를 붙여야 인식한다.
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -611,6 +644,14 @@ function NavigatePage({ search }: { search: string }) {
                   : `위치 오차가 커요(약 ${Math.round(accuracyM / 10) * 10}m). 지도의 파란 원 안 어딘가에 있어요.`}
               </p>
             )}
+
+            <SafetyAlerts
+              lowSpot={lowSpot}
+              haven={haven}
+              overdue={arrival.overdue}
+              onSnooze={arrival.snooze}
+              onNotifyGuardians={() => smsGuardians("[귀가 확인] 예상 시간이 지났는데 아직 도착하지 못했어요.")}
+            />
 
             {guidance?.zone && zoneLevel && (
               <section className={styles.zoneCard} aria-label="현재 구간 안전도">
@@ -884,7 +925,7 @@ function NavigatePage({ search }: { search: string }) {
             <button
               type="button"
               className={styles.sideButton}
-              onClick={smsGuardians}
+              onClick={() => smsGuardians()}
               disabled={!myLocation}
               aria-label="보호자에게 위치 문자 보내기"
             >

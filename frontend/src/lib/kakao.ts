@@ -47,6 +47,8 @@ type KakaoAddressResult = {
   address?: { address_name?: string };
 };
 
+type KakaoPlaceResult = { place_name: string; x: string; y: string; distance: string };
+
 export type KakaoSdk = {
   maps: {
     load(callback: () => void): void;
@@ -66,6 +68,14 @@ export type KakaoSdk = {
     };
     services: {
       Status: { OK: string };
+      SortBy: { DISTANCE: string };
+      Places: new () => {
+        categorySearch(
+          code: string,
+          callback: (result: KakaoPlaceResult[], status: string) => void,
+          options: { location: KakaoLatLng; radius: number; sort: string }
+        ): void;
+      };
       Geocoder: new () => {
         addressSearch(address: string, callback: (result: KakaoAddressResult[], status: string) => void): void;
         coord2Address(lng: number, lat: number, callback: (result: KakaoAddressResult[], status: string) => void): void;
@@ -113,6 +123,30 @@ export async function geocodeAddress(address: string): Promise<LatLng | null> {
         resolve(null);
       }
     });
+  });
+}
+
+// 반경 안에서 가장 가까운 지하철역(카카오 카테고리 SW8). 없으면 null.
+export async function nearestSubway(
+  lat: number,
+  lng: number,
+  radiusM = 3000
+): Promise<(LatLng & { name: string; distanceM: number }) | null> {
+  await loadKakaoSdk();
+  const { kakao } = window;
+  return new Promise((resolve) => {
+    new kakao.maps.services.Places().categorySearch(
+      "SW8",
+      (result, status) => {
+        const first = status === kakao.maps.services.Status.OK ? result[0] : undefined;
+        resolve(
+          first
+            ? { name: first.place_name, lat: Number(first.y), lng: Number(first.x), distanceM: Number(first.distance) }
+            : null
+        );
+      },
+      { location: new kakao.maps.LatLng(lat, lng), radius: radiusM, sort: kakao.maps.services.SortBy.DISTANCE }
+    );
   });
 }
 

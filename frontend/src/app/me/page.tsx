@@ -189,6 +189,26 @@ export default function MyInfoPage() {
               <span className={styles.switchKnob} />
             </button>
           </div>
+
+          <div className={styles.settingRow}>
+            <div>
+              <p className={styles.settingLabel} id="arrival-check-setting">귀가 완료 확인</p>
+              <p className={styles.settingHint}>
+                길안내 중 예상 도착 시간이 한참 지나도 도착하지 않으면 &ldquo;괜찮으세요?&rdquo;라고 묻고, 보호자에게 위치
+                문자를 바로 보낼 수 있게 해요.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.arrivalCheck}
+              aria-labelledby="arrival-check-setting"
+              className={`${styles.switch} ${settings.arrivalCheck ? styles.switchOn : ""}`}
+              onClick={() => updateSettings({ arrivalCheck: !settings.arrivalCheck })}
+            >
+              <span className={styles.switchKnob} />
+            </button>
+          </div>
         </section>
 
         <section className={`${styles.card} ${styles.settingsCard}`}>
