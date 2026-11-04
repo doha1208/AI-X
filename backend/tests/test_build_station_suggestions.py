@@ -3,7 +3,9 @@ from pathlib import Path
 from scripts.build_station_suggestions import collect_stations
 
 
-def test_collect_stations_keeps_named_railway_stations_in_scope(tmp_path: Path):
+def test_collect_stations_keeps_named_railway_stations_in_scope(tmp_path: Path, monkeypatch):
+    # osmium은 Windows에서 한글 경로를 열지 못한다 — 임시 폴더로 들어가 상대경로를 ASCII로 만든다.
+    monkeypatch.chdir(tmp_path)
     source = tmp_path / "stations.osm"
     source.write_text(
         '<osm version="0.6">'

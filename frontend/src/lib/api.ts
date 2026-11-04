@@ -86,6 +86,36 @@ export type RouteEnvironmentAssessment = {
   comparison_group_id: string;
 };
 
+// 점수를 만든 원자료와 경기도 안 순위. null은 지자체가 데이터를 안 올려 "모름"이라는 뜻.
+export type SafetyZoneDetail = SafetyZone & {
+  rank: number;
+  total: number;
+  cctv_count: number | null;
+  streetlight_count: number | null;
+  crime_rate: number | null;
+  police_dist_m: number | null;
+  bell_dist_m: number | null;
+  accident_dist_m: number | null;
+  night_floating_pop: number | null;
+  store_count: number;
+};
+
+export type SafeHavenKind = "police" | "convenience" | "bell";
+export type SafeHaven = { kind: SafeHavenKind; lat: number; lng: number; distance_m: number };
+
+export type SpotReport = {
+  lat: number;
+  lng: number;
+  period: RoutePeriod;
+  radius_m: number;
+  zone: SafetyZoneDetail | null;
+  here_score: number | null;
+  area_day_score: number | null;
+  area_night_score: number | null;
+  counts: { cctv: number | null; lights: number | null; convenience: number | null } | null;
+  havens: SafeHaven[];
+};
+
 export type User = { id: number; email: string };
 export type RouteHistoryPlace = { label: string; lat: number; lng: number };
 export type RouteHistoryItem = { start: RouteHistoryPlace; end: RouteHistoryPlace; lastUsedAt: string };
@@ -230,6 +260,14 @@ export function nearbyZones(lat: number, lng: number, radiusKm = 2) {
 export function nearbyBells(lat: number, lng: number, radiusKm = 1, limit?: number, options: RequestInit = {}) {
   const limitParam = limit ? `&limit=${limit}` : "";
   return request<{ lat: number; lng: number }[]>(`/safety/bells?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${limitParam}`, options);
+}
+
+export function spotReport(lat: number, lng: number, options: RequestInit = {}) {
+  return request<SpotReport>(`/safety/spot?lat=${lat}&lng=${lng}`, options);
+}
+
+export function zoneDetail(dongCode: string) {
+  return request<SafetyZoneDetail>(`/safety/zones/${encodeURIComponent(dongCode)}`);
 }
 
 export function routeSafety(

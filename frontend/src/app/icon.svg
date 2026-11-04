@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- 안심 거주지: 밤에 불 켜진 집 -->
+  <rect width="64" height="64" rx="14" fill="#1f3a5f"/>
+  <path d="M14 30 32 15l18 15v19a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2z" fill="#f4f1ea"/>
+  <rect x="27" y="33" width="10" height="11" rx="1.5" fill="#f2b33d"/>
+  <circle cx="49" cy="15" r="5" fill="#f2b33d"/>
+  <circle cx="51.5" cy="13" r="4.2" fill="#1f3a5f"/>
+</svg>

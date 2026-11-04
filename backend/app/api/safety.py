@@ -20,11 +20,21 @@ from app.schemas.safety import (
     RouteRequest,
     RoutePoint,
     RouteResponse,
+    SafetyZoneDetail,
     SafetyZoneOut,
+    SpotReport,
 )
 from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
-from app.services.safe_route import find_safe_routes, route_artifact_runtime
+from app.services.safe_route import _facility_index, find_safe_routes, route_artifact_runtime
+from app.services.spot_report import (
+    REPORT_RADIUS_M,
+    area_scores,
+    facility_counts,
+    load_haven_index,
+    nearest_havens,
+    point_score,
+)
 from app.services.safety_score import compute_zone_period_scores
 from app.services.service_area import is_in_service_area
 from app.services.time_period import period_for
@@ -252,6 +262,76 @@ def residence_recommend(limit: int = Query(5, gt=0, le=50), db: Session = Depend
     score_maps, _ = _period_score_maps(zones)
     top = sorted(zones, key=lambda zone: score_maps[period][zone.dong_code], reverse=True)[:limit]
     return [_zone_out(zone, score_maps, period) for zone in top]
+
+
+def _zone_detail(
+    zone: SafetyZone, score_maps: dict[str, dict[str, float]], period: str, zones: list[SafetyZone]
+) -> SafetyZoneDetail:
+    """점수와 원자료를 함께. 지자체가 데이터를 안 올린 요소는 0이 아니라 None(모름)으로 내려준다."""
+    score_map = score_maps[period]
+    rank = 1 + sum(score_map[z.dong_code] > score_map[zone.dong_code] for z in zones)
+    return SafetyZoneDetail(
+        **_zone_out(zone, score_maps, period).model_dump(),
+        rank=rank,
+        total=len(zones),
+        cctv_count=zone.cctv_count if zone.cctv_known is not False else None,
+        streetlight_count=zone.streetlight_count if zone.lights_known is not False else None,
+        crime_rate=zone.crime_rate,
+        police_dist_m=zone.police_dist_m,
+        bell_dist_m=zone.bell_dist_m if zone.bell_known is not False else None,
+        accident_dist_m=zone.accident_dist_m,
+        night_floating_pop=zone.night_floating_pop,
+        store_count=zone.store_count,
+    )
+
+
+@router.get("/zones/{dong_code}", response_model=SafetyZoneDetail)
+def zone_detail(dong_code: str, db: Session = Depends(get_db)):
+    """동네 비교 화면용 — 한 동의 점수·순위와 요소별 원자료."""
+    zones = scoped_zones_query(db).all()
+    zone = next((z for z in zones if z.dong_code == dong_code), None)
+    if zone is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="해당 동네를 찾을 수 없어요.")
+    score_maps, _ = _period_score_maps(zones)
+    return _zone_detail(zone, score_maps, period_for(), zones)
+
+
+@router.get("/spot", response_model=SpotReport)
+def spot_report(
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    radius_m: int = Query(int(REPORT_RADIUS_M), ge=100, le=1000),
+    db: Session = Depends(get_db),
+):
+    """한 지점 주변 요약 — 집 주소 안전 리포트와 실시간 안내의 안심 거점 안내가 함께 쓴다."""
+    if not is_in_service_area(lat, lng, region_scope_prefix=settings.region_scope_prefix):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"reason": "outside_service_area", "action": "안전 리포트는 경기도 지역에서만 지원합니다."},
+        )
+    period = period_for()
+    zones = scoped_zones_query(db).all()
+    zone = min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)) if zones else None
+    lights_known = zone is None or zone.lights_known is not False
+    cctv_known = zone is None or zone.cctv_known is not False
+    facilities = _facility_index()
+    area = area_scores(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None
+    zone_detail_out = None
+    if zone is not None:
+        score_maps, _ = _period_score_maps(zones)
+        zone_detail_out = _zone_detail(zone, score_maps, period, zones)
+    return SpotReport(
+        lat=lat,
+        lng=lng,
+        period=period,
+        radius_m=radius_m,
+        zone=zone_detail_out,
+        here_score=point_score(facilities, lat, lng, period, lights_known, cctv_known) if facilities else None,
+        area_day_score=area["day"] if area else None,
+        area_night_score=area["night"] if area else None,
+        counts=facility_counts(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None,
+        havens=nearest_havens(load_haven_index(), lat, lng),
+    )
 
 
 @router.post("/route", response_model=RouteResponse)
