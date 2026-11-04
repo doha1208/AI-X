@@ -6,6 +6,8 @@ export type Settings = {
   voiceOn: boolean;
   voiceVolume: number;
   keepScreenOn: boolean;
+  // 길안내 중 예상 도착 시간이 지나면 "괜찮으세요?"를 묻는 귀가 완료 확인.
+  arrivalCheck: boolean;
 };
 // lat/lng을 함께 저장해서, 다시 고를 때 이름으로 재검색하지 않고 바로 그 위치로 간다
 // (동명 지명이나 지오코딩 실패로 엉뚱한 곳이 잡히는 걸 막는다).
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceOn: true,
   voiceVolume: 0.8,
   keepScreenOn: false,
+  arrivalCheck: true,
 };
 
 // 서버 렌더링·사생활 보호 모드처럼 localStorage를 못 쓰는 환경에서는 기본값으로 동작한다.
@@ -55,7 +58,9 @@ export function writeJson(key: string, value: unknown): void {
 export function loadSettings(): Settings {
   const stored = readJson(SETTINGS_KEY);
   if (!stored || typeof stored !== "object") return DEFAULT_SETTINGS;
-  const { showBells, timeMode, voiceOn, voiceVolume, keepScreenOn } = stored as Partial<Record<keyof Settings, unknown>>;
+  const { showBells, timeMode, voiceOn, voiceVolume, keepScreenOn, arrivalCheck } = stored as Partial<
+    Record<keyof Settings, unknown>
+  >;
   const validVolume = typeof voiceVolume === "number" && voiceVolume >= 0 && voiceVolume <= 1;
   return {
     showBells: typeof showBells === "boolean" ? showBells : DEFAULT_SETTINGS.showBells,
@@ -63,6 +68,7 @@ export function loadSettings(): Settings {
     voiceOn: typeof voiceOn === "boolean" ? voiceOn : DEFAULT_SETTINGS.voiceOn,
     voiceVolume: validVolume ? voiceVolume : DEFAULT_SETTINGS.voiceVolume,
     keepScreenOn: typeof keepScreenOn === "boolean" ? keepScreenOn : DEFAULT_SETTINGS.keepScreenOn,
+    arrivalCheck: typeof arrivalCheck === "boolean" ? arrivalCheck : DEFAULT_SETTINGS.arrivalCheck,
   };
 }
 

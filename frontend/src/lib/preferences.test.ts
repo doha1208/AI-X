@@ -27,6 +27,13 @@ describe("preferences", () => {
     expect(loadSettings()).toEqual({ ...DEFAULT_SETTINGS, showBells: false, timeMode: "night" });
   });
 
+  it("remembers turning the arrival check off, defaulting to on for settings saved before it existed", () => {
+    saveSettings({ ...DEFAULT_SETTINGS, arrivalCheck: false });
+    expect(loadSettings().arrivalCheck).toBe(false);
+    localStorage.setItem("ansim:settings", JSON.stringify({ showBells: true, timeMode: "auto" }));
+    expect(loadSettings().arrivalCheck).toBe(true);
+  });
+
   it("remembers keepScreenOn, defaulting to off for settings saved before it existed", () => {
     saveSettings({ ...DEFAULT_SETTINGS, keepScreenOn: true });
     expect(loadSettings()).toMatchObject({ keepScreenOn: true });

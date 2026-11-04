@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { HomeIcon, RouteIcon, ShieldHeartIcon, ShieldPinIcon } from "@/components/icons";
+import { HomeIcon, MapPinIcon, RouteIcon, ShieldHeartIcon, ShieldPinIcon } from "@/components/icons";
 import styles from "./AppHeader.module.css";
 
 const TABS = [
   { href: "/", label: "안심 거주지", icon: HomeIcon },
+  { href: "/report", label: "집 리포트", icon: MapPinIcon },
   { href: "/route", label: "길찾기", icon: RouteIcon },
   { href: "/me", label: "내 정보", icon: ShieldHeartIcon },
 ];

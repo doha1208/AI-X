@@ -72,7 +72,7 @@ export function ShieldHeartIcon({ size = 24, className }: IconProps) {
       <path d="M12 3 5 5.5V11c0 4.6 2.9 8.3 7 9.9 4.1-1.6 7-5.3 7-9.9V5.5L12 3Z" />
       <path
         d="M12 15.5 9 12.9a1.9 1.9 0 0 1 2.8-2.6l.2.2.2-.2a1.9 1.9 0 0 1 2.8 2.6L12 15.5Z"
-        fill="var(--brand, #2f6b3a)"
+        fill="var(--brand, #1f3a5f)"
       />
     </svg>
   );

@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     security_light_api_key: str = ""
     # safetydata.go.kr(재난안전데이터 공유플랫폼) 공통POI(경찰) API 키 — 지구대·파출소 위치용
     safetydata_api_key: str = ""
+    # safetydata.go.kr 여성범죄 주의구간(DSSP-IF-00149) 키 — 등록한 IP에서만 호출된다
+    safetydata_women_crime_key: str = ""
+    # safemap.go.kr 생활안전지도 범죄주의구간(WMS) 키
+    safemap_api_key: str = ""
     kakao_rest_api_key: str = ""
     # 쉼표로 구분된 관리자 이메일. 빈 값이면 관리자 API는 모든 사용자에게 거부된다.
     admin_emails: str = ""

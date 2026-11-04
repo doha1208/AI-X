@@ -268,7 +268,7 @@
 }
 
 .scoreSafe {
-  background: #e3f2e5;
+  background: var(--safe-light);
   color: var(--safe);
 }
 

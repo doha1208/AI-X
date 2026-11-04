@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { nearbyBells, nearbyZones, residenceRecommend, type SafetyZone } from "@/lib/api";
 import { haversineMeters } from "@/lib/geo";
@@ -305,6 +306,12 @@ function ResidencePage({ search }: { search: string }) {
                 </span>
                 {selectedRank > 0 && <span>{showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
               </div>
+              <Link
+                className={styles.footerButton}
+                href={`/report?${placeQuery("at", { lat: selectedZone.lat, lng: selectedZone.lng, label: selectedZone.dong_name })}`}
+              >
+                {selectedZone.dong_name} 안전 리포트 보기
+              </Link>
             </section>
           )}
 
@@ -354,6 +361,11 @@ function ResidencePage({ search }: { search: string }) {
           )}
 
           <footer className={styles.panelFooter}>
+            {watched.length >= 2 && (
+              <Link className={styles.footerButton} href="/compare">
+                관심 동네 {watched.length}곳 비교하기
+              </Link>
+            )}
             {showingNearby ? (
               <button type="button" className={styles.footerButton} onClick={() => setScope("all")}>
                 전체 지역 순위 보기
@@ -390,6 +402,7 @@ function ResidencePage({ search }: { search: string }) {
               void searchAt(place);
             },
           },
+          { label: "이 위치 안전 리포트", onSelect: (place) => router.push(`/report?${placeQuery("at", place)}`) },
           { label: "여기로 길찾기", onSelect: (place) => router.push(`/route?${placeQuery("end", place)}`) },
         ]}
       />

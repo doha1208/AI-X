@@ -47,6 +47,50 @@ class SafetyZoneOut(BaseModel):
         from_attributes = True
 
 
+class SafetyZoneDetail(SafetyZoneOut):
+    """동네 비교용 — 점수와 함께 점수를 만든 원자료와 경기도 안 순위를 보여준다. None은 '모름'."""
+
+    rank: int
+    total: int
+    cctv_count: int | None
+    streetlight_count: int | None
+    crime_rate: float | None
+    police_dist_m: float | None
+    bell_dist_m: float | None
+    accident_dist_m: float | None
+    night_floating_pop: float | None
+    store_count: int
+
+
+class SafeHaven(BaseModel):
+    kind: Literal["police", "convenience", "bell"]
+    lat: float
+    lng: float
+    distance_m: int
+
+
+class FacilityCounts(BaseModel):
+    cctv: int | None
+    lights: int | None
+    convenience: int | None
+
+
+class SpotReport(BaseModel):
+    """한 지점 주변 요약 — 집 주소 리포트와 실시간 안내의 안심 거점 안내가 함께 쓴다."""
+
+    lat: float
+    lng: float
+    period: Period
+    radius_m: int
+    zone: SafetyZoneDetail | None
+    # 지금 이 자리의 구간 점수(현재 시간대). 구간 데이터가 없으면 None.
+    here_score: float | None
+    area_day_score: float | None
+    area_night_score: float | None
+    counts: FacilityCounts | None
+    havens: list[SafeHaven]
+
+
 class RouteRequest(BaseModel):
     start_lat: float = Field(ge=-90, le=90)
     start_lng: float = Field(ge=-180, le=180)
