@@ -130,7 +130,7 @@ describe("RoutePage responsive presentation", () => {
     expect(screen.getByRole("button", { name: "출발지와 도착지 바꾸기" })).toBeInTheDocument();
   });
 
-  it.each([null, 0, 55])("allows guidance when the legacy route score is %s", async (score) => {
+  it.each([null, 0, 55])("allows guidance without presenting retired safety_score %s as a current facility score", async (score) => {
     sessionStorage.clear();
     routeSafety.mockReset();
     routeSafety.mockResolvedValue({
@@ -149,13 +149,10 @@ describe("RoutePage responsive presentation", () => {
     fireEvent.change(screen.getByRole("combobox", { name: "도착지 주소" }), { target: { value: "37.31, 126.87" } });
     fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
     expect(await screen.findByRole("region", { name: "경로 검색 결과" })).toBeInTheDocument();
-    if (score === null) {
-      expect(screen.getAllByText("안전지수 미제공").length).toBeGreaterThan(0);
-      expect(screen.queryByText("추천 1순위")).not.toBeInTheDocument();
-      expect(screen.queryByText(/0점/)).not.toBeInTheDocument();
-    } else {
-      expect(screen.getByText(`참고 안전지수 ${score}점`)).toBeInTheDocument();
-    }
+    const results = screen.getByRole("region", { name: "경로 검색 결과" });
+    expect(within(results).getByText("점수 미산정")).toBeInTheDocument();
+    expect(within(results).queryByText("추천 1순위")).not.toBeInTheDocument();
+    expect(within(results).queryByText(/참고 안전지수|시설 \d+점/)).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /실시간 안내 시작|이 경로로 안내 시작/ }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "실시간 안내 시작" }));
     expect(loadHandoff({ lat: 37.31, lng: 126.87 })?.points).toEqual([
@@ -163,9 +160,10 @@ describe("RoutePage responsive presentation", () => {
     ]);
   });
 
-  it("shows each server facility score and preserves the selected assessment for guidance", async () => {
+  it.each([0, 72.4])("shows server facility score %s and preserves the selected assessment for guidance", async (score) => {
     const response = environmentRouteFixture();
-    const second = { ...response.alternatives[0], distance_m: 1250, environment_assessment: assessmentFixture({ score: 72.4 }) };
+    const selectedAssessment = assessmentFixture({ score });
+    const second = { ...response.alternatives[0], distance_m: 1250, environment_assessment: selectedAssessment };
     response.alternatives.push(second);
     routeSafety.mockReset();
     routeSafety.mockResolvedValue(response);
@@ -175,11 +173,15 @@ describe("RoutePage responsive presentation", () => {
     fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
     const results = await screen.findByRole("region", { name: "경로 검색 결과" });
     expect(within(results).getByText("시설 97점")).toBeInTheDocument();
-    expect(within(results).getByText("시설 72점")).toBeInTheDocument();
+    const displayed = `시설 ${score.toFixed(0)}점`;
+    expect(within(results).getByText(displayed)).toBeInTheDocument();
     expect(screen.queryByText("안전지수 미제공")).not.toBeInTheDocument();
-    fireEvent.click(within(results).getByRole("button", { name: /시설 72점/ }));
+    fireEvent.click(within(results).getByRole("button", { name: new RegExp(displayed) }));
     fireEvent.click(within(results).getByRole("button", { name: "실시간 안내 시작" }));
-    expect(loadHandoff({ lat: 37.31, lng: 126.87 })?.environment_assessment?.score).toBe(72.4);
+    const handoff = loadHandoff({ lat: 37.31, lng: 126.87 });
+    expect(handoff?.environmentAssessment).toEqual(selectedAssessment);
+    expect(handoff?.distanceM).toBe(second.distance_m);
+    expect(handoff?.points).toEqual(second.route_points);
   });
 
   it("clears the previous route when a replacement search fails", async () => {
