@@ -187,8 +187,6 @@ function ResidencePage({ search }: { search: string }) {
 
   return (
     <main className={styles.page}>
-      <AppHeader userInitial={userInitial(user)} />
-
       <div ref={stageRef} className={styles.stage} data-sheet-snap={sheetSnap}>
         <SafetyMap
           ref={mapRef}
@@ -207,188 +205,195 @@ function ResidencePage({ search }: { search: string }) {
           height="100%"
         />
 
-        <form className={styles.searchBar} onSubmit={handleSearch} role="search">
-          <SearchIcon size={18} className={styles.searchIcon} />
-          <AddressSearchInput
-            className={styles.searchInput}
-            value={query}
-            onChange={(value) => { setQuery(value); setSelectedQueryPlace(null); }}
-            onSelect={(place) => { setQuery(place.label); setSelectedQueryPlace(place); }}
-            placeholder="동네나 주소를 검색하세요 (예: 수원시 영통구 망포동)"
-            ariaLabel="주소 검색"
-          />
-          <button
-            type="button"
-            className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
-            onClick={() => setPicking((p) => !p)}
-            aria-pressed={picking}
-            aria-label="지도에서 선택"
-          >
-            <MapPinIcon size={17} className={styles.chipIcon} />
-            <span className={styles.chipLabel}>지도에서 선택</span>
-          </button>
-          <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
-            <LocateIcon size={17} className={styles.chipIcon} />
-            <span className={styles.chipLabel}>현재 위치</span>
-          </button>
-        </form>
-
-        {scoreAlerts.length > 0 && (
-          <div className={`${styles.notice} ${styles.noticeScore}`} role="status">
-            {scoreAlerts.join(" · ")}
-            <button
-              type="button"
-              className={styles.noticeClose}
-              aria-label="알림 닫기"
-              onClick={() => setScoreAlerts([])}
-            >
-              <CloseIcon size={14} />
-            </button>
-          </div>
-        )}
-
-        {(error || picking) && (
-          <div className={`${styles.notice} ${error ? styles.noticeError : ""}`} role={error ? "alert" : "status"}>
-            {error ? <AlertIcon size={16} /> : null}
-            {error ?? "지도를 클릭해서 검색할 위치를 선택하세요"}
-            <button
-              type="button"
-              className={styles.noticeClose}
-              aria-label="닫기"
-              onClick={() => (error ? setError(null) : setPicking(false))}
-            >
-              <CloseIcon size={14} />
-            </button>
-          </div>
-        )}
-
-        <AdaptiveBottomSheet
-          className={styles.panel}
-          label="안심 순위"
-          snap={sheetSnap}
-          onSnapChange={setSheetSnap}
-          workspaceRef={stageRef}
-          summary={
-            <div className={styles.sheetSummary}>
-              <div className={styles.sheetSummaryText}>
-                <span>{showingNearby ? "내 주변 안심 순위" : "전체 지역 안심 순위"}</span>
-                <strong>{(selectedZone ?? ranking[0])?.dong_name ?? "안전 구역을 불러오는 중"}</strong>
-              </div>
-              {(selectedZone ?? ranking[0]) && (
-                <span className={`${styles.scoreBadge} ${scoreTone((selectedZone ?? ranking[0]).safety_score)}`}>
-                  {(selectedZone ?? ranking[0]).safety_score.toFixed(0)}점
-                </span>
-              )}
+        <div className={styles.floatingPanel}>
+          <AppHeader userInitial={userInitial(user)} variant="panel" />
+          <form className={styles.searchBar} onSubmit={handleSearch} role="search">
+            <div className={styles.searchField}>
+              <AddressSearchInput
+                className={styles.searchInput}
+                value={query}
+                onChange={(value) => { setQuery(value); setSelectedQueryPlace(null); }}
+                onSelect={(place) => { setQuery(place.label); setSelectedQueryPlace(place); }}
+                placeholder="동네나 주소를 검색하세요"
+                ariaLabel="주소 검색"
+              />
+              <button type="submit" className={styles.searchSubmit} aria-label="주소 검색하기"><SearchIcon size={19} /></button>
             </div>
-          }
-        >
-          <header className={styles.panelHeader}>
-            <h1 className={styles.panelTitle}>{showingNearby ? "안심 거주지 추천 Top 5" : "전체 지역 안심 순위"}</h1>
-            <p className={styles.panelSub}>
-              {showingNearby
-                ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
-                : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
-            </p>
-            {currentPeriod && (
-              <p className={styles.panelSub}>현재 시간 기준: {currentPeriod === "night" ? "야간" : "주간"}</p>
-            )}
-          </header>
+            <button
+              type="button"
+              className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
+              onClick={() => setPicking((p) => !p)}
+              aria-pressed={picking}
+              aria-label="지도에서 선택"
+            >
+              <MapPinIcon size={17} className={styles.chipIcon} />
+              <span>지도에서 선택</span>
+            </button>
+            <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
+              <LocateIcon size={17} className={styles.chipIcon} />
+              <span>현재 위치</span>
+            </button>
+          </form>
 
-          {selectedZone && (
-            <section className={styles.mobileSelectedDetail} aria-label="선택 안전구역 상세">
-              <div>
-                <span>선택 안전구역</span>
-                <strong>{selectedZone.dong_name}</strong>
-              </div>
-              <div className={styles.selectedDetailStats}>
-                <span className={`${styles.scoreBadge} ${scoreTone(selectedZone.safety_score)}`}>
-                  {scoreLabel(selectedZone.safety_score)} · {selectedZone.safety_score.toFixed(0)}점
-                </span>
-                {selectedRank > 0 && <span>{showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
-              </div>
-              <Link
-                className={styles.footerButton}
-                href={`/report?${placeQuery("at", { lat: selectedZone.lat, lng: selectedZone.lng, label: selectedZone.dong_name })}`}
+          {scoreAlerts.length > 0 && (
+            <div className={`${styles.notice} ${styles.noticeScore}`} role="status">
+              {scoreAlerts.join(" · ")}
+              <button
+                type="button"
+                className={styles.noticeClose}
+                aria-label="알림 닫기"
+                onClick={() => setScoreAlerts([])}
               >
-                {selectedZone.dong_name} 안전 리포트 보기
-              </Link>
-            </section>
+                <CloseIcon size={14} />
+              </button>
+            </div>
           )}
 
-          {loadingList ? (
-            <p className={styles.panelEmpty}>불러오는 중...</p>
-          ) : ranking.length === 0 ? (
-            <p className={styles.panelEmpty}>이 주변에서 안전 구역을 찾지 못했어요. 다른 위치를 검색해보세요.</p>
-          ) : (
-            <ol className={styles.rankList}>
-              {ranking.map((zone, i) => {
-                const isWatched = watched.some((w) => w.dong_code === zone.dong_code);
-                return (
-                  <li key={zone.dong_code} className={styles.rankRow}>
-                    <button
-                      type="button"
-                      className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
-                      onClick={() => {
-                        setSelectedZone(zone);
-                        setSheetSnap("half");
-                      }}
-                    >
-                      <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
-                      <span className={styles.rankName}>{zone.dong_name}</span>
-                      <span className={`${styles.scoreBadge} ${scoreTone(zone.safety_score)}`}>
-                        {zone.safety_score.toFixed(0)}점
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.watchButton} ${isWatched ? styles.watchButtonOn : ""}`}
-                      aria-pressed={isWatched}
-                      aria-label={`${zone.dong_name} 관심 동네 ${isWatched ? "해제" : "저장"}`}
-                      title={
-                        !isWatched && watched.length >= MAX_WATCHED_ZONES
-                          ? `관심 동네는 ${MAX_WATCHED_ZONES}곳까지 저장할 수 있어요`
-                          : "점수가 바뀌면 알림으로 알려드려요"
-                      }
-                      disabled={!isWatched && watched.length >= MAX_WATCHED_ZONES}
-                      onClick={() => setWatched(toggleWatchedZone(zone))}
-                    >
-                      {isWatched ? "관심 중" : "관심"}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+          {(error || picking) && (
+            <div className={`${styles.notice} ${error ? styles.noticeError : ""}`} role={error ? "alert" : "status"}>
+              {error ? <AlertIcon size={16} /> : null}
+              {error ?? "지도를 클릭해서 검색할 위치를 선택하세요"}
+              <button
+                type="button"
+                className={styles.noticeClose}
+                aria-label="닫기"
+                onClick={() => (error ? setError(null) : setPicking(false))}
+              >
+                <CloseIcon size={14} />
+              </button>
+            </div>
           )}
 
-          <footer className={styles.panelFooter}>
-            {watched.length >= 2 && (
-              <Link className={styles.footerButton} href="/compare">
-                관심 동네 {watched.length}곳 비교하기
-              </Link>
+          <AdaptiveBottomSheet
+            className={styles.panel}
+            contentClassName={styles.panelContent}
+            label="안심 순위"
+            snap={sheetSnap}
+            onSnapChange={setSheetSnap}
+            workspaceRef={stageRef}
+            topGap={136}
+            summary={
+              <div className={styles.sheetSummary}>
+                <div className={styles.sheetSummaryText}>
+                  <span>{showingNearby ? "내 주변 안심 순위" : "전체 지역 안심 순위"}</span>
+                  <strong>{(selectedZone ?? ranking[0])?.dong_name ?? "안전 구역을 불러오는 중"}</strong>
+                </div>
+                {(selectedZone ?? ranking[0]) && (
+                  <span className={`${styles.scoreBadge} ${scoreTone((selectedZone ?? ranking[0]).safety_score)}`}>
+                    {(selectedZone ?? ranking[0]).safety_score.toFixed(0)}점
+                  </span>
+                )}
+              </div>
+            }
+          >
+            <header className={styles.panelHeader}>
+              <h1 className={styles.panelTitle}>{showingNearby ? "내 주변 지역 통계 지수" : "전체 지역 통계 지수"}</h1>
+              <p className={styles.panelSub}>
+                {showingNearby
+                  ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
+                  : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
+              </p>
+              {currentPeriod && (
+                <p className={styles.panelSub}>현재 시간 기준: {currentPeriod === "night" ? "야간" : "주간"}</p>
+              )}
+            </header>
+
+            {selectedZone && (
+              <section className={styles.mobileSelectedDetail} aria-label="선택 안전구역 상세">
+                <div>
+                  <span>선택 안전구역</span>
+                  <strong>{selectedZone.dong_name}</strong>
+                </div>
+                <div className={styles.selectedDetailStats}>
+                  <span className={`${styles.scoreBadge} ${scoreTone(selectedZone.safety_score)}`}>
+                    {scoreLabel(selectedZone.safety_score)} · {selectedZone.safety_score.toFixed(0)}점
+                  </span>
+                  {selectedRank > 0 && <span>{showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
+                </div>
+                <Link
+                  className={styles.footerButton}
+                  href={`/report?${placeQuery("at", { lat: selectedZone.lat, lng: selectedZone.lng, label: selectedZone.dong_name })}`}
+                >
+                  {selectedZone.dong_name} 안전 리포트 보기
+                </Link>
+              </section>
             )}
-            {showingNearby ? (
-              <button type="button" className={styles.footerButton} onClick={() => setScope("all")}>
-                전체 지역 순위 보기
-              </button>
-            ) : nearby ? (
-              <button type="button" className={styles.footerButton} onClick={() => setScope("nearby")}>
-                {nearby.place.label} 주변 순위 보기
-              </button>
+
+            {loadingList ? (
+              <p className={styles.panelEmpty}>불러오는 중...</p>
+            ) : ranking.length === 0 ? (
+              <p className={styles.panelEmpty}>이 주변에서 안전 구역을 찾지 못했어요. 다른 위치를 검색해보세요.</p>
             ) : (
-              <button type="button" className={styles.footerButton} onClick={searchMyLocation}>
-                내 주변 순위 보기
-              </button>
+              <ol className={styles.rankList}>
+                {ranking.map((zone, i) => {
+                  const isWatched = watched.some((w) => w.dong_code === zone.dong_code);
+                  return (
+                    <li key={zone.dong_code} className={styles.rankRow}>
+                      <button
+                        type="button"
+                        className={`${styles.rankItem} ${selectedZone?.dong_code === zone.dong_code ? styles.rankItemActive : ""}`}
+                        onClick={() => {
+                          setSelectedZone(zone);
+                          setSheetSnap("half");
+                        }}
+                      >
+                        <span className={`${styles.rankNumber} ${i === 0 ? styles.rankFirst : ""}`}>{i + 1}</span>
+                        <span className={styles.rankName}>{zone.dong_name}</span>
+                        <span className={`${styles.scoreBadge} ${scoreTone(zone.safety_score)}`}>
+                          {zone.safety_score.toFixed(0)}점
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.watchButton} ${isWatched ? styles.watchButtonOn : ""}`}
+                        aria-pressed={isWatched}
+                        aria-label={`${zone.dong_name} 관심 동네 ${isWatched ? "해제" : "저장"}`}
+                        title={
+                          !isWatched && watched.length >= MAX_WATCHED_ZONES
+                            ? `관심 동네는 ${MAX_WATCHED_ZONES}곳까지 저장할 수 있어요`
+                            : "점수가 바뀌면 알림으로 알려드려요"
+                        }
+                        disabled={!isWatched && watched.length >= MAX_WATCHED_ZONES}
+                        onClick={() => setWatched(toggleWatchedZone(zone))}
+                      >
+                        {isWatched ? "관심 중" : "관심"}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
             )}
-          </footer>
-          <MapLegend className={styles.mobileLegend} title="안전도" items={SAFETY_LEGEND} />
-        </AdaptiveBottomSheet>
+
+            <footer className={styles.panelFooter}>
+              {watched.length >= 2 && (
+                <Link className={styles.footerButton} href="/compare">
+                  관심 동네 {watched.length}곳 비교하기
+                </Link>
+              )}
+              {showingNearby ? (
+                <button type="button" className={styles.footerButton} onClick={() => setScope("all")}>
+                  전체 지역 순위 보기
+                </button>
+              ) : nearby ? (
+                <button type="button" className={styles.footerButton} onClick={() => setScope("nearby")}>
+                  {nearby.place.label} 주변 순위 보기
+                </button>
+              ) : (
+                <button type="button" className={styles.footerButton} onClick={searchMyLocation}>
+                  내 주변 순위 보기
+                </button>
+              )}
+            </footer>
+            <MapLegend className={styles.mobileLegend} title="지역 통계 지수" items={SAFETY_LEGEND} />
+          </AdaptiveBottomSheet>
+        </div>
 
         <MapControls
           className={styles.controls}
           onZoomIn={() => mapRef.current?.zoomIn()}
           onZoomOut={() => mapRef.current?.zoomOut()}
+          onLocate={location ? () => mapRef.current?.panTo(location) : undefined}
         />
-        <MapLegend className={styles.legend} title="안전도" items={SAFETY_LEGEND} />
       </div>
 
       <MapContextMenu

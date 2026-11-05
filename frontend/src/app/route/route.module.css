@@ -1,4 +1,8 @@
 .page {
+  --app-header-height: 0px;
+  --mobile-navigation-height: 0px;
+  --map-panel-inset: 412px;
+  --map-top-overlay: 230px;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -9,25 +13,33 @@
 .mobileFlow { display: none; }
 
 .layout {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  height: calc(100dvh - var(--app-header-height));
-  min-height: 520px;
+  touch-action: pan-x pan-y;
+  position: relative;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 
-/* ---- 왼쪽 사이드바 ---- */
-
+/* 지도와 가장자리에서 떨어진 둥근 패널 */
 .sidebar {
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
+  left: 16px;
+  z-index: 20;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 20px 16px;
-  border-right: 1px solid var(--border);
+  width: 380px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
   background: var(--surface);
-  overflow-y: auto;
+  box-shadow: 0 8px 32px rgb(20 30 45 / 14%);
+  overflow: hidden;
 }
 
 .searchPanel {
+  flex-shrink: 0;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -35,16 +47,23 @@
 
 .resultsSheet {
   flex: 1;
+  padding: 0 18px 14px;
+  overflow-y: auto;
   min-height: 0;
 }
 
 .compactSearch,
-.collapseSearch,
-.mobileLegend {
+.collapseSearch {
   display: none;
 }
 
-.sidebar .compactSearch { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 6px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-muted); color: var(--text); text-align: left; cursor: pointer; }
+.mobileLegend {
+  margin-top: 12px;
+  flex-shrink: 0;
+  box-shadow: none;
+}
+
+.sidebar .compactSearch { flex-shrink: 0; margin: 16px 18px; display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 6px; align-items: center; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-muted); color: var(--text); text-align: left; cursor: pointer; }
 .sidebar .compactSearch span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; }
 .sidebar .compactSearch small { display: block; color: var(--text-muted); font-size: 10px; }
 
@@ -442,15 +461,9 @@ div.routeCardMain {
 /* ---- 지도 ---- */
 
 .mapArea {
-  position: relative;
-  min-width: 0;
-}
-
-.legend {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 10;
+  inset: 0;
+  min-width: 0;
 }
 
 .pickConfirm {
@@ -515,7 +528,7 @@ div.routeCardMain {
     overflow: hidden;
   }
 
-  .mobileFlow { display: block; height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height)); overflow-y: auto; padding: 20px 16px; background: var(--page-bg); }
+  .mobileFlow { position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 124px); right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); left: 12px; display: block; z-index: 30; overflow-y: auto; padding: 20px 16px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-card); pointer-events: auto; }
   .mobileIdle, .mobileEditor { display: flex; flex-direction: column; gap: 12px; max-width: 520px; margin: 0 auto; }
   .mobileIdle h1, .mobileEditor h1 { margin: 0 0 8px; font-size: 22px; }
   .mobilePlaceRow { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); font-size: 15px; text-align: left; }
@@ -528,16 +541,24 @@ div.routeCardMain {
   .historyControls { margin-top: 8px; }
   .historyItem { min-height: 44px; padding: 10px 12px; background: var(--surface); }
   .mobileFlowHidden { display: none; }
-  .layout { display: none; }
+  .layout[data-has-route="false"] .searchPanel,
+  .layout[data-has-route="false"] .compactSearch,
+  .layout[data-has-route="false"] .resultsSheet { display: none; }
   .layout[data-has-route="true"] { display: block; }
-  .layout[data-picking] .sidebar { display: none; }
+  .layout[data-picking] .searchPanel,
+  .layout[data-picking] .compactSearch,
+  .layout[data-picking] .resultsSheet { display: none; }
   .layout[data-picking] .pickConfirm { bottom: max(20px, env(safe-area-inset-bottom)); width: min(360px, calc(100% - 32px)); }
 
   .sidebar {
     position: absolute;
     inset: 0;
+    width: auto;
     z-index: 20;
     display: block;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
     padding: 0;
     border-right: none;
     overflow: visible;
@@ -553,11 +574,11 @@ div.routeCardMain {
 
   .searchPanel {
     position: absolute;
-    top: 12px;
+    top: calc(max(12px, env(safe-area-inset-top)) + 120px);
     right: 12px;
     left: 12px;
     z-index: 40;
-    max-height: min(62dvh, 520px);
+    max-height: calc(100% - 248px);
     padding: 14px;
     border: 1px solid var(--border);
     border-radius: 18px;
@@ -569,7 +590,7 @@ div.routeCardMain {
 
   .sidebar .compactSearch {
     position: absolute;
-    top: 12px;
+    top: calc(max(12px, env(safe-area-inset-top)) + 120px);
     right: 12px;
     left: 12px;
     z-index: 40;
@@ -577,6 +598,7 @@ div.routeCardMain {
     grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
     align-items: center;
     min-height: 60px;
+    margin: 0;
     padding: 8px 10px;
     border: 1px solid var(--border);
     border-radius: 18px;
@@ -647,6 +669,8 @@ div.routeCardMain {
 
   .resultsSheet {
     position: absolute;
+    padding: 0;
+    overflow: hidden;
   }
 
   .results {
@@ -654,10 +678,6 @@ div.routeCardMain {
     padding-top: 0;
     border-top: 0;
     overflow: visible;
-  }
-
-  .legend {
-    display: none;
   }
 
   .mobileLegend {
@@ -686,11 +706,14 @@ div.routeCardMain {
 .editRoute { grid-column: 1 / -1; color: var(--brand); font-size: 12px; }
 
 @media (min-width: 768px) and (max-width: 1023px) {
-  .layout {
-    grid-template-columns: 340px minmax(0, 1fr);
-  }
+  .page { --map-panel-inset: 352px; }
+  .sidebar { width: 320px; }
+  .searchPanel { padding: 14px; }
+  .sidebarHeader { gap: 8px; flex-wrap: wrap; }
+}
 
-  .sidebar {
-    padding: 18px 14px;
-  }
+@media (min-width: 768px) {
+  .desktopHistory { max-height: 140px; overflow-y: auto; }
+  .mobileLegend { display: block; }
+  .searchPanel { max-height: calc(100% - 170px); overflow-y: auto; }
 }

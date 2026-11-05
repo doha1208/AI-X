@@ -1,4 +1,5 @@
 import { render, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { KakaoSdk } from "@/lib/kakao";
 
@@ -16,7 +17,7 @@ vi.mock("@/lib/kakao", async (importOriginal) => ({
   loadKakaoSdk: state.loadKakaoSdk,
 }));
 
-import { SafetyMap } from "./SafetyMap";
+import { SafetyMap, type SafetyMapHandle } from "./SafetyMap";
 
 function installKakao() {
   function LatLng(lat: number, lng: number) {
@@ -45,6 +46,7 @@ describe("SafetyMap container resize", () => {
     state.loadKakaoSdk.mockClear();
     state.map.relayout.mockClear();
     state.map.setBounds.mockClear();
+    state.map.panTo.mockClear();
     state.resizeCallback = null;
     installKakao();
     vi.stubGlobal("ResizeObserver", class {
@@ -74,5 +76,24 @@ describe("SafetyMap container resize", () => {
     state.resizeCallback?.([], {} as ResizeObserver);
 
     await waitFor(() => expect(state.map.setBounds).toHaveBeenCalledTimes(2));
+  });
+
+  it("uses the workspace panel inset when fitting a desktop route", async () => {
+    const { container } = render(<SafetyMap height="100%" routePath={[{ lat: 37.3, lng: 127.04 }, { lat: 37.31, lng: 127.05 }]} />);
+    (container.firstElementChild as HTMLElement).style.setProperty("--map-panel-inset", "412px");
+    await waitFor(() => expect(state.map.setBounds).toHaveBeenCalledWith(expect.anything(), 16, 16, 16, 412));
+  });
+
+  it("places a searched location in the visible map area beside the panel", async () => {
+    const ref = createRef<SafetyMapHandle>();
+    state.map.getProjection.mockReturnValue({
+      pointFromCoords: () => ({ x: 500, y: 300 }),
+      coordsFromPoint: (point: { x: number; y: number }) => point,
+    });
+    const { container } = render(<SafetyMap ref={ref} height="100%" />);
+    (container.firstElementChild as HTMLElement).style.setProperty("--map-panel-inset", "412px");
+    await waitFor(() => expect(state.resizeCallback).not.toBeNull());
+    ref.current?.panTo({ lat: 37.3, lng: 127.04 });
+    expect(state.map.panTo).toHaveBeenCalledWith({ x: 302, y: 300 });
   });
 });
