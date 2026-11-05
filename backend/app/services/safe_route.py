@@ -6,6 +6,7 @@ import pickle
 import socket
 import threading
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from collections import OrderedDict
 from functools import lru_cache
@@ -62,10 +63,11 @@ LOCAL_WALK_GRAPH_CACHE_PATH = LOCAL_WALK_NETWORK_PATH.with_suffix(".graph.pickle
 
 _local_graph: nx.MultiDiGraph | None = None
 _local_graph_attempted = False
+_local_graph_fingerprint: str | None = None
 _local_graph_lock = threading.Lock()
 
 
-def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
+def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> bool:
     # 저장 도중 죽어도 기존 캐시가 깨지지 않게 임시 파일에 쓴 뒤 교체한다.
     # 캐시 저장 실패는 치명적이지 않다 — 다음 시작에 XML을 다시 파싱하면 된다.
     tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
@@ -73,9 +75,11 @@ def _write_graph_cache(graph: nx.MultiDiGraph, cache_path: Path) -> None:
         with tmp.open("wb") as f:
             pickle.dump(graph, f, protocol=pickle.HIGHEST_PROTOCOL)
         tmp.replace(cache_path)
+        return True
     except Exception:
         logger.warning("Failed to write graph cache %s", cache_path, exc_info=True)
         tmp.unlink(missing_ok=True)
+        return False
 
 
 def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiDiGraph:
@@ -85,14 +89,24 @@ def _read_graph_cached(xml_path: Path, cache_path: Path, parse_xml) -> nx.MultiD
     ponytail: 이 프로젝트가 직접 만든 로컬 파일만 읽는다(pickle은 신뢰할 수 없는
     파일을 열면 위험) — 사용자 업로드 경로에는 절대 쓰지 말 것.
     """
-    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime:
+    from app.services.route_environment_inputs import atomic_json
+    fingerprint = _file_sha256(xml_path)
+    source_path = cache_path.with_suffix(cache_path.suffix + ".source.json")
+    try:
+        recorded = json.loads(source_path.read_text(encoding="utf-8")).get("sha256")
+    except (OSError, ValueError, AttributeError):
+        recorded = None
+    if cache_path.exists() and cache_path.stat().st_mtime >= xml_path.stat().st_mtime and recorded == fingerprint:
         try:
             with cache_path.open("rb") as f:
-                return pickle.load(f)
+                graph = pickle.load(f)
+            atomic_json(source_path, {"sha256": fingerprint})
+            return graph
         except Exception:
             logger.warning("Graph cache unreadable, re-parsing XML: %s", cache_path, exc_info=True)
     graph = parse_xml(xml_path)
-    _write_graph_cache(graph, cache_path)
+    if _write_graph_cache(graph, cache_path):
+        atomic_json(source_path, {"sha256": fingerprint})
     return graph
 
 
@@ -100,13 +114,15 @@ def _load_local_graph() -> nx.MultiDiGraph | None:
     """서울+경기 보행자 도로망(약 400MB XML) 파싱에 수 분이 걸린다. 플래그만으로
     가드하면 로딩 중 들어온 동시 요청이 아직 None인 _local_graph를 받아
     Overpass 실시간 폴백으로 새 지연을 겪는다 — 락으로 대기시켜 막는다."""
-    global _local_graph, _local_graph_attempted
-    if _local_graph_attempted:
+    global _local_graph, _local_graph_attempted, _local_graph_fingerprint
+    fingerprint = _file_sha256(LOCAL_WALK_NETWORK_PATH)
+    if _local_graph_attempted and _local_graph_fingerprint == fingerprint:
         return _local_graph
     with _local_graph_lock:
-        if _local_graph_attempted:
+        if _local_graph_attempted and _local_graph_fingerprint == fingerprint:
             return _local_graph
         _local_graph_attempted = True
+        _local_graph_fingerprint = fingerprint
         if not LOCAL_WALK_NETWORK_PATH.exists():
             return None
         try:
@@ -470,6 +486,26 @@ def _edge_score(zone_score: float, road_score: float, local_score: float) -> flo
     )
 
 
+def _build_environment_graph(graph: nx.MultiDiGraph) -> nx.DiGraph:
+    """Independent walkable graph; parallel edges reduce by actual length, never legacy scores.
+
+    This is a bounded candidate generator, not a guarantee of retaining every parallel geometry.
+    """
+    simple = nx.DiGraph()
+    simple.add_nodes_from(graph.nodes(data=True))
+    for u, v, data in graph.edges(data=True):
+        if is_car_only(data):
+            continue
+        if simple.has_edge(u, v) and simple[u][v].get("length", 0) <= data.get("length", 0):
+            continue
+        attributes = {k: value for k, value in data.items() if k not in {"edge_score", "safety_cost"}}
+        if simple.has_edge(u, v):
+            simple[u][v].clear()
+        simple.add_edge(u, v, **attributes)
+    _keep_largest_walk_network(simple)
+    return simple
+
+
 def _build_scored_graph(
     graph: nx.MultiDiGraph,
     zones: list[SafetyZone],
@@ -591,6 +627,12 @@ def _summarize_path(graph: nx.DiGraph, path: list[int]) -> dict:
     return {"points": points, "score": avg_score, "distance_m": total_length}
 
 
+@dataclass(frozen=True)
+class EnvironmentSnapshot:
+    artifact: RouteArtifact
+    node_tree: cKDTree
+
+
 class RouteArtifactRuntime:
     """HTTP 요청이 읽기 전용 경로 산출물만 조회하도록 하는 런타임 보관소."""
 
@@ -603,16 +645,23 @@ class RouteArtifactRuntime:
         self._result_cache: OrderedDict[tuple[str, Period, int, int, int], list[dict]] = OrderedDict()
         self._manifest_mtime_ns: int | None = None
         self._last_reload_check = float("-inf")
+        self._capabilities = {"area_environment_ready": False, "zone_environment_ready": False}
 
     def install(self, artifact: RouteArtifact, *, published_at: datetime | None = None) -> None:
         """완성된 산출물과 그 노드 색인을 한 번에 교체한다."""
 
+        from app.services.route_artifact import extended_artifact_valid
+        from app.services.route_artifact_validation import validate_route_artifact
+        if not extended_artifact_valid(artifact):
+            raise ValueError("Invalid extended spatial artifact")
+        report = validate_route_artifact(artifact)
         tree = cKDTree(artifact.node_points)
         with self._lock:
             self._artifact = artifact
             self._artifact_published_at = published_at
             self._tree = tree
             self._result_cache.clear()
+            self._capabilities = {key: report[key] for key in ("area_environment_ready", "zone_environment_ready")}
 
     def clear(self) -> None:
         with self._lock:
@@ -621,6 +670,7 @@ class RouteArtifactRuntime:
             self._tree = None
             self._result_cache.clear()
             self._manifest_mtime_ns = None
+            self._capabilities = {"area_environment_ready": False, "zone_environment_ready": False}
 
     def status(self) -> dict[str, bool | str | None]:
         with self._lock:
@@ -628,6 +678,7 @@ class RouteArtifactRuntime:
                 "available": self._artifact is not None,
                 "version": self._artifact.version if self._artifact is not None else None,
                 "published_at": self._artifact_published_at.isoformat() if self._artifact_published_at else None,
+                **self._capabilities,
             }
 
     def published_at(self) -> datetime | None:
@@ -641,7 +692,47 @@ class RouteArtifactRuntime:
             scores = self._artifact.score_by_period.get(period)
             return dict(scores) if scores is not None else None
 
+    def environment_snapshot(self):
+        """Return one immutable artifact reference for the whole request, including reload races."""
+        from app.services.route_environment_policy import EnvironmentPolicy
+        with self._lock:
+            artifact, tree = self._artifact, self._tree
+            if artifact is None or tree is None or artifact.schema_version not in (3, 4) or artifact.environment_model_version != "facility-access-v1":
+                return None
+            if artifact.environment_policy_fingerprint != EnvironmentPolicy().fingerprint():
+                return None
+            if artifact.environment_graph is None:
+                return None
+            return EnvironmentSnapshot(artifact, tree)
+
+    def find_environment_candidates(self, start, end, *, at, policy, snapshot=None):
+        from app.services.route_environment_search import find_candidates
+
+        snapshot = snapshot if snapshot is not None else self.environment_snapshot()
+        if snapshot is None or snapshot.artifact.environment_index is None:
+            return None
+        artifact = snapshot.artifact
+        graph = artifact.environment_graph
+        # Use this snapshot's node index; a concurrent reload cannot mix graph/node IDs.
+        tree = snapshot.node_tree
+        _, a = tree.query((start[0], start[1] * _LNG_SCALE))
+        _, b = tree.query((end[0], end[1] * _LNG_SCALE))
+        origin, destination = artifact.node_ids[int(a)], artifact.node_ids[int(b)]
+        for point, node in ((start, origin), (end, destination)):
+            if haversine_km(*point, graph.nodes[node]["y"], graph.nodes[node]["x"]) > MAX_ROUTE_NODE_SNAP_KM:
+                return None
+        try:
+            return find_candidates(graph, origin, destination, at=at, policy=policy, indexes=artifact.environment_index,
+                                   straight_km=haversine_km(*start, *end), edge_points=_edge_points)
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return None
+
     def load(self, directory: Path) -> bool:
+        try:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") not in (3, 4):
+                return False
+        except (OSError, ValueError, AttributeError):
+            return False
         artifact = load_current_artifact(directory)
         if artifact is None:
             return False
@@ -669,10 +760,20 @@ class RouteArtifactRuntime:
             manifest_stat = (directory / "current.json").stat()
             manifest_mtime_ns = manifest_stat.st_mtime_ns
             published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
-        except OSError:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") not in (3, 4):
+                return False
+        except (OSError, ValueError, AttributeError):
             return False
         if manifest_mtime_ns == current_mtime_ns:
-            return False
+            # Atomic replacements can share one Windows timestamp tick. Version identity,
+            # not mtime alone, determines whether the currently loaded immutable artifact changed.
+            try:
+                manifest_version = json.loads((directory / "current.json").read_text(encoding="utf-8")).get("version")
+            except (OSError, ValueError, AttributeError):
+                return False
+            with self._lock:
+                if self._artifact is not None and self._artifact.version == manifest_version:
+                    return False
 
         artifact = load_current_artifact(directory)
         if artifact is None:
@@ -741,8 +842,28 @@ class RouteArtifactRuntime:
 route_artifact_runtime = RouteArtifactRuntime()
 
 
+def _prepare_extended_environment(zones, environment_index, policy):
+    from app.services.walk_environment_samples import SAMPLING_VERSION, load_walk_source_for_sampling
+    from app.services.zone_environment_summaries import load_assessment_boundaries, build_zone_environment_summaries
+    def release_batch_source():
+        global _local_graph, _local_graph_attempted, _local_graph_fingerprint
+        with _local_graph_lock:
+            _local_graph, _local_graph_attempted, _local_graph_fingerprint = None, False, None
+    logger.info("Preparing physical walk index for area and zone assessments")
+    index = load_walk_source_for_sampling(LOCAL_WALK_NETWORK_PATH,
+        cache_path=LOCAL_WALK_NETWORK_PATH.with_name("walk-environment-index.pickle"), before_source_load=release_batch_source)
+    wanted = {z.dong_code for z in zones}
+    boundaries = load_assessment_boundaries(Path(settings.route_environment_sources_path), wanted)
+    summaries = build_zone_environment_summaries(index, boundaries.boundaries, wanted, policy=policy, indexes=environment_index,
+                                                boundary_version=boundaries.version)
+    return dict(walk_environment_index=index, zone_facility_summaries=summaries, boundary_version=boundaries.version,
+                sampling_version=SAMPLING_VERSION, boundary_diagnostics={"missing_codes": boundaries.missing_codes,
+                    "invalid_codes": boundaries.invalid_codes, "wanted_count": len(wanted), "matched_count": len(boundaries.boundaries)})
+
+
 def build_route_artifact(
-    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE,
+    target_schema: int = 4,
 ) -> RouteArtifact:
     """배치 실행에서만 호출하는 낮·밤 안전 가중 경로 그래프 생성기.
 
@@ -752,26 +873,30 @@ def build_route_artifact(
 
     if not zones:
         raise ValueError("Safety zones are required to build a route artifact")
+    if target_schema not in (3, 4):
+        raise ValueError("unsupported_target_schema")
+
+    from app.services.route_environment_policy import EnvironmentPolicy
+    from app.services.route_environment_sources import build_environment_index, load_environment_sources
+    from app.services.route_environment_search import annotate_environment_graph
+    environment_policy = EnvironmentPolicy()
+    environment_index = build_environment_index(load_environment_sources(Path(settings.route_environment_sources_path)))
+    extended = _prepare_extended_environment(zones, environment_index, environment_policy) if target_schema == 4 else {}
     graph = _load_local_graph()
     if graph is None or graph.number_of_nodes() == 0:
         raise RuntimeError("Local walking graph is required to build a route artifact")
-
-    zone_index = _build_zone_index(zones)
-    # 산출물은 공공시설 좌표의 스냅샷이다. 장기 실행되는 빌더가 이전 KD-tree를
-    # 재사용하면 시설 파일만 갱신된 경우에도 오래된 간선 점수가 게시될 수 있으므로,
-    # 빌드마다 파일에서 다시 읽는다.
-    facilities = load_facility_index()
-    graph_by_period: dict[Period, nx.DiGraph] = {}
+    environment_graph = _build_environment_graph(graph)
+    if any(entry.source.eligible() for entry in environment_index.sources):
+        annotate_environment_graph(environment_graph, environment_index, environment_policy)
+    # Route graphs carry geometry/evidence only. Dong/road mixture costs are retired.
+    graph_by_period = {"day": environment_graph, "night": environment_graph}
     score_by_period: dict[Period, dict[str, float]] = {}
     for period in ("day", "night"):
-        # 화면에 보여줄 동 점수(전체 요인)와 간선에 섞을 동 점수(구간 단위 요인 제외)는 다르다.
+        # Residence endpoints may reuse these maps; route selection never reads them.
         score_by_period[period] = compute_zone_period_scores(zones, period, profile=profile)
-        graph_by_period[period] = _build_scored_graph(
-            graph, zones, route_zone_scores(zones, period, profile), zone_index, period, facilities
-        )
 
     # 출발·도착점은 걸어서 닿을 수 있는 노드에만 붙인다(차도 구간을 뺀 뒤 남은 도로망).
-    walk_graph = graph_by_period["day"]
+    walk_graph = environment_graph
     node_ids = list(walk_graph.nodes)
     node_points = np.array(
         [(walk_graph.nodes[node_id]["y"], walk_graph.nodes[node_id]["x"] * _LNG_SCALE) for node_id in node_ids]
@@ -783,8 +908,15 @@ def build_route_artifact(
         node_ids=node_ids,
         node_points=node_points,
         profile_version=profile.version,
-        data_version=route_input_data_version(zones),
+        data_version=route_input_data_version(zones, profile=profile, target_schema=target_schema),
+        schema_version=target_schema,
         score_by_period=score_by_period,
+        environment_model_version="facility-access-v1",
+        policy_version=environment_policy.version,
+        environment_index=environment_index,
+        environment_policy_fingerprint=environment_policy.fingerprint(),
+        environment_graph=environment_graph,
+        **extended,
     )
 
 
@@ -826,6 +958,9 @@ def route_input_data_version(
     isolated_areas_path: Path = ISOLATED_AREAS_PATH,
     night_places_path: Path = NIGHT_PLACES_PATH,
     store_points_path: Path = STORE_POINTS_PATH,
+    graph_path: Path | None = None,
+    profile: ScoringProfile = DEFAULT_SCORING_PROFILE,
+    target_schema: int = 4,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
@@ -838,7 +973,27 @@ def route_input_data_version(
         "store_points": _file_sha256(store_points_path),
         "scoring_semantics": SCORING_SEMANTICS_VERSION,
         "route_scoring": ROUTE_SCORING_VERSION,
+        "route_engine": "facility-only-v1",
+        "walking_network": _file_sha256(graph_path or LOCAL_WALK_NETWORK_PATH),
+        "profile": {"version": profile.version, "weights": {k: dict(v) for k, v in profile.weights.items()}, "unknown_score": profile.unknown_score},
     }
+    from app.services.route_environment_policy import EnvironmentPolicy
+    from app.services.route_environment_sources import load_environment_sources
+    source_path = Path(settings.route_environment_sources_path)
+    payload["environment_policy"] = EnvironmentPolicy().fingerprint()
+    payload["environment_graph_preparation"] = "walk-length-parallel-v1"
+    payload["environment_manifest"] = _file_sha256(source_path)
+    payload["environment_verified_files"] = [(s.source_id, s.sha256) for s in load_environment_sources(source_path)]
+    if target_schema == 4:
+        from app.services import facility_assessment, route_environment_sources, walk_environment_samples, zone_environment_summaries
+        payload["target_schema"] = target_schema
+        payload["assessment_implementations"] = [_file_sha256(Path(module.__file__)) for module in
+                                                (facility_assessment, route_environment_sources, walk_environment_samples, zone_environment_summaries)]
+        payload["sampling_version"] = walk_environment_samples.SAMPLING_VERSION
+        payload["physical_road_filter"] = _file_sha256(Path(__file__).with_name("road_score.py"))
+        payload["schedule_version"] = zone_environment_summaries.SCHEDULE_VERSION
+        from scripts import build_gyeonggi_boundaries
+        payload["boundary_mapping"] = _file_sha256(Path(build_gyeonggi_boundaries.__file__))
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

@@ -14,10 +14,20 @@ from app.db.session import Base
 from app.models.safety_zone import SafetyZone
 from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
 from app.services.route_artifact import RouteArtifact, load_current_artifact, publish_artifact
-from app.services.scoring_profile import DEFAULT_SCORING_PROFILE
+from app.services.scoring_profile import DEFAULT_SCORING_PROFILE, ScoringProfile
+from app.services.route_environment_sources import EnvironmentIndex
+from app.services.route_environment_policy import EnvironmentPolicy
 from app.services import scoring_profile_store
 from app.services.safe_route import route_input_data_version
 from scripts import build_route_artifacts as script
+
+
+@pytest.fixture(autouse=True)
+def isolated_preparation(monkeypatch, tmp_path):
+    from app.services import route_environment_inputs
+    monkeypatch.setattr(route_environment_inputs, "prepare_environment_inputs", lambda *a, **k: None)
+    monkeypatch.setattr(settings, "route_environment_sources_path", str(tmp_path / "sources.json"))
+    monkeypatch.setattr(settings, "route_validation_cases_path", str(tmp_path / "cases.json"))
 
 
 def _raise(exc: BaseException) -> None:
@@ -26,15 +36,22 @@ def _raise(exc: BaseException) -> None:
     raise exc
 
 
-def _artifact(version: str) -> RouteArtifact:
+def _artifact(version: str, schema: int = 4) -> RouteArtifact:
+    from app.services.walk_environment_samples import SAMPLING_VERSION, WalkEnvironmentIndex
     graph = nx.DiGraph()
     graph.add_node(1, y=37.5, x=127.0)
     graph.add_node(2, y=37.501, x=127.001)
     graph.add_edge(1, 2, length=140.0, edge_score=70.0, safety_cost=210.0)
     return RouteArtifact(
         version=version,
+        schema_version=schema,
+        walk_environment_index=WalkEnvironmentIndex((), "test-source") if schema == 4 else None,
+        sampling_version=SAMPLING_VERSION if schema == 4 else None,
+        boundary_version="test-boundary" if schema == 4 else None,
         region="seoul-gyeonggi",
         graph_by_period={"day": graph, "night": graph.copy()},
+        environment_graph=graph, environment_index=EnvironmentIndex(),
+        environment_model_version="facility-access-v1", environment_policy_fingerprint=EnvironmentPolicy().fingerprint(),
         node_ids=[1, 2],
         node_points=np.array([(37.5, 100.75587421698687), (37.501, 100.75666757032717)]),
     )
@@ -74,7 +91,7 @@ def _seed_queued_build(session_local, *, active_version: str = "current-v1") -> 
 
 
 def test_batch_builder_publishes_the_built_artifact(monkeypatch, tmp_path):
-    monkeypatch.setattr(script, "build_route_artifact", lambda zones, **kwargs: _artifact(kwargs["version"]))
+    monkeypatch.setattr(script, "build_route_artifact", lambda zones, **kwargs: _artifact(kwargs["version"], kwargs["target_schema"]))
 
     artifact_dir = script.build_and_publish_route_artifact(
         zones=[object()], directory=tmp_path, version="v1", region="seoul-gyeonggi"
@@ -104,13 +121,13 @@ def test_main_builds_an_artifact_from_scoped_zones_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
         script,
         "build_and_publish_route_artifact",
-        lambda **kwargs: captured.update(kwargs) or tmp_path / "v1",
+        lambda **kwargs: captured.update({**kwargs, "dong_codes": [z.dong_code for z in kwargs["zones"]]}) or tmp_path / "v1",
     )
-    monkeypatch.setattr(sys, "argv", ["build_route_artifacts.py", "--directory", str(tmp_path)])
+    monkeypatch.setattr(sys, "argv", ["build_route_artifacts.py", "--directory", str(tmp_path), "--bootstrap"])
 
     script.main()
 
-    assert [zone.dong_code for zone in captured["zones"]] == ["11110101"]
+    assert captured["dong_codes"] == ["11110101"]
 
 
 def test_main_processes_one_queued_build(monkeypatch, tmp_path):
@@ -129,8 +146,8 @@ def test_queued_build_publishes_then_activates_candidate_profile(monkeypatch, tm
     publish_artifact(_artifact("stable-v1"), tmp_path)
     monkeypatch.setattr(script, "SessionLocal", session_local)
 
-    def publish_candidate(*, directory, version, profile, **_):
-        artifact = _artifact(version)
+    def publish_candidate(*, directory, version, profile, target_schema, **_):
+        artifact = _artifact(version, target_schema)
         object.__setattr__(artifact, "profile_version", profile.version)
         return publish_artifact(artifact, directory)
 
@@ -141,6 +158,8 @@ def test_queued_build_publishes_then_activates_candidate_profile(monkeypatch, tm
     db = session_local()
     build = db.get(ScoreBuildRecord, build_id)
     profiles = {profile.version: profile.status for profile in db.query(ScoringProfileRecord).all()}
+    assert load_current_artifact(tmp_path).schema_version == 3
+    assert db.query(ScoreBuildRecord).filter_by(target_schema=4, status="queued").count() == 1
     db.close()
     current = load_current_artifact(tmp_path)
 
@@ -209,7 +228,7 @@ def test_reconcile_published_artifact_completes_interrupted_build(tmp_path):
     db.close()
     artifact = _artifact("published-v2")
     object.__setattr__(artifact, "profile_version", candidate.version)
-    object.__setattr__(artifact, "data_version", route_input_data_version([zone]))
+    object.__setattr__(artifact, "data_version", route_input_data_version([zone], profile=ScoringProfile(candidate.version, json.loads(candidate.weights_json), candidate.unknown_score)))
     publish_artifact(artifact, tmp_path)
 
     db = session_local()
@@ -233,7 +252,7 @@ def test_unchanged_active_artifact_does_not_queue_periodic_rebuild(tmp_path):
     db.commit()
     artifact = _artifact("active-artifact")
     object.__setattr__(artifact, "profile_version", active.version)
-    object.__setattr__(artifact, "data_version", route_input_data_version([zone]))
+    object.__setattr__(artifact, "data_version", route_input_data_version([zone], profile=ScoringProfile(active.version, json.loads(active.weights_json), active.unknown_score)))
     publish_artifact(artifact, tmp_path)
 
     assert script.queue_rebuild_if_active_artifact_is_stale(db, tmp_path) is False
@@ -241,29 +260,71 @@ def test_unchanged_active_artifact_does_not_queue_periodic_rebuild(tmp_path):
     db.close()
 
 
-def test_worker_processes_queue_and_runs_one_freshness_check(monkeypatch, tmp_path):
-    assert find_spec("scripts.artifact_builder_worker") is not None
-    from scripts import artifact_builder_worker as worker
+def test_bootstrap_registers_default_draft_and_deduplicates_request(tmp_path):
+    session_local = _session_local(tmp_path)
+    db = session_local()
+    profile = script.ensure_build_profile(db, bootstrap=True, current_profile_version="default-v3")
+    assert profile.status == "draft"
+    again = script.ensure_build_profile(db, bootstrap=True, current_profile_version="default-v3")
+    assert again.id == profile.id
+    a = scoring_profile_store.queue_route_build(db, profile_id=profile.id, input_fingerprint="inputs-v1", region="gyeonggi", target_schema=3, reason="bootstrap")
+    b = scoring_profile_store.queue_route_build(db, profile_id=profile.id, input_fingerprint="inputs-v1", region="gyeonggi", target_schema=3, reason="changed")
+    assert a.id == b.id
+    assert db.query(ScoreBuildRecord).count() == 1
+    assert db.get(ScoringProfileRecord, profile.id).status == "draft"
+    db.close()
 
-    calls: list[str] = []
+
+def test_bootstrap_does_not_replace_an_unknown_existing_profile(tmp_path):
+    session_local = _session_local(tmp_path)
+    with session_local() as db, pytest.raises(ValueError, match="profile_unresolved"):
+        script.ensure_build_profile(db, bootstrap=True, current_profile_version="unknown-custom")
+
+
+def test_interrupted_build_is_requeued_immediately_after_restart(tmp_path):
+    from datetime import UTC, datetime
+    session_local = _session_local(tmp_path)
+    with session_local() as db:
+        profile = _profile("default-v3", "active")
+        zone = SafetyZone(dong_code="TEST1", dong_name="테스트", lat=37.5, lng=127)
+        db.add_all([profile, zone])
+        db.commit()
+        fingerprint = route_input_data_version([zone])
+        db.add(ScoreBuildRecord(profile_id=profile.id, status="failed", input_fingerprint=fingerprint,
+                                error_code="interrupted", finished_at=datetime.now(UTC)))
+        db.commit()
+        assert script.queue_rebuild_if_active_artifact_is_stale(db, tmp_path) is True
+
+
+def test_corrupt_unchanged_artifact_triggers_automatic_repair(tmp_path):
+    session_local = _session_local(tmp_path)
+    with session_local() as db:
+        profile = _profile("default-v3", "active")
+        zone = SafetyZone(dong_code="TEST1", dong_name="테스트", lat=37.5, lng=127)
+        db.add_all([profile, zone])
+        db.commit()
+        artifact = _artifact("stable")
+        object.__setattr__(artifact, "profile_version", profile.version)
+        object.__setattr__(artifact, "data_version", route_input_data_version([zone]))
+        publish_artifact(artifact, tmp_path)
+        assert script.queue_rebuild_if_active_artifact_is_stale(db, tmp_path) is False
+        (tmp_path / "stable" / "route-artifact.pickle").write_bytes(b"truncated")
+        assert script.queue_rebuild_if_active_artifact_is_stale(db, tmp_path) is True
+
+
+def test_worker_prepares_inputs_before_freshness_check_and_processing(monkeypatch, tmp_path):
+    from scripts import artifact_builder_worker as worker
+    from app.services import route_environment_inputs
+    from types import SimpleNamespace
+    calls = []
     monkeypatch.setattr(worker, "process_next_queued_build", lambda **_: calls.append("process") or False)
     monkeypatch.setattr(worker, "reconcile_published_build", lambda *_: calls.append("reconcile") or False)
-    monkeypatch.setattr(
-        worker, "queue_rebuild_if_active_artifact_is_stale", lambda *_: calls.append("freshness") or False
-    )
-    monkeypatch.setattr(worker, "SessionLocal", lambda: _WorkerSession(calls))
+    monkeypatch.setattr(worker, "queue_rebuild_if_active_artifact_is_stale", lambda *a, **k: calls.append("freshness") or False)
+    monkeypatch.setattr(route_environment_inputs, "prepare_environment_inputs", lambda *a: calls.append("prepare") or SimpleNamespace(snapshot_id="fixture",diagnostics=[]))
+    monkeypatch.setattr(worker, "SessionLocal", _session_local(tmp_path))
     monkeypatch.setattr(worker.time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(worker.time, "sleep", lambda _: _raise(StopIteration()))
-
     with pytest.raises(StopIteration):
-        worker.run_worker(directory=tmp_path, region="seoul-gyeonggi", poll_seconds=1, refresh_seconds=1800)
-
-    assert calls == ["process", "reconcile", "freshness", "close"]
-
-
-class _WorkerSession:
-    def __init__(self, calls: list[str]):
-        self.calls = calls
-
-    def close(self) -> None:
-        self.calls.append("close")
+        worker.run_worker(directory=tmp_path, region="gyeonggi", poll_seconds=1, refresh_seconds=1800)
+    assert calls.index("prepare") < calls.index("freshness") < calls.index("process")
+    assert "reconcile" in calls

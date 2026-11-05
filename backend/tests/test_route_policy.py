@@ -56,6 +56,14 @@ def test_development_allows_default_jwt_secret_for_local_startup():
     validate_runtime_settings(Settings(app_env="development"))
 
 
+def test_retired_route_switch_in_existing_env_does_not_break_or_disable_new_engine(tmp_path):
+    env = tmp_path / "legacy.env"
+    env.write_text("APP_ENV=test\nROUTE_ENVIRONMENT_MODEL_ENABLED=false\n")
+    settings = Settings(_env_file=env)
+    assert not hasattr(settings, "route_environment_model_enabled")
+    assert settings.route_builder_auto_start is True
+
+
 def test_credentialed_cors_rejects_a_wildcard_origin_in_every_environment():
     with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
         validate_runtime_settings(Settings(app_env="development", cors_allow_origins="*"))

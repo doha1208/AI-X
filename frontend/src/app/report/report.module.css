@@ -95,7 +95,7 @@
 
 .countRow {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -112,13 +112,32 @@
 }
 
 .count strong {
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 800;
 }
 
 .count span {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.details,
+.localEvidence {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.details summary {
+  cursor: pointer;
+}
+
+.details p {
+  margin-top: 6px;
+}
+
+.localEvidence {
+  padding-inline-start: 20px;
 }
 
 .havens {
@@ -137,6 +156,11 @@
   border-radius: var(--radius-md);
   background: var(--surface-muted);
   font-size: 14px;
+}
+
+.havens small {
+  display: block;
+  color: var(--text-muted);
 }
 
 .havens a,

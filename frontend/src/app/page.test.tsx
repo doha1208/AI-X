@@ -76,16 +76,17 @@ describe("ResidencePage responsive presentation", () => {
   it("tells the user right away when a watched neighbourhood's score has changed", async () => {
     localStorage.setItem(
       "ansim:watched-zones",
-      JSON.stringify([{ dong_code: "1168064000", dong_name: "강남구 역삼동", lat: 37.5, lng: 127.03, score: 82.4 }])
+      JSON.stringify({ schema: 2, zones: [{ dong_code: "1168064000", dong_name: "강남구 역삼동", lat: 37.5, lng: 127.03,
+        score: 82.4, metric: "regional_statistics", period: "day" }] })
     );
     nearbyZones.mockResolvedValue([
-      { dong_code: "1168064000", dong_name: "강남구 역삼동", lat: 37.5, lng: 127.03, safety_score: 70 },
+      { dong_code: "1168064000", dong_name: "강남구 역삼동", lat: 37.5, lng: 127.03, safety_score: 70, period: "day" },
     ]);
 
     render(<ResidencePage />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("강남구 역삼동 안전지수가 82점에서 70점으로 내려갔어요");
-    expect(JSON.parse(localStorage.getItem("ansim:watched-zones") ?? "[]")[0].score).toBe(70);
+    expect(await screen.findByRole("status")).toHaveTextContent("강남구 역삼동 지역 통계 지수가 82점에서 70점으로 내려갔어요");
+    expect(JSON.parse(localStorage.getItem("ansim:watched-zones")!).zones[0].score).toBe(70);
 
     fireEvent.click(screen.getByRole("button", { name: "알림 닫기" }));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

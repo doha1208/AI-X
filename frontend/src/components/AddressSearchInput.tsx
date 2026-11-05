@@ -20,15 +20,17 @@ type Props = {
 export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, placeholder, className, containerClassName, autoFocus, required, inlineResults = false }: Props) {
   const listId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
-  const selectedLabel = useRef<string | null>(null);
+  const [typedQuery, setTypedQuery] = useState<string | null>(null);
   const [result, setResult] = useState<{ query: string; places: Place[] } | null>(null);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  const places = open && result?.query === value.trim() ? result.places : [];
+  const places = open && typedQuery === value && result?.query === value.trim() ? result.places : [];
 
   useEffect(() => {
-    const query = value.trim();
-    if (query.length < 2 || query === selectedLabel.current) return;
+    // Map selections and restored places are already resolved, not new search input.
+    if (typedQuery === null || typedQuery !== value) return;
+    const query = typedQuery.trim();
+    if (query.length < 2) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void searchAddressSuggestions(query)
@@ -36,10 +38,10 @@ export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, place
         .catch(() => { if (!cancelled) setResult({ query, places: [] }); });
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [value]);
+  }, [typedQuery, value]);
 
   function choose(place: Place) {
-    selectedLabel.current = place.label;
+    setTypedQuery(null);
     setOpen(false);
     setActive(-1);
     onSelect(place);
@@ -55,7 +57,7 @@ export function AddressSearchInput({ value, onChange, onSelect, ariaLabel, place
         className={`${styles.input} ${className ?? ""}`}
         value={value}
         onChange={(event) => {
-          selectedLabel.current = null;
+          setTypedQuery(event.target.value);
           setResult(null);
           setActive(-1);
           setOpen(true);

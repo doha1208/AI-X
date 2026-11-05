@@ -97,11 +97,11 @@ export function addRecent(kind: RecentKind, place: RecentPlace): void {
   writeJson(RECENT_KEYS[kind], [entry, ...rest].slice(0, MAX_RECENT));
 }
 
-// 서버는 시각만 보고 낮(06~22시)/밤을 가르므로, 고정 시각을 보내 가중치를 강제한다.
-export function routeTimeFor(mode: TimeMode): string | undefined {
-  if (mode === "day") return "2000-01-01T12:00:00+09:00";
-  if (mode === "night") return "2000-01-01T23:00:00+09:00";
-  return undefined;
+// 시간대 미리보기에도 현재 KST 날짜·요일을 보존해 영업시간 판정에 사용한다.
+export function routeTimeFor(mode: TimeMode, now: Date = new Date()): string | undefined {
+  if (mode === "auto") return undefined;
+  const kstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return `${kstDate}T${mode === "day" ? "12" : "23"}:00:00+09:00`;
 }
 
 // sms: 링크에 그대로 들어가므로 숫자·+·-·공백·괄호만 허용하고 숫자가 3자리 이상일 때만 번호로 본다.

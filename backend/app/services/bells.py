@@ -19,16 +19,33 @@ DEFAULT_BELL_LIMIT = 60
 Point = tuple[float, float]
 
 _cached_points: list[Point] | None = None
+_cached_stamp = None
+_snapshot_version = None
+_snapshot_points: list[Point] = []
 
 
 def load_bell_points(path: Path = BELL_POINTS_PATH) -> list[Point]:
     """좌표 파일이 없으면 빈 목록 — 지도에 마커가 안 보일 뿐 나머지 기능은 그대로 동작한다."""
-    global _cached_points
-    if _cached_points is None:
+    global _cached_points, _cached_stamp, _snapshot_version, _snapshot_points
+    if path == BELL_POINTS_PATH:
+        from app.services.safe_route import route_artifact_runtime
+        snapshot = route_artifact_runtime.environment_snapshot()
+        if snapshot is not None:
+            artifact = snapshot.artifact
+            if _snapshot_version != artifact.version:
+                _snapshot_points = sorted({p for entry in artifact.environment_index.sources if entry.source.factor == "bell" for p in entry.source.points})
+                _snapshot_version = artifact.version
+            return _snapshot_points
+    try:
+        stamp = (str(path.resolve()), path.stat().st_mtime_ns, path.stat().st_size)
+    except OSError:
+        stamp = (str(path.resolve()), None, None)
+    if _cached_points is None or _cached_stamp != stamp:
         if not path.exists():
             _cached_points = []
         else:
             _cached_points = [tuple(p) for p in json.loads(path.read_text(encoding="utf-8"))]
+        _cached_stamp = stamp
     return _cached_points
 
 

@@ -18,6 +18,7 @@ import {
   type TimeMode,
 } from "@/lib/preferences";
 import { AppHeader } from "@/components/AppHeader";
+import { AssessmentExplanation } from "@/components/AssessmentExplanation";
 import { CloseIcon, InfoIcon, MapPinIcon, PhoneIcon, PlusIcon, SearchIcon } from "@/components/icons";
 import styles from "./me.module.css";
 
@@ -155,9 +156,9 @@ export default function MyInfoPage() {
           <div className={styles.settingRow}>
             <div>
               <label className={styles.settingLabel} htmlFor="time-mode">
-                안전지수 시간대 기준
+                경로 미리보기 시간대 기준
               </label>
-              <p className={styles.settingHint}>자동이면 현재 시각(밤 22시~6시)에 맞춰 가중치를 바꿉니다.</p>
+              <p className={styles.settingHint}>자동은 현재 KST, 수동은 오늘 낮 12시·밤 23시로 경로를 비교합니다. 실시간 안내는 현재 시각을 사용합니다.</p>
             </div>
             <select
               id="time-mode"
@@ -268,18 +269,12 @@ export default function MyInfoPage() {
         <section className={styles.infoCard}>
           <h2 className={styles.infoTitle}>
             <InfoIcon size={16} />
-            안전지수 계산 방식 안내
+            평가 기준 안내
           </h2>
-          <p className={styles.infoText}>
-            안전지수는 <strong>CCTV·보안등 개수, 1만 명당 범죄율, 가까운 경찰서·안전비상벨까지의 거리, 상점 밀도,
-            교통사고 다발지역과의 거리</strong>를 종합해 계산해요. 밤에는 보안등 비중을 높이고 야간 유동인구를 더하며,
-            길안내에서는 편의점 근처를 더 낫게, 유흥업소 근처와 공원·하천변을 덜 좋게 봐요.
-          </p>
-          <p className={styles.infoText}>
-            지자체가 데이터를 제출하지 않은 항목은 0이나 중간값으로 채우지 않고 계산에서 빼요. 이 점수와 추천 경로는
-            공개 데이터를 바탕으로 한 참고 정보이며, 실제 안전을 보장하지 않아요.{" "}
-            <Link href="/data">데이터 출처와 기준 보기</Link>
-          </p>
+          <details><summary>계산 방식·시간대·알림 기준 상세</summary>
+            <AssessmentExplanation textClassName={styles.infoText} />
+          </details>
+          <p className={styles.infoText}><Link href="/data">데이터 출처와 기준 보기</Link></p>
         </section>
 
         <button type="button" className={styles.logoutButton} onClick={handleLogout}>

@@ -19,8 +19,13 @@ def ensure_database_schema(engine: Engine) -> None:
         ("error_code", "VARCHAR"),
         ("started_at", "DATETIME"),
         ("finished_at", "DATETIME"),
+        ("input_fingerprint", "VARCHAR"),
+        ("region", "VARCHAR NOT NULL DEFAULT 'gyeonggi'"),
+        ("target_schema", "INTEGER NOT NULL DEFAULT 3"),
+        ("reason", "VARCHAR NOT NULL DEFAULT 'profile_apply'"),
     )
     with engine.begin() as connection:
         for name, ddl in additions:
             if name not in existing_columns:
                 connection.execute(text(f"ALTER TABLE score_builds ADD COLUMN {name} {ddl}"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_route_pending_input ON score_builds (profile_id, input_fingerprint, region, target_schema) WHERE status IN ('queued', 'building') AND input_fingerprint IS NOT NULL"))

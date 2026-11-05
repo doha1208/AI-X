@@ -23,6 +23,12 @@ describe("guide handoff", () => {
     expect(loadHandoff({ lat: 37.3, lng: 127.02 }, 2000)).toBeNull();
   });
 
+  it("preserves the preview evaluation version and date without treating it as a live response", () => {
+    const basis = { artifact_version: "test-snapshot", evaluated_at: "2026-11-05T23:00:00+09:00" };
+    saveHandoff(end, { ...option, facilityBasis: basis }, 1000);
+    expect(loadHandoff(end, 2000)?.facilityBasis).toEqual(basis);
+  });
+
   it("ignores a stale route", () => {
     saveHandoff(end, option, 0);
     expect(loadHandoff(end, 11 * 60 * 1000)).toBeNull();

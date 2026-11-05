@@ -47,7 +47,7 @@ def simplify_geometry(geometry: dict) -> dict:
     return mapping(shapely.set_precision(simplified, 10**-COORD_DECIMALS))
 
 
-def build_features(source: dict, wanted_codes: set[str]) -> list[dict]:
+def build_features(source: dict, wanted_codes: set[str], *, simplify: bool = True) -> list[dict]:
     features = []
     for feature in source["features"]:
         props = feature["properties"]
@@ -57,7 +57,7 @@ def build_features(source: dict, wanted_codes: set[str]) -> list[dict]:
             {
                 "type": "Feature",
                 "properties": {"adm_cd2": props["adm_cd2"], "adm_nm": props["adm_nm"], "sggnm": props["sggnm"]},
-                "geometry": simplify_geometry(feature["geometry"]),
+                "geometry": simplify_geometry(feature["geometry"]) if simplify else feature["geometry"],
             }
         )
     return features
