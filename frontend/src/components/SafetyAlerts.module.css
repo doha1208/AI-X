@@ -45,6 +45,15 @@
   font-weight: 700;
 }
 
+.liveDetails {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.liveDetails summary {
+  cursor: pointer;
+}
+
 .actions {
   display: flex;
   gap: 8px;

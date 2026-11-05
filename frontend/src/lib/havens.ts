@@ -27,6 +27,3 @@ export function havenAvailabilityText(haven: SafeHaven): string {
   return [opening, haven.staffing_status === "unverified" && "유인 미확인",
     haven.operation_status === "unverified" && "작동 미확인"].filter(Boolean).join(" · ");
 }
-
-// Compatibility for the previous guide until the next commit.
-export const LOW_SPOT_SCORE = 40;

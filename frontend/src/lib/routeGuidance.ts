@@ -1,4 +1,4 @@
-import type { FacilityScoreDisplay, RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
+import type { FacilityScoreDisplay, RouteEnvironmentBasis, RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
 import { haversineMeters } from "./geo";
 import type { LatLng } from "./kakao";
 
@@ -59,11 +59,17 @@ export function progressAlong(points: LatLng[], here: LatLng): Progress {
 // 경로 위 실제로 가장 가까운 지점(꼭짓점이 아니라 선분 위 투영점)을 찾는다. 내 위치 마커를
 // 경로에 붙여 보여줄 때(GPS 떨림 완화) 씀 — 꼭짓점만 보면 직선 구간 중간에서 튀어 보인다.
 export function nearestPointOnPath(points: LatLng[], here: LatLng): { point: LatLng; distanceM: number } {
-  if (points.length === 0) return { point: here, distanceM: 0 };
+  const { point, distanceM } = projectOnPath(points, here);
+  return { point, distanceM };
+}
+
+export function projectOnPath(points: LatLng[], here: LatLng): { point: LatLng; distanceM: number; progressM: number } {
+  if (points.length === 0) return { point: here, distanceM: 0, progressM: 0 };
   const toXY = (p: LatLng) => ({ x: (p.lng - here.lng) * LNG_SCALE, y: p.lat - here.lat });
   const toLatLng = (x: number, y: number): LatLng => ({ lat: here.lat + y, lng: here.lng + x / LNG_SCALE });
 
-  let best = { point: points[0], distanceM: haversineMeters(here, points[0]) };
+  let best = { point: points[0], distanceM: haversineMeters(here, points[0]), progressM: 0 };
+  let walkedM = 0;
   for (let i = 0; i < points.length - 1; i++) {
     const a = toXY(points[i]);
     const b = toXY(points[i + 1]);
@@ -73,7 +79,9 @@ export function nearestPointOnPath(points: LatLng[], here: LatLng): { point: Lat
     const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, (-a.x * abx + -a.y * aby) / lenSq));
     const candidate = toLatLng(a.x + abx * t, a.y + aby * t);
     const distanceM = haversineMeters(here, candidate);
-    if (distanceM < best.distanceM) best = { point: candidate, distanceM };
+    const length = haversineMeters(points[i], points[i + 1]);
+    if (distanceM < best.distanceM) best = { point: candidate, distanceM, progressM: walkedM + t * length };
+    walkedM += length;
   }
   return best;
 }
@@ -93,7 +101,21 @@ export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): Nex
 }
 
 export type GuideKind = "safe" | "shortest";
-export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number; environmentAssessment?: RouteEnvironmentAssessment | null };
+export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number;
+  environmentAssessment?: RouteEnvironmentAssessment | null; facilityBasis?: RouteEnvironmentBasis | null };
+
+export function routeGeometryId(points: LatLng[]): string {
+  let hash = 2166136261;
+  let second = 5381;
+  for (const p of points) {
+    const coordinate = `${p.lat},${p.lng};`;
+    for (let i = 0; i < coordinate.length; i++) {
+      hash = Math.imul(hash ^ coordinate.charCodeAt(i), 16777619);
+      second = (Math.imul(second, 33) ^ coordinate.charCodeAt(i)) | 0;
+    }
+  }
+  return `${points.length}:${hash >>> 0}:${second >>> 0}`;
+}
 
 export function supportedEnvironment<T extends FacilityScoreDisplay>(value?: T | null): T | null {
   return value?.model_version === "facility-access-v1" && value.policy_version === "environment-v1-draft" ? value : null;
@@ -142,11 +164,12 @@ export function guideOptions(result: RouteResult): GuideOption[] {
       zones: best?.zones_passed ?? result.zones_passed,
       distanceM: best?.distance_m ?? pathLength(result.route_points),
       environmentAssessment: supportedEnvironment(best?.environment_assessment ?? result.environment_assessment),
+      facilityBasis: result.environment_basis,
     },
   ];
   const shortest = result.shortest_route_points;
   if (shortest && shortest.length > 1) {
-    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), environmentAssessment: supportedEnvironment(result.comparison_environment_assessment) });
+    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), environmentAssessment: supportedEnvironment(result.comparison_environment_assessment), facilityBasis: result.environment_basis });
   }
   return options;
 }

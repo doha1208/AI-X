@@ -1,11 +1,11 @@
-import type { SafeHaven } from "@/lib/api";
-import { HAVEN_LABEL, havenDirectionsUrl } from "@/lib/havens";
+import type { LiveFacilityReport, SafeHaven } from "@/lib/api";
+import { bestHaven, HAVEN_LABEL, havenAvailabilityText, havenDirectionsUrl } from "@/lib/havens";
 import { formatDistance } from "@/lib/routeGuidance";
+import { facilityAlertText, type FacilityAlert } from "@/lib/facility_alerts";
 import styles from "./SafetyAlerts.module.css";
 
 type Props = {
-  // 지금 자리 점수가 낮을 때 보여줄 가장 가까운 안심 거점(없으면 경고만).
-  lowSpot: boolean;
+  facilityAlert: FacilityAlert | null;
   haven: SafeHaven | null;
   // 예상 도착 시간이 지났는지.
   overdue: boolean;
@@ -13,8 +13,35 @@ type Props = {
   onNotifyGuardians: () => void;
 };
 
-export function SafetyAlerts({ lowSpot, haven, overdue, onSnooze, onNotifyGuardians }: Props) {
-  if (!lowSpot && !overdue) return null;
+function HavenDetails({ haven }: { haven: SafeHaven | null }) {
+  if (!haven) return <p className={styles.text}>현재 자료에서 가까운 안심 거점을 확인하지 못했어요.</p>;
+  const status = havenAvailabilityText(haven);
+  return <p className={styles.text}>
+    {HAVEN_LABEL[haven.kind]} <strong>{formatDistance(haven.distance_m)}</strong>
+    {status && ` · ${status}`}{" "}
+    <a href={havenDirectionsUrl(haven)} target="_blank" rel="noopener noreferrer">위치 보기</a>
+  </p>;
+}
+
+const LOCAL_FACTORS: Record<string, string> = { cctv: "CCTV", lighting: "보안등", open_store: "영업 확인 상점" };
+
+export function LiveFacilityDetails({ report }: { report: LiveFacilityReport | null }) {
+  const point = report?.local_environment;
+  const factors = point?.period === "night" ? ["lighting", "open_store"] : ["cctv", "open_store"];
+  return <details className={styles.liveDetails}>
+    <summary>실시간 시설 정보</summary>
+    {point ? factors.map(factor => {
+      const state = point.factors[factor]?.state;
+      const label = state === "present" ? "인접 근거 있음" : state === "absent_in_verified_inventory"
+        ? "검증 목록에서 인접 시설 미관측" : "자료 미확인";
+      return <p className={styles.text} key={factor}>{LOCAL_FACTORS[factor]}: {label}</p>;
+    }) : <p className={styles.text}>현재 시각의 시설 근거를 확인하지 못했어요.</p>}
+    <HavenDetails haven={report ? bestHaven(report.havens) : null} />
+  </details>;
+}
+
+export function SafetyAlerts({ facilityAlert, haven, overdue, onSnooze, onNotifyGuardians }: Props) {
+  if (!facilityAlert && !overdue) return null;
   return (
     <div className={styles.stack}>
       {overdue && (
@@ -30,19 +57,10 @@ export function SafetyAlerts({ lowSpot, haven, overdue, onSnooze, onNotifyGuardi
           </div>
         </section>
       )}
-      {lowSpot && (
+      {facilityAlert && (
         <section className={styles.card} role="status">
-          <p className={styles.title}>지금 지나는 길은 밝은 시설이 적어요</p>
-          {haven ? (
-            <p className={styles.text}>
-              가장 가까운 {HAVEN_LABEL[haven.kind]} <strong>{formatDistance(haven.distance_m)}</strong>{" "}
-              <a href={havenDirectionsUrl(haven)} target="_blank" rel="noopener noreferrer">
-                위치 보기
-              </a>
-            </p>
-          ) : (
-            <p className={styles.text}>근처 1.5km 안에 파출소·24시 편의점이 없어요. 큰길로 걸어 주세요.</p>
-          )}
+          <p className={styles.title}>{facilityAlertText(facilityAlert)}</p>
+          <HavenDetails haven={haven} />
         </section>
       )}
     </div>

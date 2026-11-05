@@ -26,11 +26,14 @@ export function loadHandoff(end: LatLng, now = Date.now()): GuideOption | null {
     const saved = JSON.parse(raw) as Handoff;
     const samePlace =
       Math.abs(saved.end.lat - end.lat) < SAME_PLACE_DEG && Math.abs(saved.end.lng - end.lng) < SAME_PLACE_DEG;
-    const fresh = now - saved.savedAt <= MAX_AGE_MS;
+    const fresh = now >= saved.savedAt && now - saved.savedAt <= MAX_AGE_MS;
     const valid = Array.isArray(saved.option?.points) && saved.option.points.length > 1;
     if (!(samePlace && fresh && valid)) return null;
     if (saved.option.environmentAssessment) {
       saved.option.environmentAssessment = supportedEnvironment(saved.option.environmentAssessment);
+    }
+    if (saved.option.facilityBasis && !Number.isFinite(Date.parse(saved.option.facilityBasis.evaluated_at))) {
+      delete saved.option.facilityBasis;
     }
     return saved.option;
   } catch {

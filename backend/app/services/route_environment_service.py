@@ -20,6 +20,8 @@ class EnvironmentRouteResult:
     baseline_source: str
     artifact_used: bool
     osm_available: bool
+    artifact_version: str | None
+    evaluated_at: datetime
 
 
 async def calculate_environment_routes(payload, *, runtime, tmap_provider):
@@ -53,4 +55,5 @@ async def calculate_environment_routes(payload, *, runtime, tmap_provider):
                                                           at=at, policy=policy, indexes=indexes)
     comparison = next((r for r in evaluated if r.candidate.source == "tmap"), None)
     return EnvironmentRouteResult(selected, comparison if payload.include_comparison else None,
-                                  "tmap" if comparison else "osm_shortest", snapshot is not None, osm_available)
+                                  "tmap" if comparison else "osm_shortest", snapshot is not None, osm_available,
+                                  snapshot.artifact.version if snapshot else None, at if at.tzinfo else at.replace(tzinfo=KST))

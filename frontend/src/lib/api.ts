@@ -57,6 +57,7 @@ export type RouteResult = {
   comparison_environment_assessment?: RouteEnvironmentAssessment | null;
   environment_model_applied?: boolean;
   baseline_source?: "tmap" | "osm_shortest" | null;
+  environment_basis?: RouteEnvironmentBasis | null;
 };
 
 export type RouteAlternative = {
@@ -161,6 +162,25 @@ export type NearbyFacilityObservation = {
   count: number | null;
   coverage: "verified_inventory" | "partial" | "unknown";
   sources: Record<string, { version: string; url: string | null }>;
+};
+
+export type RouteEnvironmentBasis = { artifact_version: string | null; evaluated_at: string };
+
+export type RouteFacilityInterval = {
+  start_m: number;
+  end_m: number;
+  state: LocalEnvironment["factors"][string]["state"];
+};
+
+export type LiveFacilityReport = RouteEnvironmentBasis & {
+  assessment: RouteEnvironmentAssessment | null;
+  route_evidence: Record<string, RouteFacilityInterval[]>;
+  local_environment: LocalEnvironment | null;
+  havens: SafeHaven[];
+  valid_until: string;
+  temporal_key: string;
+  period: RoutePeriod;
+  status: "available" | "degraded" | "pending" | "unavailable";
 };
 
 export type SpotReport = {
@@ -359,6 +379,15 @@ export function routeSafety(
       include_comparison: options.includeComparison ?? true,
       at: options.at,
     }),
+    signal: options.signal,
+  });
+}
+
+export function routeEnvironment(routePoints: { lat: number; lng: number }[],
+  options: { position?: { lat: number; lng: number }; signal?: AbortSignal } = {}) {
+  return request<LiveFacilityReport>("/safety/route-environment", {
+    method: "POST",
+    body: JSON.stringify({ route_points: routePoints, position: options.position }),
     signal: options.signal,
   });
 }

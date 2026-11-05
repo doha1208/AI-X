@@ -29,7 +29,7 @@ PAYLOAD = dict(start_lat=37.5, start_lng=127, end_lat=37.5018, end_lng=127, at="
 
 def test_both_engines_use_one_group_and_do_not_publish_legacy_dong_score(monkeypatch):
     index = build_environment_index([source("cctv", [(37.5009,127)]), source("bell", [(37.5009,127)])])
-    snapshot = SimpleNamespace(artifact=SimpleNamespace(environment_index=index))
+    snapshot = SimpleNamespace(artifact=SimpleNamespace(version="test-snapshot", environment_index=index))
     monkeypatch.setattr(api.route_artifact_runtime, "environment_snapshot", lambda: snapshot)
     monkeypatch.setattr(api.route_artifact_runtime, "find_environment_candidates", lambda *a, **kw: [RouteCandidate("osm-0", POINTS, "osm")])
     async def tmap(*args):
@@ -70,7 +70,7 @@ def test_no_pedestrian_engine_returns_503(monkeypatch):
 
 
 def test_reroute_with_degenerate_osm_result_still_uses_tmap(monkeypatch):
-    snapshot = SimpleNamespace(artifact=SimpleNamespace(environment_index=build_environment_index([])))
+    snapshot = SimpleNamespace(artifact=SimpleNamespace(version="test-snapshot", environment_index=build_environment_index([])))
     monkeypatch.setattr(api.route_artifact_runtime, "environment_snapshot", lambda: snapshot)
     monkeypatch.setattr(api.route_artifact_runtime, "find_environment_candidates", lambda *a, **kw: [RouteCandidate("osm-0", [POINTS[0]], "osm")])
     async def tmap(*args):
@@ -85,7 +85,7 @@ def test_out_of_budget_candidate_does_not_remove_evidence_from_valid_routes(monk
     sources = [source("cctv", [(37.5009,127)]), source("bell", [(37.5009,127)])]
     for s in sources:
         s.coverage_geometry = {"type":"Polygon", "coordinates":[[[126.99,37.49],[127.01,37.49],[127.01,37.51],[126.99,37.51],[126.99,37.49]]]}
-    snapshot = SimpleNamespace(artifact=SimpleNamespace(environment_index=build_environment_index(sources)))
+    snapshot = SimpleNamespace(artifact=SimpleNamespace(version="test-snapshot", environment_index=build_environment_index(sources)))
     monkeypatch.setattr(api.route_artifact_runtime, "environment_snapshot", lambda: snapshot)
     detour = [POINTS[0], (37.5,127.02),(37.5018,127.02),POINTS[1]]
     monkeypatch.setattr(api.route_artifact_runtime, "find_environment_candidates", lambda *a, **kw: [RouteCandidate("osm-0", detour, "osm")])

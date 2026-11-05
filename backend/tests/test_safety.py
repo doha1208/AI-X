@@ -310,7 +310,7 @@ def test_route_without_comparison_skips_tmap_when_environment_graph_exists(monke
     from app.api import safety as api
     from app.services.route_environment import RouteCandidate
     from app.services.route_environment_sources import EnvironmentIndex
-    monkeypatch.setattr(api.route_artifact_runtime, "environment_snapshot", lambda: SimpleNamespace(artifact=SimpleNamespace(environment_index=EnvironmentIndex())))
+    monkeypatch.setattr(api.route_artifact_runtime, "environment_snapshot", lambda: SimpleNamespace(artifact=SimpleNamespace(version="test-snapshot", environment_index=EnvironmentIndex())))
     monkeypatch.setattr(api.route_artifact_runtime, "find_environment_candidates", lambda *a, **k: [RouteCandidate("baseline", [(37.5,127),(37.51,127.01)], "osm")])
     async def must_not_call(*a):
         raise AssertionError("Tmap must not be called for a plain reroute")
@@ -318,6 +318,7 @@ def test_route_without_comparison_skips_tmap_when_environment_graph_exists(monke
     body = _route_response(include_comparison=False).json()
     assert body["mode"] == "safety_weighted"
     assert body["shortest_route_points"] is None
+    assert body["environment_basis"]["artifact_version"] == "test-snapshot"
 
 
 def test_route_safety_returns_retry_after_when_request_limit_is_exhausted(monkeypatch):

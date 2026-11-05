@@ -110,7 +110,8 @@ function RoutePage({ search }: { search: string }) {
   const shortestOption = useMemo(() => (route ? guideOptions(route).find((o) => o.kind === "shortest") : undefined), [route]);
   const activeAlt = route?.alternatives[selected] ?? route?.alternatives[0];
   const activeOption: GuideOption | undefined =
-    activeAlt && { kind: "safe", points: activeAlt.route_points, zones: activeAlt.zones_passed, distanceM: activeAlt.distance_m, environmentAssessment: activeAlt.environment_assessment };
+    activeAlt && { kind: "safe", points: activeAlt.route_points, zones: activeAlt.zones_passed,
+      distanceM: activeAlt.distance_m, environmentAssessment: activeAlt.environment_assessment, facilityBasis: route?.environment_basis };
   const activePoints = activeOption?.points;
   // 일반 경로는 선택 카드 없이 지도 비교선으로만 유지한다.
   const comparePoints = shortestOption?.points;

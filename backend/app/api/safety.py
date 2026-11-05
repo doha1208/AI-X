@@ -12,6 +12,8 @@ from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.core.config import settings
 from app.core.security import decode_token
 from app.schemas.safety import (
+    LiveRouteEnvironmentRequest,
+    LiveRouteEnvironmentResponse,
     RouteAlternative,
     RouteDataDisclosure,
     RouteFallback,
@@ -26,6 +28,7 @@ from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
 from app.services.safe_route import route_artifact_runtime
 from app.services.area_environment_service import assess_area_environment
+from app.services.live_route_environment import OutsideLiveServiceArea, assess_live_route
 from app.services.spot_report import REPORT_RADIUS_M
 from app.services.safety_score import compute_zone_period_scores
 from app.services.service_area import is_in_service_area
@@ -260,6 +263,25 @@ def spot_report(
     )
 
 
+@router.post("/route-environment", response_model=LiveRouteEnvironmentResponse)
+def live_route_environment(
+    payload: LiveRouteEnvironmentRequest,
+    _request_limit: None = Depends(limit_route_requests),
+):
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
+    try:
+        return assess_live_route(
+            snapshot=snapshot, points=[(point.lat, point.lng) for point in payload.route_points],
+            position=(payload.position.lat, payload.position.lng) if payload.position else None,
+            at=payload.at, contains=lambda lat, lng: is_in_service_area(lat, lng, region_scope_prefix=settings.region_scope_prefix),
+        )
+    except OutsideLiveServiceArea as exc:
+        raise HTTPException(status_code=422, detail={
+            "reason": "outside_service_area", "action": "현재 시설 안내는 경기도 지역에서만 지원합니다.", "field": str(exc),
+        }) from exc
+
+
 @router.post("/route", response_model=RouteResponse)
 async def route_safety(
     payload: RouteRequest,
@@ -302,6 +324,7 @@ async def route_safety(
         environment_assessment=asdict(best.assessment),
         comparison_environment_assessment=asdict(comparison.assessment) if comparison else None,
         environment_model_applied=True, baseline_source=result.baseline_source,
+        environment_basis={"artifact_version": result.artifact_version, "evaluated_at": result.evaluated_at},
         shortest_route_points=[RoutePoint(lat=a, lng=b) for a, b in comparison.candidate.points] if comparison else None,
         shortest_zones_passed=[] if comparison else None,
         data_disclosure=RouteDataDisclosure(

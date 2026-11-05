@@ -193,6 +193,27 @@ class RoutePoint(BaseModel):
     lng: float
 
 
+class LiveRoutePoint(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class LiveRouteEnvironmentRequest(BaseModel):
+    route_points: list[LiveRoutePoint] = Field(min_length=2, max_length=5000)
+    position: LiveRoutePoint | None = None
+    at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_polyline(self) -> "LiveRouteEnvironmentRequest":
+        points = self.route_points
+        distance = sum(_haversine_km(a.lat, a.lng, b.lat, b.lng) for a, b in zip(points, points[1:]))
+        if not 0 < distance <= 20:
+            raise ValueError("시설 평가 경로의 총 길이는 0m 초과, 20km 이하여야 합니다")
+        if self.at is not None and not 1 < self.at.year < 9999:
+            raise ValueError("평가 시각을 지원 범위 안으로 입력해 주세요")
+        return self
+
+
 class RouteAlternative(BaseModel):
     route_points: list[RoutePoint]
     safety_score: float | None
@@ -253,6 +274,30 @@ class RouteEnvironmentAssessment(BaseModel):
 RouteAlternative.model_rebuild()
 
 
+class RouteFacilityInterval(BaseModel):
+    start_m: float
+    end_m: float
+    state: Literal["present", "absent_in_verified_inventory", "unknown"]
+
+
+class LiveRouteEnvironmentResponse(BaseModel):
+    assessment: RouteEnvironmentAssessment | None
+    route_evidence: dict[str, list[RouteFacilityInterval]]
+    local_environment: LocalEnvironment | None
+    havens: list[SafeHaven]
+    artifact_version: str | None
+    evaluated_at: datetime
+    valid_until: datetime
+    temporal_key: str
+    period: Period
+    status: Literal["available", "degraded", "pending", "unavailable"]
+
+
+class RouteEnvironmentBasis(BaseModel):
+    artifact_version: str | None
+    evaluated_at: datetime
+
+
 class RouteResponse(BaseModel):
     safety_score: float | None
     zones_passed: list[SafetyZoneOut]
@@ -271,3 +316,4 @@ class RouteResponse(BaseModel):
     comparison_environment_assessment: RouteEnvironmentAssessment | None = None
     environment_model_applied: bool = False
     baseline_source: Literal["tmap", "osm_shortest"] | None = None
+    environment_basis: RouteEnvironmentBasis | None = None
