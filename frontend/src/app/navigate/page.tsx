@@ -40,6 +40,7 @@ import {
 import { bestHaven, HAVEN_LABEL, LOW_SPOT_SCORE } from "@/lib/havens";
 import { useArrivalCheck } from "@/lib/useArrivalCheck";
 import { useMyLocation } from "@/lib/useMyLocation";
+import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { useSafeHaven } from "@/lib/useSafeHaven";
 import { SafetyAlerts } from "@/components/SafetyAlerts";
@@ -476,6 +477,8 @@ function NavigatePage({ search }: { search: string }) {
     const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
     window.location.href = `sms:${numbers}${isIOS ? "&" : "?"}body=${encodeURIComponent(body)}`;
   }
+
+  useMapZoomGuard(stageRef, Boolean(user && guided));
 
   if (!user) return null;
   if (!guided) {

@@ -17,6 +17,7 @@ import {
   type WatchedZone,
 } from "@/lib/watchedZones";
 import { useMyLocation } from "@/lib/useMyLocation";
+import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
@@ -62,6 +63,7 @@ function ResidencePage({ search }: { search: string }) {
   const { location, request: requestLocation } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  useMapZoomGuard(stageRef, Boolean(user));
   const menu = useMapContextMenu();
   const [settings] = useState(loadSettings);
   const [initialNear] = useState(() => placeFromQuery(search, "near"));

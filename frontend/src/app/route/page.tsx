@@ -10,6 +10,7 @@ import { loadSettings, routeTimeFor } from "@/lib/preferences";
 import { saveHandoff } from "@/lib/guideHandoff";
 import { formatDistance, guideOptions, walkingMinutes, zoneSummary, type GuideOption } from "@/lib/routeGuidance";
 import { useMyLocation } from "@/lib/useMyLocation";
+import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
@@ -89,6 +90,7 @@ function RoutePage({ search }: { search: string }) {
   const { location, request: requestLocation } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
+  useMapZoomGuard(layoutRef, Boolean(user));
   const menu = useMapContextMenu();
   const [settings] = useState(loadSettings);
   const [places, setPlaces] = useState<Record<Field, Place | null>>(() => ({
