@@ -6,6 +6,11 @@ describe("visibleMapInsets", () => {
     expect(visibleMapInsets(false, 400)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
   });
 
+  it("keeps fitted routes out from behind an overlaid desktop panel", () => {
+    expect(visibleMapInsets(false, 0, 412)).toEqual({ top: 16, right: 16, bottom: 16, left: 412 });
+    expect(visibleMapInsets(true, 104, 412).left).toBe(0);
+  });
+
   it("keeps the route clear of the bottom sheet and the top card on mobile", () => {
     const insets = visibleMapInsets(true, 312);
     expect(insets.bottom).toBeGreaterThanOrEqual(312);

@@ -1,0 +1,8 @@
+.summary { padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; }
+.summary > strong { display: block; margin-bottom: 6px; }
+.summary summary { min-height: 32px; padding: 6px 0; color: var(--brand); font-weight: 700; cursor: pointer; }
+.summary dl { display: grid; gap: 8px; margin-top: 10px; }
+.summary dl > div { display: flex; justify-content: space-between; gap: 16px; }
+.summary dt, .summary p { color: var(--text-muted); }
+.summary dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.summary p { margin-top: 10px; line-height: 1.6; }

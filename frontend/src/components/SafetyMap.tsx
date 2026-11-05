@@ -47,10 +47,24 @@ type Props = {
   height?: number | string;
 };
 
-// 지금 지도를 덮고 있는 모바일 시트·카드 여백. 데스크톱은 0이다.
+// 페이지가 지정한 패널 여백을 읽어 지도에서 실제 보이는 영역을 사용한다.
 function currentInsets(container: HTMLElement | null): MapInsets {
-  const sheetHeight = parsePx(container ? getComputedStyle(container).getPropertyValue("--adaptive-sheet-height") : "");
-  return visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
+  const style = container ? getComputedStyle(container) : null;
+  const sheetHeight = parsePx(style?.getPropertyValue("--adaptive-sheet-height") ?? "");
+  const panelInset = parsePx(style?.getPropertyValue("--map-panel-inset") ?? "");
+  const topOverlay = parsePx(style?.getPropertyValue("--map-top-overlay") ?? "") || undefined;
+  return visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight, panelInset, topOverlay);
+}
+
+function panToVisible(map: KakaoMap, position: LatLng, container: HTMLElement | null) {
+  const { kakao } = window;
+  const insets = currentInsets(container);
+  const projection = map.getProjection();
+  const point = projection.pointFromCoords(new kakao.maps.LatLng(position.lat, position.lng));
+  map.panTo(projection.coordsFromPoint(new kakao.maps.Point(
+    point.x + (insets.right - insets.left) / 2,
+    point.y + (insets.bottom - insets.top) / 2,
+  )));
 }
 
 function escapeHtml(text: string): string {
@@ -167,7 +181,7 @@ export function SafetyMap({
     zoomOut: () => mapRef.current?.setLevel(mapRef.current.getLevel() + 1),
     panTo: (position) => {
       viewTakenRef.current = true;
-      mapRef.current?.panTo(new window.kakao.maps.LatLng(position.lat, position.lng));
+      if (mapRef.current) panToVisible(mapRef.current, position, containerRef.current);
     },
   }), []);
 
@@ -520,7 +534,8 @@ export function SafetyMap({
     const projection = map.getProjection();
     const point = projection.pointFromCoords(new kakao.maps.LatLng(focusZone.lat, focusZone.lng));
     const shiftY = (insets.bottom - insets.top) / 2;
-    map.panTo(projection.coordsFromPoint(new kakao.maps.Point(point.x, point.y + shiftY)));
+    const shiftX = (insets.right - insets.left) / 2;
+    map.panTo(projection.coordsFromPoint(new kakao.maps.Point(point.x + shiftX, point.y + shiftY)));
   }, [focusZone]);
 
   if (!KAKAO_KEY) {

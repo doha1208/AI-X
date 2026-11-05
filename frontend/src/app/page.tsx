@@ -18,6 +18,7 @@ import {
   type WatchedZone,
 } from "@/lib/watchedZones";
 import { useMyLocation } from "@/lib/useMyLocation";
+import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
@@ -69,6 +70,7 @@ function ResidencePage({ search }: { search: string }) {
   const { location, request: requestLocation } = useMyLocation();
   const mapRef = useRef<SafetyMapHandle>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  useMapZoomGuard(stageRef, Boolean(user));
   const menu = useMapContextMenu();
   const [settings] = useState(loadSettings);
   const [initialNear] = useState(() => placeFromQuery(search, "near"));
@@ -225,8 +227,6 @@ function ResidencePage({ search }: { search: string }) {
 
   return (
     <main className={styles.page}>
-      <AppHeader userInitial={userInitial(user)} />
-
       <div ref={stageRef} className={styles.stage} data-sheet-snap={sheetSnap}>
         <SafetyMap
           ref={mapRef}
@@ -246,31 +246,35 @@ function ResidencePage({ search }: { search: string }) {
           height="100%"
         />
 
-        <form className={styles.searchBar} onSubmit={handleSearch} role="search">
-          <SearchIcon size={18} className={styles.searchIcon} />
-          <AddressSearchInput
-            className={styles.searchInput}
-            value={query}
-            onChange={(value) => { setQuery(value); setSelectedQueryPlace(null); }}
-            onSelect={(place) => { setQuery(place.label); setSelectedQueryPlace(place); }}
-            placeholder="동네나 주소를 검색하세요 (예: 수원시 영통구 망포동)"
-            ariaLabel="주소 검색"
-          />
-          <button
-            type="button"
-            className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
-            onClick={() => setPicking((p) => !p)}
-            aria-pressed={picking}
-            aria-label="지도에서 선택"
-          >
-            <MapPinIcon size={17} className={styles.chipIcon} />
-            <span className={styles.chipLabel}>지도에서 선택</span>
-          </button>
-          <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
-            <LocateIcon size={17} className={styles.chipIcon} />
-            <span className={styles.chipLabel}>현재 위치</span>
-          </button>
-        </form>
+        <div className={styles.floatingPanel}>
+          <AppHeader userInitial={userInitial(user)} variant="panel" />
+          <form className={styles.searchBar} onSubmit={handleSearch} role="search">
+            <div className={styles.searchField}>
+              <AddressSearchInput
+                className={styles.searchInput}
+                value={query}
+                onChange={(value) => { setQuery(value); setSelectedQueryPlace(null); }}
+                onSelect={(place) => { setQuery(place.label); setSelectedQueryPlace(place); }}
+                placeholder="동네나 주소를 검색하세요"
+                ariaLabel="주소 검색"
+              />
+              <button type="submit" className={styles.searchSubmit} aria-label="주소 검색하기"><SearchIcon size={19} /></button>
+            </div>
+            <button
+              type="button"
+              className={`${styles.chip} ${picking ? styles.chipActive : ""}`}
+              onClick={() => setPicking((p) => !p)}
+              aria-pressed={picking}
+              aria-label="지도에서 선택"
+            >
+              <MapPinIcon size={17} className={styles.chipIcon} />
+              <span>지도에서 선택</span>
+            </button>
+            <button type="button" className={styles.primaryChip} onClick={searchMyLocation} aria-label="현재 위치">
+              <LocateIcon size={17} className={styles.chipIcon} />
+              <span>현재 위치</span>
+            </button>
+          </form>
 
         {shownAlerts.length > 0 && (
           <div className={`${styles.notice} ${styles.noticeScore}`} role="status">
@@ -303,10 +307,12 @@ function ResidencePage({ search }: { search: string }) {
 
         <AdaptiveBottomSheet
           className={styles.panel}
+          contentClassName={styles.panelContent}
           label="안심 순위"
           snap={sheetSnap}
           onSnapChange={setSheetSnap}
           workspaceRef={stageRef}
+          topGap={136}
           summary={
             <div className={styles.sheetSummary}>
               <div className={styles.sheetSummaryText}>
@@ -440,13 +446,13 @@ function ResidencePage({ search }: { search: string }) {
           </footer>
           <MapLegend className={styles.mobileLegend} title={legendTitle} items={legend} />
         </AdaptiveBottomSheet>
+        </div>
 
         <MapControls
           className={styles.controls}
           onZoomIn={() => mapRef.current?.zoomIn()}
           onZoomOut={() => mapRef.current?.zoomOut()}
         />
-        <MapLegend className={styles.legend} title={legendTitle} items={legend} />
       </div>
 
       <MapContextMenu

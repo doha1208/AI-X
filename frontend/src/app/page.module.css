@@ -1,4 +1,8 @@
 .page {
+  --app-header-height: 0px;
+  --mobile-navigation-height: 0px;
+  --map-panel-inset: 412px;
+  --map-top-overlay: 248px;
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -7,113 +11,68 @@
 }
 
 .stage {
+  touch-action: pan-x pan-y;
   position: relative;
   height: calc(100dvh - var(--app-header-height));
-  min-height: 480px;
+  min-height: 0;
   overflow: hidden;
 }
 
-/* ---- 상단 검색바 ---- */
-
-.searchBar {
+/* 탐색·검색·결과를 담는 독립된 지도 패널 */
+.floatingPanel {
   position: absolute;
   top: 16px;
-  right: 80px;
+  bottom: 16px;
   left: 16px;
   z-index: 20;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px 8px 16px;
+  flex-direction: column;
+  width: 380px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: 24px;
   background: var(--surface);
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 8px 32px rgb(20 30 45 / 14%);
+  overflow: hidden;
 }
-
-.searchIcon {
+.searchBar {
+  position: relative;
+  z-index: 40;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
   flex-shrink: 0;
-  color: var(--text-muted);
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
-
-.searchInput {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 4px;
-  border: none;
-  background: none;
-  color: var(--text);
-  font-size: 15px;
-  outline: none;
+.searchField { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 5px 3px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-muted); }
+.searchField:focus-within { border-color: var(--brand); }
+.searchField [role="listbox"] {
+  max-height: min(240px, max(44px, calc(100dvh - 240px)));
 }
-
-.chip,
-.primaryChip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex-shrink: 0;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.chipIcon {
-  display: none;
-}
-
-.chip {
-  border: 1px solid var(--brand-light);
-  background: var(--brand-light);
-  color: var(--brand);
-}
-
-.chipActive {
-  border-color: var(--brand);
-}
-
-.primaryChip {
-  border: 1px solid var(--brand);
-  background: var(--brand);
-  color: #fff;
-}
-
-.primaryChip:hover {
-  background: var(--brand-dark);
-}
+.searchInput { min-width: 0; padding: 10px 0; border: 0; outline: none; background: transparent; color: var(--text); font-size: 14px; }
+.searchSubmit { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 10px; background: var(--brand); color: #fff; cursor: pointer; }
+.chip, .primaryChip { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.chipIcon { display: block; }
+.chip:hover, .primaryChip:hover, .chipActive { background: var(--brand-light); color: var(--brand); }
+.searchSubmit:focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
 
 .notice {
-  position: absolute;
-  top: 80px;
-  left: 50%;
-  z-index: 30;
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 32px);
-  padding: 10px 12px 10px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
-  font-size: 13px;
-  font-weight: 600;
-  transform: translateX(-50%);
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 12px;
+  line-height: 1.6;
 }
-
 .noticeError {
   border-color: var(--danger);
   background: var(--danger-bg);
   color: var(--danger);
-}
-
-/* 오류·위치 선택 안내(top 80px) 아래에 겹치지 않게 놓는다. */
-.noticeScore {
-  top: 132px;
 }
 
 .noticeClose {
@@ -129,19 +88,18 @@
 /* ---- 왼쪽 순위 패널 ---- */
 
 .panel {
-  position: absolute;
-  top: 84px;
-  bottom: 16px;
-  left: 16px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  width: 320px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
+}
+
+.panelContent {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panelContent > * {
+  flex-shrink: 0;
 }
 
 .panelHeader {
@@ -190,9 +148,9 @@
 }
 
 .rankList {
-  flex: 1;
+  flex: none;
   padding: 8px;
-  overflow-y: auto;
+  overflow: visible;
   list-style: none;
 }
 
@@ -335,15 +293,11 @@
   z-index: 20;
 }
 
-.legend {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  z-index: 10;
-}
-
 .mobileLegend {
-  display: none;
+  margin: 0 14px 14px;
+  padding: 12px;
+  box-shadow: none;
+  flex-shrink: 0;
 }
 
 .mobileSelectedDetail {
@@ -403,12 +357,30 @@
     min-height: 0;
   }
 
+  .floatingPanel { display: contents; }
   .searchBar {
-    top: 12px;
+    position: absolute;
+    top: calc(max(12px, env(safe-area-inset-top)) + 120px);
     right: 12px;
     left: 12px;
-    padding: 6px 6px 6px 12px;
+    z-index: 40;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: var(--shadow-card);
   }
+  .notice {
+    position: absolute;
+    top: 240px;
+    right: 12px;
+    left: 12px;
+    z-index: 45;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .noticeScore { top: 296px; }
+  .stage[data-sheet-snap="full"] .notice { display: none; }
+
 
   /* 시트를 맨 위까지 올리면 검색창이 시트의 손잡이를 덮어 다시 내릴 수 없다 — 그동안은 검색창을 숨긴다. */
   .stage[data-sheet-snap="full"] .searchBar {
@@ -420,30 +392,9 @@
     font-size: 14px;
   }
 
-  .chip,
-  .primaryChip {
-    width: 44px;
-    height: 44px;
-    padding: 0;
-  }
-
-  .chipIcon {
-    display: block;
-  }
-
-  .chipLabel {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
-
+  .chip, .primaryChip { min-height: 36px; }
   .panel {
+    position: absolute;
     top: auto;
     right: 0;
     bottom: 0;
@@ -458,10 +409,6 @@
     right: 12px;
     bottom: calc(var(--adaptive-sheet-height, 104px) + var(--map-control-gap));
     transition: bottom 220ms ease;
-  }
-
-  .legend {
-    display: none;
   }
 
   .mobileLegend {
@@ -533,11 +480,6 @@
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
-  .panel {
-    width: 300px;
-  }
-
-  .searchBar {
-    right: 72px;
-  }
+  .page { --map-panel-inset: 352px; }
+  .floatingPanel { width: 320px; }
 }

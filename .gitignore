@@ -27,6 +27,10 @@ frontend/node_modules/
 frontend/.next/
 frontend/.env.local
 
+# Local browser verification and temporary development artifacts
+/frontend/.playwright-cli/
+/frontend/output/
+
 # 개인 PC의 절대경로가 박혀 있는 컴파일 산출물 — run_app.cs에서 각자 컴파일해서 쓴다.
 /실행.exe
 

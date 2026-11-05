@@ -1,20 +1,23 @@
 .page {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   background: var(--page-bg);
   color: var(--text);
 }
 
-.emptyState { display: grid; place-items: center; align-content: center; gap: 12px; min-height: calc(100dvh - var(--app-header-height)); padding: 24px; text-align: center; }
+.emptyState { display: grid; flex: 1; place-items: center; align-content: center; gap: 12px; min-height: 0; padding: 24px; text-align: center; }
 .emptyState h1 { margin: 0; font-size: 22px; }
 .emptyState p { margin: 0; color: var(--text-muted); }
 .returnRoute { min-height: 44px; padding: 12px 16px; border-radius: var(--radius-md); background: var(--brand); color: #fff; font-weight: 800; text-decoration: none; }
 
 .stage {
+  touch-action: pan-x pan-y;
   position: relative;
-  height: calc(100dvh - var(--app-header-height));
-  min-height: 520px;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -375,15 +378,27 @@
 .bottomPanel {
   composes: card;
   position: absolute;
-  right: 16px;
   bottom: 16px;
-  left: 16px;
+  left: 50%;
   z-index: 20;
+  width: min(640px, calc(100% - 176px));
+  max-height: calc(100% - 180px);
   padding: 0;
   border-radius: var(--radius-lg);
+  overflow: hidden;
+  transform: translateX(-50%);
+}
+
+.guidanceContent {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .bottomPanelContent {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12px;
   padding: 16px 20px;
 }
 
@@ -444,7 +459,6 @@
 .progressLabels {
   display: flex;
   justify-content: space-between;
-  margin-top: 14px;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-muted);
@@ -452,7 +466,6 @@
 
 .progress {
   height: 8px;
-  margin-top: 6px;
   border-radius: 4px;
   background: var(--surface-muted);
   overflow: hidden;
@@ -954,12 +967,10 @@
 
 @media (max-width: 767px) {
   .page {
-    min-height: 100dvh;
-    overflow: hidden;
+    padding-bottom: var(--mobile-navigation-height);
   }
 
   .stage {
-    height: calc(100dvh - var(--app-header-height) - var(--mobile-navigation-height));
     min-height: 0;
   }
 
@@ -1004,12 +1015,24 @@
     display: none;
   }
 
-  .controls {
+  .stage .controls {
     top: auto;
     right: 12px;
     bottom: calc(var(--adaptive-sheet-height, 0px) + 12px);
+    display: grid;
+    grid-template-columns: repeat(3, 44px);
+    gap: 8px;
     transform: none;
     transition: bottom 220ms ease;
+  }
+
+  .stage[data-sheet-snap="full"] .controls {
+    display: none;
+  }
+
+  .sideButton {
+    width: 44px;
+    height: 44px;
   }
 
   .bottomPanel,
@@ -1018,6 +1041,7 @@
     bottom: 0;
     left: 0;
     width: auto;
+    max-height: none;
     padding: 0;
     border-radius: 24px 24px 0 0;
     transform: none;
@@ -1128,6 +1152,20 @@
 
   .toast {
     bottom: calc(var(--adaptive-sheet-height, 0px) + 16px);
+  }
+}
+
+@media (min-width: 768px) and (max-height: 600px) {
+  .stage .controls {
+    top: auto;
+    bottom: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, 52px);
+    transform: none;
+  }
+
+  .bottomPanel {
+    width: min(640px, calc(100% - 288px));
   }
 }
 

@@ -1,6 +1,7 @@
 import type { FacilityScoreDisplay, RouteEnvironmentBasis, RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
 import { haversineMeters } from "./geo";
 import type { LatLng } from "./kakao";
+import { alternativeAssessment, comparisonAssessment, type RouteScoreSource } from "./routeAssessment";
 
 // 도보 평균 4km/h.
 const WALK_METERS_PER_MIN = 67;
@@ -102,7 +103,7 @@ export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): Nex
 
 export type GuideKind = "safe" | "shortest";
 export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number;
-  environmentAssessment?: RouteEnvironmentAssessment | null; facilityBasis?: RouteEnvironmentBasis | null };
+  environmentAssessment?: RouteEnvironmentAssessment | null; facilityBasis?: RouteEnvironmentBasis | null } & RouteScoreSource;
 
 export function routeGeometryId(points: LatLng[]): string {
   let hash = 2166136261;
@@ -163,13 +164,14 @@ export function guideOptions(result: RouteResult): GuideOption[] {
       points: best?.route_points ?? result.route_points,
       zones: best?.zones_passed ?? result.zones_passed,
       distanceM: best?.distance_m ?? pathLength(result.route_points),
+      ...alternativeAssessment(result, best),
       environmentAssessment: supportedEnvironment(best?.environment_assessment ?? result.environment_assessment),
       facilityBasis: result.environment_basis,
     },
   ];
   const shortest = result.shortest_route_points;
   if (shortest && shortest.length > 1) {
-    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), environmentAssessment: supportedEnvironment(result.comparison_environment_assessment), facilityBasis: result.environment_basis });
+    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), ...comparisonAssessment(result), environmentAssessment: supportedEnvironment(result.comparison_environment_assessment), facilityBasis: result.environment_basis });
   }
   return options;
 }

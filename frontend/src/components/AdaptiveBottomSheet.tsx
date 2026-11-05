@@ -22,6 +22,7 @@ type Props = {
   summary: ReactNode;
   children: ReactNode;
   className?: string;
+  contentClassName?: string;
   workspaceRef?: RefObject<HTMLElement | null>;
   // 접힌 상태에서 보이는 높이(px). 경로 칩처럼 접힌 채로도 보여줄 내용이 있으면 키운다.
   collapsedHeight?: number;
@@ -54,6 +55,7 @@ export function AdaptiveBottomSheet({
   summary,
   children,
   className = "",
+  contentClassName = "",
   workspaceRef,
   collapsedHeight = COLLAPSED_HEIGHT,
   topGap = FULL_TOP_GAP,
@@ -176,7 +178,7 @@ export function AdaptiveBottomSheet({
         <span className={styles.grabber} aria-hidden />
       </button>
       <div className={styles.summary}>{summary}</div>
-      <div className={styles.content}>{children}</div>
+      <div className={`${styles.content} ${contentClassName}`}>{children}</div>
     </section>
   );
 }

@@ -9,12 +9,13 @@ const COLLAPSED_SHEET_PX = 104;
 
 const NO_INSETS: MapInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
-// 지도에서 실제로 눈에 보이는 영역 기준으로 경로를 맞추기 위한 여백. 데스크톱은 패널이 지도 옆에
-// 있어 지도를 덮지 않으므로 여백이 없다.
-export function visibleMapInsets(isMobile: boolean, sheetHeightPx: number): MapInsets {
-  if (!isMobile) return NO_INSETS;
+// 지도 위에 떠 있는 패널·시트를 피해서 경로를 맞춘다. 패널이 없는 화면은 기존 여백을 유지한다.
+export function visibleMapInsets(isMobile: boolean, sheetHeightPx: number, desktopPanelInset = 0, mobileTopOverlay = MOBILE_TOP_OVERLAY_PX): MapInsets {
+  if (!isMobile) return desktopPanelInset > 0
+    ? { top: 16, right: 16, bottom: 16, left: desktopPanelInset }
+    : NO_INSETS;
   const sheet = sheetHeightPx > 0 ? sheetHeightPx : COLLAPSED_SHEET_PX;
-  return { top: MOBILE_TOP_OVERLAY_PX, right: 0, bottom: Math.round(sheet) + SHEET_GAP_PX, left: 0 };
+  return { top: mobileTopOverlay, right: 0, bottom: Math.round(sheet) + SHEET_GAP_PX, left: 0 };
 }
 
 // "312px" → 312. CSS 변수 값을 읽을 때 쓴다(변수가 없거나 px가 아니면 0).

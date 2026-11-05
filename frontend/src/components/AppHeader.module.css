@@ -2,160 +2,284 @@
   position: sticky;
   top: 0;
   z-index: 100;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  height: 64px;
-  padding: 0 20px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  justify-self: start;
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--text);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.brandIcon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  background: var(--brand);
-  color: #fff;
-}
-
-.brandAccent {
-  color: var(--brand);
-}
-
-.tabs {
-  display: flex;
-  gap: 8px;
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-muted);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: color 0.15s, background 0.15s;
-}
-
-.tabIcon {
-  display: none;
-}
-
-.tab:hover {
-  color: var(--text);
-  background: var(--surface-muted);
-}
-
-.tabActive,
-.tabActive:hover {
-  color: var(--brand);
-  font-weight: 700;
-  background: transparent;
-}
-
-.actions {
   display: flex;
   align-items: center;
   gap: 12px;
-  justify-self: end;
+  flex-shrink: 0;
+  height: 64px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
-
+.menuToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--brand);
+  cursor: pointer;
+}
+.menuToggle:hover {
+  background: var(--brand-light);
+}
+.menuLabel {
+  display: none;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--brand);
+  font-size: 20px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.brandIcon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: var(--brand);
+  color: #fff;
+}
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tab:hover {
+  background: var(--surface-muted);
+  color: var(--brand);
+}
+.tabActive, .tabActive:hover {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 700;
+}
+.menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 16px;
+  z-index: 120;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 12px 36px rgb(20 30 45 / 18%);
+}
+.menuHeading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
 .avatar {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--brand-light);
   color: var(--brand);
+  font-size: 14px;
   font-weight: 700;
-  text-decoration: none;
 }
-
-.tab:focus-visible,
-.brand:focus-visible,
-.avatar:focus-visible {
-  outline: 2px solid var(--brand);
+.menuLink {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+.menuLink:hover, .menuLink[aria-current="page"] {
+  background: var(--brand-light);
+  color: var(--brand);
+}
+.arrow {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 22px;
+}
+.tab:focus-visible, .brand:focus-visible, .menuToggle:focus-visible, .menuLink:focus-visible {
+  outline: 2px solid var(--lamp);
   outline-offset: 2px;
 }
 
-/* 휴대폰에서는 탭을 화면 아래로 내려 한 손으로 누르기 쉽게 한다. */
+/* 지도 패널에서는 메뉴·로고 다음 줄에 두 개의 탭을 배치한다. */
+.panel {
+  position: relative;
+  top: auto;
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px 8px;
+  height: auto;
+  min-height: 126px;
+  padding: 16px 16px 14px;
+}
+.panel .brand {
+  font-size: 21px;
+}
+.panel .tabs {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+  padding: 4px;
+  border-radius: 13px;
+  background: var(--surface-muted);
+}
+.panel .tab {
+  flex: 1;
+  padding: 8px 12px;
+  min-height: 40px;
+}
+.panel .menu {
+  top: 70px;
+  left: 16px;
+  width: calc(100% - 32px);
+}
+
 @media (max-width: 767px) {
-  /* 로고·프로필은 숨기고 하단 탭만 남긴다. 탭이 이 요소 안에 있어 요소 자체는 두고 높이만 노치 영역으로 줄인다. */
   .header {
-    box-sizing: border-box;
-    grid-template-columns: 1fr;
     height: var(--app-header-height);
     padding: 0;
-    border-bottom: none;
+    border: 0;
   }
-
-  .brand,
-  .actions {
+  .brand {
     display: none;
   }
-
   .tabs {
     position: fixed;
     right: 0;
     bottom: 0;
-    left: 0;
+    left: 33.333%;
+    z-index: 100;
     gap: 0;
     height: var(--mobile-navigation-height);
+    margin: 0;
     padding-bottom: env(safe-area-inset-bottom);
-    background: var(--surface);
     border-top: 1px solid var(--border);
-    box-shadow: 0 -4px 18px rgb(0 0 0 / 6%);
+    background: var(--surface);
   }
-
   .tab {
+    flex: 1;
     flex-direction: column;
     gap: 3px;
-    flex: 1;
-    min-width: 0;
-    min-height: 44px;
-    padding: 7px 2px 5px;
+    padding: 7px 2px;
     border-radius: 0;
     font-size: 11px;
-    text-align: center;
-    touch-action: manipulation;
   }
-
-  .tabIcon {
-    display: block;
-  }
-
-  .tabActive {
+  .tabActive, .tabActive:hover {
     background: var(--brand-light);
+    color: var(--brand);
   }
-}
-
-@media (min-width: 768px) and (max-width: 1023px) {
-  .header {
-    padding: 0 14px;
+  .menuToggle {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    z-index: 101;
+    flex-direction: column;
+    gap: 3px;
+    width: 33.333%;
+    height: var(--mobile-navigation-height);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface);
+    font-size: 11px;
   }
-
-  .tab {
-    padding-inline: 10px;
-    font-size: 14px;
+  .menuLabel {
+    display: inline;
+  }
+  .menu {
+    position: fixed;
+    top: auto;
+    bottom: calc(var(--mobile-navigation-height) + 8px);
+    left: 12px;
+  }
+  .panel {
+    position: absolute;
+    top: max(12px, env(safe-area-inset-top));
+    right: 12px;
+    left: 12px;
+    z-index: 50;
+    height: auto;
+    min-height: 112px;
+    gap: 6px 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow-card);
+    pointer-events: auto;
+  }
+  .panel .brand {
+    display: inline-flex;
+    font-size: 18px;
+  }
+  .panel .menuToggle {
+    position: static;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+  }
+  .panel .menuLabel {
+    display: none;
+  }
+  .panel .tabs {
+    position: static;
+    height: auto;
+    padding: 3px;
+    border: 0;
+  }
+  .panel .tab {
+    flex-direction: row;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+  .panel .tabActive, .panel .tabActive:hover {
+    background: var(--brand);
+    color: #fff;
+  }
+  .panel .menu {
+    position: absolute;
+    top: 62px;
+    bottom: auto;
+    left: 12px;
+    width: calc(100% - 24px);
   }
 }

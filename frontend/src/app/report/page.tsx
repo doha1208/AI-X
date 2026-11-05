@@ -11,6 +11,7 @@ import { environmentPeekText, environmentScoreText, formatDistance, guideOptions
 import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
+import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { withSearch } from "@/components/WithSearch";
 import { AlertIcon, InfoIcon, SearchIcon } from "@/components/icons";
 import shared from "../me/me.module.css";
@@ -84,6 +85,7 @@ function ReportPage({ search }: { search: string }) {
   const user = useSessionUser();
   const [initial] = useState(() => placeFromQuery(search, "at"));
   const [query, setQuery] = useState(initial?.label ?? "");
+  const [selectedAddress, setSelectedAddress] = useState<Place | null>(initial);
   const [place, setPlace] = useState<Place | null>(initial);
   const [report, setReport] = useState<SpotReport | null>(null);
   const [walk, setWalk] = useState<NightWalk | null>(null);
@@ -116,7 +118,7 @@ function ReportPage({ search }: { search: string }) {
 
   async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const found = await resolvePlace(query);
+    const found = selectedAddress?.label === query ? selectedAddress : await resolvePlace(query);
     if (!found) {
       setError("주소를 찾을 수 없어요. 도로명이나 지번 주소를 정확히 입력해주세요");
       return;
@@ -124,7 +126,8 @@ function ReportPage({ search }: { search: string }) {
     setError(null);
     setReport(null);
     setWalk(null);
-    setPlace(found);
+    // Each explicit search must reload, including the same selected/prefilled address.
+    setPlace({ ...found });
     window.history.replaceState(null, "", `/report?${placeQuery("at", found)}`);
   }
 
@@ -149,13 +152,14 @@ function ReportPage({ search }: { search: string }) {
           </p>
           <form className={styles.search} onSubmit={handleSearch} role="search">
             <SearchIcon size={18} />
-            <input
+            <AddressSearchInput
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(value) => { setQuery(value); setSelectedAddress(null); }}
+              onSelect={(value) => { setQuery(value.label); setSelectedAddress(value); }}
               placeholder="예: 경기도 수원시 팔달구 효원로 241"
-              aria-label="집 주소"
+              ariaLabel="집 주소"
             />
-            <button type="submit">리포트 보기</button>
+            <button type="submit" className={styles.searchSubmit}>리포트 보기</button>
           </form>
         </section>
 

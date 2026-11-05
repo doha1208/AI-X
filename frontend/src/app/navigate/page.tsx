@@ -43,6 +43,7 @@ import { bestHaven } from "@/lib/havens";
 import { deriveFacilityAlert, facilityAlertContext, facilityAlertText, type FacilityAlert, type FacilityAlertState } from "@/lib/facility_alerts";
 import { useArrivalCheck } from "@/lib/useArrivalCheck";
 import { useMyLocation } from "@/lib/useMyLocation";
+import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { liveReportExpiresAt, useSafeHaven } from "@/lib/useSafeHaven";
 import { LiveFacilityDetails, SafetyAlerts } from "@/components/SafetyAlerts";
@@ -83,7 +84,7 @@ const NEAR_ARRIVAL_M = 100;
 // 경로 칩 + 안내 시작 버튼이 접힌 시트 안에 들어가는 높이(손잡이 44 + 칩 약 87 + 버튼 44 + 여백, 실측 기준).
 const PEEK_SHEET_HEIGHT = 204;
 // 안내 중에는 위쪽 방향 안내 카드(다음 회전)가 항상 보여야 한다 — 시트를 맨 위로 올려도 카드 아래에서 멈추게 한다.
-const GUIDING_SHEET_TOP_GAP = 100;
+const GUIDING_SHEET_TOP_GAP = 180;
 // 내 위치가 경로에서 이 거리 안이면 GPS 떨림을 줄이려고 마커를 경로 위로 붙여서 보여준다.
 const SNAP_TO_ROUTE_M = 25;
 
@@ -466,6 +467,8 @@ function NavigatePage({ search }: { search: string }) {
     window.location.href = `sms:${numbers}${isIOS ? "&" : "?"}body=${encodeURIComponent(body)}`;
   }
 
+  useMapZoomGuard(stageRef, Boolean(user && guided));
+
   if (!user) return null;
   if (!guided) {
     return (
@@ -496,7 +499,7 @@ function NavigatePage({ search }: { search: string }) {
     <main className={styles.page}>
       <AppHeader userInitial={userInitial(user)} />
 
-      <div ref={stageRef} className={styles.stage}>
+      <div ref={stageRef} className={styles.stage} data-sheet-snap={sheetSnap}>
         <SafetyMap
           ref={mapRef}
           bells={phase === "guiding" ? routeBells : undefined}
@@ -656,6 +659,7 @@ function NavigatePage({ search }: { search: string }) {
 
             <AdaptiveBottomSheet
               className={styles.bottomPanel}
+              contentClassName={styles.guidanceContent}
               label="길안내 정보"
               snap={sheetSnap}
               onSnapChange={setSheetSnap}
@@ -694,6 +698,7 @@ function NavigatePage({ search }: { search: string }) {
                   안내 종료
                 </button>
               </div>
+              <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
               <div className={styles.progressLabels}>
                 <span>{guidance ? "선택 경로 안내 중" : "안내 준비 중"}</span>
                 <span>{progressPct}% 이동</span>
