@@ -1,4 +1,4 @@
-import type { RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
+import type { FacilityScoreDisplay, RouteResult, SafetyZone, RouteEnvironmentAssessment } from "./api";
 import { haversineMeters } from "./geo";
 import type { LatLng } from "./kakao";
 
@@ -95,16 +95,16 @@ export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): Nex
 export type GuideKind = "safe" | "shortest";
 export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number; environmentAssessment?: RouteEnvironmentAssessment | null };
 
-export function supportedEnvironment(value?: RouteEnvironmentAssessment | null): RouteEnvironmentAssessment | null {
+export function supportedEnvironment<T extends FacilityScoreDisplay>(value?: T | null): T | null {
   return value?.model_version === "facility-access-v1" && value.policy_version === "environment-v1-draft" ? value : null;
 }
 
-export function environmentScoreText(value?: RouteEnvironmentAssessment | null): string | undefined {
+export function environmentScoreText(value?: FacilityScoreDisplay | null): string | undefined {
   const assessment = supportedEnvironment(value);
   return assessment?.score != null && Number.isFinite(assessment.score) ? `${assessment.score.toFixed(0)}점` : undefined;
 }
 
-export function environmentPeekText(value?: RouteEnvironmentAssessment | null): string {
+export function environmentPeekText(value?: FacilityScoreDisplay | null): string {
   const score = environmentScoreText(value);
   if (score) return `시설 ${score}`;
   const assessment = supportedEnvironment(value);

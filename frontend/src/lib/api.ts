@@ -110,7 +110,58 @@ export type SafetyZoneDetail = SafetyZone & {
 };
 
 export type SafeHavenKind = "police" | "convenience" | "bell";
-export type SafeHaven = { kind: SafeHavenKind; lat: number; lng: number; distance_m: number };
+export type SafeHaven = {
+  kind: SafeHavenKind;
+  lat: number;
+  lng: number;
+  distance_m: number;
+  source_id: string;
+  source_label: string;
+  source_url: string | null;
+  source_version: string;
+  schedule_status: "published_schedule" | "verified_weekly_schedule" | "unverified" | "not_applicable";
+  opening_status: "scheduled_open" | "scheduled_closed" | "unverified" | "not_applicable";
+  staffing_status: "unverified" | "not_applicable";
+  operation_status: "unverified" | "not_applicable";
+};
+
+export type FacilityScoreDisplay = Pick<RouteEnvironmentAssessment,
+  "model_version" | "policy_version" | "score" | "evaluation_basis" | "reference_score" | "reference_factor" | "score_bounds">;
+
+export type AreaFacilityAssessment = Required<FacilityScoreDisplay & Pick<RouteEnvironmentAssessment,
+  "status" | "period" | "active_factors" | "used_factors" | "excluded_factors" | "factor_coverage" |
+  "factor_evaluation_ratio" | "verified_distance_ratio" | "evidence_factors" | "source_versions">> & {
+  scope: "area";
+  weight_unit: "metre";
+  sampled_length_m: number;
+  artifact_version: string;
+  assessed_at: string;
+  reference_at: string;
+  comparison_basis_id: string;
+  unavailable_reason: string | null;
+};
+
+export type LocalEnvironment = {
+  point: [number, number];
+  factors: Record<string, {
+    state: "present" | "absent_in_verified_inventory" | "unknown";
+    comparison_present: boolean;
+    comparison_known: boolean;
+    observed_present: boolean;
+  }>;
+  period: RoutePeriod;
+  model_version: string;
+  policy_version: string;
+  assessed_at: string;
+  source_versions: Record<string, string>;
+  artifact_version: string;
+};
+
+export type NearbyFacilityObservation = {
+  count: number | null;
+  coverage: "verified_inventory" | "partial" | "unknown";
+  sources: Record<string, { version: string; url: string | null }>;
+};
 
 export type SpotReport = {
   lat: number;
@@ -118,11 +169,20 @@ export type SpotReport = {
   period: RoutePeriod;
   radius_m: number;
   zone: SafetyZoneDetail | null;
+  /** @deprecated Use local_environment. */
   here_score: number | null;
+  /** @deprecated Use area_environment.day. */
   area_day_score: number | null;
+  /** @deprecated Use area_environment.night. */
   area_night_score: number | null;
   counts: { cctv: number | null; lights: number | null; convenience: number | null } | null;
   havens: SafeHaven[];
+  area_environment: Record<RoutePeriod, AreaFacilityAssessment> | null;
+  local_environment: LocalEnvironment | null;
+  facility_observations: Record<string, NearbyFacilityObservation>;
+  artifact_version: string | null;
+  status: "available" | "degraded" | "pending" | "unavailable";
+  unavailable_reason: string | null;
 };
 
 export type User = { id: number; email: string };
@@ -271,8 +331,11 @@ export function nearbyBells(lat: number, lng: number, radiusKm = 1, limit?: numb
   return request<{ lat: number; lng: number }[]>(`/safety/bells?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${limitParam}`, options);
 }
 
-export function spotReport(lat: number, lng: number, options: RequestInit = {}) {
-  return request<SpotReport>(`/safety/spot?lat=${lat}&lng=${lng}`, options);
+export function spotReport(lat: number, lng: number, { at, radiusM, ...options }: RequestInit & { at?: string; radiusM?: number } = {}) {
+  const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  if (at !== undefined) params.set("at", at);
+  if (radiusM !== undefined) params.set("radius_m", String(radiusM));
+  return request<SpotReport>(`/safety/spot?${params}`, options);
 }
 
 export function zoneDetail(dongCode: string) {

@@ -2,7 +2,7 @@ from datetime import datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.services.time_period import Period
 
@@ -67,12 +67,88 @@ class SafeHaven(BaseModel):
     lat: float
     lng: float
     distance_m: int
+    source_id: str
+    source_label: str
+    source_url: str | None
+    source_version: str
+    schedule_status: Literal["published_schedule", "verified_weekly_schedule", "unverified", "not_applicable"]
+    opening_status: Literal["scheduled_open", "scheduled_closed", "unverified", "not_applicable"]
+    staffing_status: Literal["unverified", "not_applicable"]
+    operation_status: Literal["unverified", "not_applicable"]
 
 
 class FacilityCounts(BaseModel):
     cctv: int | None
     lights: int | None
     convenience: int | None
+
+
+class AreaFacilityAssessment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scope: Literal["area"]
+    weight_unit: Literal["metre"]
+    period: Period
+    sampled_length_m: float
+    score: float | None
+    reference_score: float | None
+    reference_factor: str | None
+    score_bounds: dict[str, float] | None
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"]
+    status: Literal["available", "degraded", "unavailable"]
+    active_factors: list[str]
+    used_factors: list[str]
+    excluded_factors: dict[str, str]
+    factor_coverage: dict[str, float]
+    factor_evaluation_ratio: dict[str, float]
+    verified_distance_ratio: float
+    evidence_factors: list[str]
+    source_versions: dict[str, str]
+    model_version: str
+    policy_version: str
+    artifact_version: str
+    assessed_at: datetime
+    reference_at: datetime
+    comparison_basis_id: str
+    unavailable_reason: str | None
+
+
+class AreaEnvironment(BaseModel):
+    day: AreaFacilityAssessment
+    night: AreaFacilityAssessment
+
+
+class LocalFactorEvidence(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    state: Literal["present", "absent_in_verified_inventory", "unknown"]
+    comparison_present: bool
+    comparison_known: bool
+    observed_present: bool
+
+
+class LocalEnvironment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    point: tuple[float, float]
+    factors: dict[str, LocalFactorEvidence]
+    period: Period
+    model_version: str
+    policy_version: str
+    assessed_at: datetime
+    source_versions: dict[str, str]
+    artifact_version: str
+
+
+class FacilityObservationSource(BaseModel):
+    version: str
+    url: str | None
+
+
+class NearbyFacilityObservation(BaseModel):
+    count: int | None
+    coverage: Literal["verified_inventory", "partial", "unknown"]
+    sources: dict[str, FacilityObservationSource]
 
 
 class SpotReport(BaseModel):
@@ -83,12 +159,17 @@ class SpotReport(BaseModel):
     period: Period
     radius_m: int
     zone: SafetyZoneDetail | None
-    # 지금 이 자리의 구간 점수(현재 시간대). 구간 데이터가 없으면 None.
-    here_score: float | None
-    area_day_score: float | None
-    area_night_score: float | None
+    here_score: None = Field(None, deprecated=True)
+    area_day_score: None = Field(None, deprecated=True)
+    area_night_score: None = Field(None, deprecated=True)
     counts: FacilityCounts | None
     havens: list[SafeHaven]
+    area_environment: AreaEnvironment | None
+    local_environment: LocalEnvironment | None
+    facility_observations: dict[str, NearbyFacilityObservation]
+    artifact_version: str | None
+    status: Literal["available", "degraded", "pending", "unavailable"]
+    unavailable_reason: str | None
 
 
 class RouteRequest(BaseModel):

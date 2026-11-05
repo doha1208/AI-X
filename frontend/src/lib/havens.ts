@@ -1,22 +1,32 @@
 import type { SafeHaven, SafeHavenKind } from "@/lib/api";
 
+type HavenLocation = Pick<SafeHaven, "kind" | "lat" | "lng" | "distance_m">;
+
 export const HAVEN_LABEL: Record<SafeHavenKind, string> = {
   police: "경찰서·지구대",
-  convenience: "24시 편의점",
+  convenience: "편의점",
   bell: "안전비상벨",
 };
 
-// 이 점수 미만인 자리에 들어서면 "주변이 어두워요" 경고와 함께 가까운 안심 거점을 보여준다(동 점수 "주의" 기준과 같다).
-export const LOW_SPOT_SCORE = 40;
-
 // 카카오맵 길찾기로 거점까지 바로 안내한다 — 진행 중인 귀갓길 안내는 그대로 둔다.
-export function havenDirectionsUrl(haven: SafeHaven): string {
+export function havenDirectionsUrl(haven: HavenLocation): string {
   return `https://map.kakao.com/link/to/${encodeURIComponent(HAVEN_LABEL[haven.kind])},${haven.lat},${haven.lng}`;
 }
 
-// 도움을 청하러 갈 곳은 사람이 있는 곳이 먼저다 — 비상벨은 다른 거점이 없을 때만 고른다.
-export function bestHaven(havens: SafeHaven[]): SafeHaven | null {
-  const staffed = havens.filter((h) => h.kind !== "bell");
-  const pool = staffed.length > 0 ? staffed : havens;
-  return pool.reduce<SafeHaven | null>((best, h) => (!best || h.distance_m < best.distance_m ? h : best), null);
+export function bestHaven<T extends HavenLocation & Partial<Pick<SafeHaven, "opening_status">>>(havens: T[]): T | null {
+  return havens.reduce<T | null>((best, h) => (
+    h.opening_status !== "scheduled_closed" && (!best || h.distance_m < best.distance_m) ? h : best
+  ), null);
 }
+
+export function havenAvailabilityText(haven: SafeHaven): string {
+  const opening = {
+    scheduled_open: "시간표상 영업 시간", scheduled_closed: "시간표상 영업시간 아님",
+    unverified: "영업 미확인", not_applicable: null,
+  }[haven.opening_status];
+  return [opening, haven.staffing_status === "unverified" && "유인 미확인",
+    haven.operation_status === "unverified" && "작동 미확인"].filter(Boolean).join(" · ");
+}
+
+// Compatibility for the previous guide until the next commit.
+export const LOW_SPOT_SCORE = 40;

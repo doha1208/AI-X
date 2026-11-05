@@ -48,7 +48,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   nearestSubway.mockResolvedValue({ lat: 37.25, lng: 127.03, name: "테스트역" });
   const report: SpotReport = { lat: 37.257896, lng: 127.029607, period: "day", radius_m: 300, zone: null,
-    here_score: null, area_day_score: null, area_night_score: null, counts: null, havens: [] };
+    here_score: null, area_day_score: null, area_night_score: null, counts: null, havens: [],
+    area_environment: null, local_environment: null, facility_observations: {}, artifact_version: null,
+    status: "pending", unavailable_reason: "facility_artifact_pending" };
   spotReport.mockResolvedValue(report);
 });
 
@@ -123,4 +125,41 @@ it("distinguishes a route request failure from an unscored walking route", async
   render(<ReportPage />);
   expect(await screen.findByText("귀갓길을 계산하지 못했어요. 잠시 후 다시 시도해주세요.")).toBeInTheDocument();
   expect(screen.queryByText("점수 미산정")).not.toBeInTheDocument();
+});
+
+it("uses the new walking area results and labels partial facility counts as observations", async () => {
+  spotReport.mockResolvedValue({
+    radius_m: 300, zone: null, status: "degraded", area_day_score: 99, havens: [],
+    area_environment: {
+      day: { ...assessment({ score: 0, period: "day" }), sampled_length_m: 500, reference_at: "2026-11-05T12:00:00+09:00" },
+      night: { ...assessment({ score: null, evaluation_basis: "partial_coverage", score_bounds: { lower: 20, upper: 80 } }),
+        sampled_length_m: 500, reference_at: "2026-11-05T23:00:00+09:00" },
+    },
+    facility_observations: { cctv: { count: 2, coverage: "partial", sources: {} } },
+  });
+  nearestSubway.mockResolvedValue(null);
+  render(<ReportPage />);
+  const area = await screen.findByRole("heading", { name: "집 주변 300m 보행 시설 접근성" });
+  const section = within(area.closest("section")!);
+  expect(section.getByText("시설 0점")).toBeInTheDocument();
+  expect(section.getByText("부분자료 20~80점")).toBeInTheDocument();
+  expect(section.queryByText("99점")).not.toBeInTheDocument();
+  expect(section.getByText("확인된 2개")).toBeInTheDocument();
+  expect(section.getByText("평가 상세").closest("details")).not.toHaveAttribute("open");
+});
+
+it("keeps pending area evaluation separate from point evidence and unverified opening hours", async () => {
+  nearestSubway.mockResolvedValue(null);
+  spotReport.mockResolvedValue({
+    radius_m: 300, zone: null, status: "pending", area_environment: null,
+    local_environment: { assessed_at: "2026-11-05T23:00:00+09:00",
+      factors: { bell: { state: "present" }, open_store: { state: "unknown" } } },
+    havens: [{ kind: "convenience", lat: 37.25, lng: 127.03, distance_m: 55, source_label: "이마트24 매장 찾기",
+      opening_status: "unverified", staffing_status: "unverified", operation_status: "not_applicable" }],
+  });
+  render(<ReportPage />);
+  expect(await screen.findByText("주변 보행 평가 자료를 준비 중이에요.")).toBeInTheDocument();
+  expect(screen.getByText("가까운 시설 확인")).toBeInTheDocument();
+  expect(screen.getByText(/영업 미확인.*유인 미확인/)).toBeInTheDocument();
+  expect(screen.queryByText(/24시 편의점/)).not.toBeInTheDocument();
 });

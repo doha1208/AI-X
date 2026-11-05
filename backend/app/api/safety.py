@@ -1,6 +1,8 @@
 import math
 import time
 from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -22,18 +24,12 @@ from app.schemas.safety import (
 )
 from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
-from app.services.safe_route import _facility_index, route_artifact_runtime
-from app.services.spot_report import (
-    REPORT_RADIUS_M,
-    area_scores,
-    facility_counts,
-    load_haven_index,
-    nearest_havens,
-    point_score,
-)
+from app.services.safe_route import route_artifact_runtime
+from app.services.area_environment_service import assess_area_environment
+from app.services.spot_report import REPORT_RADIUS_M
 from app.services.safety_score import compute_zone_period_scores
 from app.services.service_area import is_in_service_area
-from app.services.time_period import period_for
+from app.services.time_period import KST, period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
 from app.observability import log_route, metrics
@@ -234,6 +230,7 @@ def spot_report(
     lat: float = Query(ge=-90, le=90),
     lng: float = Query(ge=-180, le=180),
     radius_m: int = Query(int(REPORT_RADIUS_M), ge=100, le=1000),
+    at: datetime | None = Query(None),
     db: Session = Depends(get_db),
 ):
     """한 지점 주변 요약 — 집 주소 안전 리포트와 실시간 안내의 안심 거점 안내가 함께 쓴다."""
@@ -242,13 +239,13 @@ def spot_report(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"reason": "outside_service_area", "action": "안전 리포트는 경기도 지역에서만 지원합니다."},
         )
-    period = period_for()
+    moment = at or datetime.now(KST)
+    period = period_for(moment)
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
+    assessment = assess_area_environment(snapshot=snapshot, lat=lat, lng=lng, radius_m=radius_m, at=moment)
     zones = scoped_zones_query(db).all()
     zone = min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)) if zones else None
-    lights_known = zone is None or zone.lights_known is not False
-    cctv_known = zone is None or zone.cctv_known is not False
-    facilities = _facility_index()
-    area = area_scores(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None
     zone_detail_out = None
     if zone is not None:
         score_maps, _ = _period_score_maps(zones)
@@ -259,11 +256,7 @@ def spot_report(
         period=period,
         radius_m=radius_m,
         zone=zone_detail_out,
-        here_score=point_score(facilities, lat, lng, period, lights_known, cctv_known) if facilities else None,
-        area_day_score=area["day"] if area else None,
-        area_night_score=area["night"] if area else None,
-        counts=facility_counts(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None,
-        havens=nearest_havens(load_haven_index(), lat, lng),
+        **vars(assessment),
     )
 
 

@@ -1,27 +1,20 @@
-"""한 지점 주변의 안전 요약 — 집 주소 안전 리포트와 실시간 안내의 '안심 거점' 안내가 함께 쓴다.
+"""Versioned nearby help locations, separate from facility score calculation."""
+from app.services.facility_density import FacilityIndex, edge_local_scores
+from app.services.safety_score import Period
+from app.services.poi_factors import Point
 
-- 주변 점수: 반경 안을 격자로 찍어 구간 점수(edge_local_scores)를 평균한다 — 귀갓길 경로가 쓰는 것과 같은 계산.
-- 지금 이 자리 점수: 그 지점 하나의 구간 점수.
-- 안심 거점: 가장 가까운 경찰서·지구대·파출소, 24시 편의점, 안전비상벨.
-- 시설 수: 반경 안 CCTV·보안등·편의점 개수.
-
-ponytail: 격자 50m 간격의 평균 — 도로가 없는 땅(논밭·건물 안)도 같이 센다. 실제 도로만 보려면
-보행 그래프 간선 중간점으로 바꾸면 되지만, 그래프를 메모리에 올리는 비용이 커서 첫 버전은 격자로 둔다.
-"""
+import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
-from pathlib import Path
-from typing import Literal
 
 import numpy as np
 from scipy.spatial import cKDTree
 
-from app.services.bells import load_bell_points
-from app.services.facility_density import OSM_DIR, STORE_POINTS_PATH, FacilityIndex, edge_local_scores
-from app.services.poi_factors import Point, to_meters
-from app.services.safety_score import Period
+from app.services.facility_density import OSM_DIR
+from app.services.poi_factors import to_meters
+from app.services.route_environment_sources import EnvironmentIndex
 
 logger = logging.getLogger(__name__)
 
@@ -31,53 +24,67 @@ GRID_STEP_M = 50.0
 # 이보다 먼 거점은 "가까이 없음"으로 본다 — 걸어서 도움을 청하러 갈 거리가 아니다.
 HAVEN_MAX_M = 1500.0
 
-HavenKind = Literal["police", "convenience", "bell"]
+@lru_cache(maxsize=2)
+def _police_index(raw: bytes):
+    # Equal size and mtime do not imply equal contents on a batch overwrite.
+    payload = json.loads(raw)
+    points = np.asarray(payload["police"], dtype=float).reshape(-1, 2)
+    points = points[np.all(np.isfinite(points) & (np.abs(points) <= (90, 180)), axis=1)]
+    label = payload.get("source") or "별도 경찰 시설 좌표 자료"
+    url = "https://www.safetydata.go.kr/" if label == "행정안전부_공통POI_경찰" else None
+    return points, cKDTree(to_meters(points)), str(label), url, hashlib.sha256(raw).hexdigest()
 
 
-@dataclass(frozen=True)
-class HavenIndex:
-    """거점 종류별 좌표와 KD-tree. 좌표를 돌려줘야 해서 FacilityIndex와 따로 둔다."""
-
-    points: dict[HavenKind, np.ndarray]
-    trees: dict[HavenKind, cKDTree]
-
-
-def build_haven_index(police: list[Point], convenience: list[Point], bells: list[Point]) -> HavenIndex:
-    raw: dict[HavenKind, list[Point]] = {"police": police, "convenience": convenience, "bell": bells}
-    points = {kind: np.asarray(pts, dtype=float).reshape(-1, 2) for kind, pts in raw.items() if len(pts)}
-    return HavenIndex(points=points, trees={kind: cKDTree(to_meters(pts)) for kind, pts in points.items()})
-
-
-def _points_from(path: Path, key: str) -> list[Point]:
-    if not path.exists():
-        logger.warning("Haven points file missing, that haven kind is skipped: %s", path)
-        return []
+def load_haven_index():
+    """Police is a separately versioned coordinate list, outside the facility score."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))[key]
-    except (OSError, ValueError, KeyError):
-        logger.warning("Haven points unreadable, that haven kind is skipped: %s", path, exc_info=True)
-        return []
+        return _police_index(POLICE_POINTS_PATH.read_bytes())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        logger.warning("Police coordinate list could not be loaded", exc_info=True)
+        return None
 
 
-@lru_cache(maxsize=1)
-def load_haven_index() -> HavenIndex:
-    return build_haven_index(
-        _points_from(POLICE_POINTS_PATH, "police"),
-        _points_from(STORE_POINTS_PATH, "convenience"),
-        list(load_bell_points()),
-    )
-
-
-def nearest_havens(index: HavenIndex, lat: float, lng: float, max_m: float = HAVEN_MAX_M) -> list[dict]:
-    """종류마다 가장 가까운 거점 하나씩, 가까운 순으로. max_m보다 먼 종류는 뺀다."""
+def nearest_havens(indexes: EnvironmentIndex | None, lat: float, lng: float, *, at: datetime,
+                   max_m: float = HAVEN_MAX_M) -> list[dict]:
+    """One location per kind. Snapshot trees already carry the facility data version."""
     here = to_meters([(lat, lng)])[0]
-    found = []
-    for kind, tree in index.trees.items():
-        dist, i = tree.query(here)
-        if dist <= max_m:
-            p_lat, p_lng = index.points[kind][i]
-            found.append({"kind": kind, "lat": float(p_lat), "lng": float(p_lng), "distance_m": round(float(dist))})
-    return sorted(found, key=lambda h: h["distance_m"])
+    found = {}
+
+    def add(kind, tree, points, source_id, label, url, version, *, priority=0,
+            schedule="not_applicable", opening="not_applicable"):
+        distance, i = tree.query(here)
+        order = (float(distance), priority, source_id)
+        if distance > max_m or (kind in found and found[kind][0] <= order):
+            return
+        p_lat, p_lng = points[i]
+        found[kind] = (order, {"kind": kind, "lat": float(p_lat), "lng": float(p_lng),
+            "distance_m": round(float(distance)), "source_id": source_id, "source_label": label,
+            "source_url": url, "source_version": version, "schedule_status": schedule, "opening_status": opening,
+            "staffing_status": "not_applicable" if kind == "bell" else "unverified",
+            "operation_status": "unverified" if kind == "bell" else "not_applicable"})
+
+    if police := load_haven_index():
+        points, tree, label, url, version = police
+        add("police", tree, points, "local-police", label, url, version)
+    for entry in indexes.sources if indexes is not None else ():
+        source = entry.source
+        if entry.tree is None:
+            continue
+        if source.factor == "bell":
+            add("bell", entry.tree, source.points, source.source_id,
+                "검증된 비상벨 목록" if source.presence_eligible() else "비상벨 위치 자료",
+                source.source_url or None, source.sha256, priority=int(not source.presence_eligible()))
+        elif source.factor == "open_store" and source.source_id == "published-hours-emart24":
+            # The legacy store index mixes businesses and convenience stores; only
+            # the explicitly identified convenience-store feed can supply this kind.
+            weekly = source.presence_eligible() and bool(source.opening_hours)
+            opening = ("scheduled_open" if source.is_open(at) else "scheduled_closed") if weekly else "unverified"
+            schedule = "verified_weekly_schedule" if weekly else "published_schedule" if source.schedule_status == "published_schedule" else "unverified"
+            add("convenience", entry.tree, source.points, source.source_id, "이마트24 매장 찾기",
+                source.source_url or None, source.sha256, schedule=schedule, opening=opening)
+    return [record for _, record in sorted(found.values(), key=lambda entry: entry[0])]
 
 
 def grid_around(lat: float, lng: float, radius_m: float = REPORT_RADIUS_M, step_m: float = GRID_STEP_M) -> list[Point]:
