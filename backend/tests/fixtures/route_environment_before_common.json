@@ -1,0 +1,1445 @@
+[
+  {
+    "name": "multi-day",
+    "at": "2026-11-04T12:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "cctv",
+        "factor": "cctv",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": "crime_prevention",
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      },
+      {
+        "source_id": "bell",
+        "factor": "bell",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline",
+      "detour"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "day",
+        "distance_m": 200.1508679601084,
+        "score": 79.97738686397227,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "cctv"
+        ],
+        "excluded_factors": {
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0,
+          "cctv": 0.5995477372794452
+        },
+        "data_factor_availability_ratio": 0.6666666666666666,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "cctv": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "6bb7924cb03286b28ca0b173",
+        "per_factor_gaps": {
+          "cctv": [
+            {
+              "start_m": 0.0,
+              "end_m": 40.0
+            },
+            {
+              "start_m": 160.0,
+              "end_m": 200.1508679601084
+            }
+          ],
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1,
+          "cctv": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0,
+          "cctv": 0.5995477372794452
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 1.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "cctv"
+        ]
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "day",
+        "distance_m": 200.92697942855114,
+        "score": 79.86159458060025,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "cctv"
+        ],
+        "excluded_factors": {
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0,
+          "cctv": 0.597231891612005
+        },
+        "data_factor_availability_ratio": 0.6666666666666666,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "cctv": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "6bb7924cb03286b28ca0b173",
+        "per_factor_gaps": {
+          "cctv": [
+            {
+              "start_m": 0.0,
+              "end_m": 40.0
+            },
+            {
+              "start_m": 160.0,
+              "end_m": 200.92697942855114
+            }
+          ],
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1,
+          "cctv": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0,
+          "cctv": 0.597231891612005
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 1.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "cctv"
+        ]
+      }
+    }
+  },
+  {
+    "name": "single-night",
+    "at": "2026-11-04T23:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "bell",
+        "factor": "bell",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline",
+      "detour"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.1508679601084,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell"
+        ],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "source_missing",
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0
+        },
+        "data_factor_availability_ratio": 0.25,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "f1679a23d40737229c796bfb",
+        "per_factor_gaps": {
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0
+        },
+        "evaluation_basis": "single_factor",
+        "reference_score": 100.0,
+        "reference_factor": "bell",
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell"
+        ]
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.92697942855114,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell"
+        ],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "source_missing",
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0
+        },
+        "data_factor_availability_ratio": 0.25,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "f1679a23d40737229c796bfb",
+        "per_factor_gaps": {
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0
+        },
+        "evaluation_basis": "single_factor",
+        "reference_score": 100.0,
+        "reference_factor": "bell",
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell"
+        ]
+      }
+    }
+  },
+  {
+    "name": "zero-day",
+    "at": "2026-11-04T12:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "cctv",
+        "factor": "cctv",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": "crime_prevention",
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      },
+      {
+        "source_id": "bell",
+        "factor": "bell",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline",
+      "detour"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "day",
+        "distance_m": 200.1508679601084,
+        "score": 0.0,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "cctv"
+        ],
+        "excluded_factors": {
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 0.0,
+          "cctv": 0.0
+        },
+        "data_factor_availability_ratio": 0.6666666666666666,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "cctv": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "6bb7924cb03286b28ca0b173",
+        "per_factor_gaps": {
+          "cctv": [
+            {
+              "start_m": 0.0,
+              "end_m": 200.1508679601084
+            }
+          ],
+          "bell": [
+            {
+              "start_m": 0.0,
+              "end_m": 200.1508679601084
+            }
+          ]
+        },
+        "observed_facility_counts": {
+          "bell": 0,
+          "cctv": 0
+        },
+        "observed_factor_coverage": {
+          "bell": 0.0,
+          "cctv": 0.0
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 1.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "cctv"
+        ]
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "day",
+        "distance_m": 200.92697942855114,
+        "score": 0.0,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "cctv"
+        ],
+        "excluded_factors": {
+          "open_store": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 0.0,
+          "cctv": 0.0
+        },
+        "data_factor_availability_ratio": 0.6666666666666666,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "cctv": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "6bb7924cb03286b28ca0b173",
+        "per_factor_gaps": {
+          "cctv": [
+            {
+              "start_m": 0.0,
+              "end_m": 200.92697942855114
+            }
+          ],
+          "bell": [
+            {
+              "start_m": 0.0,
+              "end_m": 200.92697942855114
+            }
+          ]
+        },
+        "observed_facility_counts": {
+          "bell": 0,
+          "cctv": 0
+        },
+        "observed_factor_coverage": {
+          "bell": 0.0,
+          "cctv": 0.0
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 1.0,
+          "open_store": 0.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "cctv"
+        ]
+      }
+    }
+  },
+  {
+    "name": "partial-night",
+    "at": "2026-11-04T23:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "lighting",
+        "factor": "lighting",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126.9,
+                37.4
+              ],
+              [
+                127.1,
+                37.4
+              ],
+              [
+                127.1,
+                37.5009
+              ],
+              [
+                126.9,
+                37.5009
+              ],
+              [
+                126.9,
+                37.4
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.1508679601084,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "outside_source_coverage",
+          "open_store": "source_missing",
+          "bell": "source_missing"
+        },
+        "factor_coverage": {},
+        "data_factor_availability_ratio": 0.0,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "lighting": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "f0b27c48faee7ba2b643dc4c",
+        "per_factor_gaps": {},
+        "observed_facility_counts": {
+          "lighting": 1
+        },
+        "observed_factor_coverage": {
+          "lighting": 0.39969849151963016
+        },
+        "evaluation_basis": "partial_coverage",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": {
+          "lower": 9.992462287990753,
+          "upper": 92.50565328400694
+        },
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.6994723601593528,
+          "open_store": 0.0,
+          "bell": 0.0
+        },
+        "verified_distance_ratio": 0.6994723601593528,
+        "evidence_factors": [
+          "lighting"
+        ]
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.92697942855114,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "outside_source_coverage",
+          "open_store": "source_missing",
+          "bell": "source_missing"
+        },
+        "factor_coverage": {},
+        "data_factor_availability_ratio": 0.0,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "lighting": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "f0b27c48faee7ba2b643dc4c",
+        "per_factor_gaps": {},
+        "observed_facility_counts": {
+          "lighting": 1
+        },
+        "observed_factor_coverage": {
+          "lighting": 0.3981545944080033
+        },
+        "evaluation_basis": "partial_coverage",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": {
+          "lower": 9.953864860200083,
+          "upper": 92.53460135484994
+        },
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.6967705402140058,
+          "open_store": 0.0,
+          "bell": 0.0
+        },
+        "verified_distance_ratio": 0.6967705402140058,
+        "evidence_factors": [
+          "lighting"
+        ]
+      }
+    }
+  },
+  {
+    "name": "unverified-day",
+    "at": "2026-11-04T12:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "cctv",
+        "factor": "cctv",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "partial",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": "crime_prevention",
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "unavailable",
+        "period": "day",
+        "distance_m": 200.1508679601084,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [],
+        "excluded_factors": {
+          "cctv": "coverage_unverified",
+          "open_store": "source_missing",
+          "bell": "source_missing"
+        },
+        "factor_coverage": {},
+        "data_factor_availability_ratio": 0.0,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {},
+        "comparison_group_id": "9359871b6f951c67ff158126",
+        "per_factor_gaps": {},
+        "observed_facility_counts": {
+          "cctv": 1
+        },
+        "observed_factor_coverage": {
+          "cctv": 0.5995477372794452
+        },
+        "evaluation_basis": "observed_only",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "open_store": 0.0,
+          "bell": 0.0
+        },
+        "verified_distance_ratio": 0.0,
+        "evidence_factors": []
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "unavailable",
+        "period": "day",
+        "distance_m": 200.92697942855114,
+        "score": null,
+        "active_factors": [
+          "cctv",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [],
+        "excluded_factors": {
+          "cctv": "coverage_unverified",
+          "open_store": "source_missing",
+          "bell": "source_missing"
+        },
+        "factor_coverage": {},
+        "data_factor_availability_ratio": 0.0,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {},
+        "comparison_group_id": "9359871b6f951c67ff158126",
+        "per_factor_gaps": {},
+        "observed_facility_counts": {
+          "cctv": 1
+        },
+        "observed_factor_coverage": {
+          "cctv": 0.597231891612005
+        },
+        "evaluation_basis": "observed_only",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "open_store": 0.0,
+          "bell": 0.0
+        },
+        "verified_distance_ratio": 0.0,
+        "evidence_factors": []
+      }
+    }
+  },
+  {
+    "name": "overnight",
+    "at": "2026-11-05T01:00:00+09:00",
+    "sources": [
+      {
+        "source_id": "open_store",
+        "factor": "open_store",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": "official hours",
+        "opening_hours": {
+          "2": [
+            [
+              1320,
+              120
+            ]
+          ]
+        },
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      },
+      {
+        "source_id": "bell",
+        "factor": "bell",
+        "source_url": "https://data.go.kr/test",
+        "observed_at": "2026-11-01",
+        "retrieved_at": "2026-11-04",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "coverage_geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                126,
+                37
+              ],
+              [
+                128,
+                37
+              ],
+              [
+                128,
+                38
+              ],
+              [
+                126,
+                38
+              ],
+              [
+                126,
+                37
+              ]
+            ]
+          ]
+        },
+        "completeness": "verified_complete",
+        "coordinate_crs": "EPSG:4326",
+        "purpose": null,
+        "opening_hours_evidence": null,
+        "opening_hours": null,
+        "points": [
+          [
+            37.5009,
+            127
+          ]
+        ],
+        "coverage_basis": null,
+        "collection_evidence": null,
+        "schedule_status": null,
+        "staffing_status": null
+      }
+    ],
+    "candidates": [
+      {
+        "candidate_id": "baseline",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      },
+      {
+        "candidate_id": "detour",
+        "points": [
+          [
+            37.5,
+            127
+          ],
+          [
+            37.5009,
+            127.0001
+          ],
+          [
+            37.5018,
+            127
+          ]
+        ],
+        "source": "osm"
+      }
+    ],
+    "selected": [
+      "baseline",
+      "detour"
+    ],
+    "assessments": {
+      "baseline": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.1508679601084,
+        "score": 74.98115571997688,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "open_store"
+        ],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0,
+          "open_store": 0.49962311439953766
+        },
+        "data_factor_availability_ratio": 0.5,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "open_store": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "0ff2831ece22e90bba5c2912",
+        "per_factor_gaps": {
+          "open_store": [
+            {
+              "start_m": 0.0,
+              "end_m": 60.0
+            },
+            {
+              "start_m": 160.0,
+              "end_m": 200.1508679601084
+            }
+          ],
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1,
+          "store": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.0,
+          "open_store": 1.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "open_store"
+        ]
+      },
+      "detour": {
+        "model_version": "facility-access-v1",
+        "policy_version": "environment-v1-draft",
+        "status": "degraded",
+        "period": "night",
+        "distance_m": 200.92697942855114,
+        "score": 74.8846621505002,
+        "active_factors": [
+          "cctv",
+          "lighting",
+          "open_store",
+          "bell"
+        ],
+        "used_factors": [
+          "bell",
+          "open_store"
+        ],
+        "excluded_factors": {
+          "cctv": "source_missing",
+          "lighting": "source_missing"
+        },
+        "factor_coverage": {
+          "bell": 1.0,
+          "open_store": 0.4976932430100041
+        },
+        "data_factor_availability_ratio": 0.5,
+        "longest_support_gap_m": null,
+        "total_support_gap_m": null,
+        "gap_intervals": [],
+        "source_versions": {
+          "open_store": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bell": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "comparison_group_id": "0ff2831ece22e90bba5c2912",
+        "per_factor_gaps": {
+          "open_store": [
+            {
+              "start_m": 0.0,
+              "end_m": 60.0
+            },
+            {
+              "start_m": 160.0,
+              "end_m": 200.92697942855114
+            }
+          ],
+          "bell": []
+        },
+        "observed_facility_counts": {
+          "bell": 1,
+          "store": 1
+        },
+        "observed_factor_coverage": {
+          "bell": 1.0
+        },
+        "evaluation_basis": "multi_factor",
+        "reference_score": null,
+        "reference_factor": null,
+        "score_bounds": null,
+        "factor_evaluation_ratio": {
+          "cctv": 0.0,
+          "lighting": 0.0,
+          "open_store": 1.0,
+          "bell": 1.0
+        },
+        "verified_distance_ratio": 1.0,
+        "evidence_factors": [
+          "bell",
+          "open_store"
+        ]
+      }
+    }
+  }
+]

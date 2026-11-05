@@ -9,8 +9,10 @@ from pathlib import Path
 
 import numpy as np
 from scipy.spatial import cKDTree
+from shapely import covers, get_coordinates, get_parts, linestrings, prepare
 from shapely.geometry import LineString, Point as GeoPoint, shape
 from shapely.ops import transform, unary_union
+from shapely.strtree import STRtree
 
 from app.services.poi_factors import to_meters
 from app.services.time_period import KST
@@ -103,6 +105,7 @@ class SourceIndex:
 class EnvironmentIndex:
     sources: list[SourceIndex] = field(default_factory=list)
     coverage_by_factor: dict | None = None
+    coverage_boundary_indexes: dict | None = None
 
 
 def verified_factor_coverage(indexes: EnvironmentIndex, factor: str):
@@ -112,6 +115,32 @@ def verified_factor_coverage(indexes: EnvironmentIndex, factor: str):
         areas = [e.coverage for e in indexes.sources if e.source.factor == factor and e.source.eligible() and e.coverage is not None]
         indexes.coverage_by_factor[factor] = unary_union(areas) if areas else None
     return indexes.coverage_by_factor[factor]
+
+
+def coverage_known_mask(indexes: EnvironmentIndex, factor: str, locations, radius: float):
+    """Exact coverage of points or whole geometries, including holes/islands."""
+    known = np.zeros(len(locations), dtype=bool)
+    area = verified_factor_coverage(indexes, factor)
+    if area is None or not len(locations):
+        return known
+    if indexes.coverage_boundary_indexes is None:
+        indexes.coverage_boundary_indexes = {}
+    cached = indexes.coverage_boundary_indexes.get(factor)
+    if cached is None or cached[0] is not area:
+        parts = []
+        for ring in get_parts(area.boundary):
+            coordinates = get_coordinates(ring)
+            parts.append(linestrings(np.stack((coordinates[:-1], coordinates[1:]), axis=1)))
+        tree = STRtree(np.concatenate(parts))
+        indexes.coverage_boundary_indexes[factor] = (area, tree)
+    else:
+        tree = cached[1]
+    prepare(area)
+    inside = np.flatnonzero(covers(area, locations))
+    if len(inside):
+        pairs, distances = tree.query_nearest(locations[inside], all_matches=False, return_distance=True)
+        known[inside[pairs[0]]] = distances + 1e-8 >= radius
+    return known
 
 
 def _project_geometry(geometry):
@@ -138,8 +167,7 @@ def eligible_factors(indexes: EnvironmentIndex, route_geometries, period, policy
     used, excluded = set(), {}
     for factor in policy.active_factors(period):
         entries = [e for e in indexes.sources if e.source.factor == factor and e.source.eligible()]
-        covered = verified_factor_coverage(indexes, factor)
-        if covered is not None and routes and all(covered.covers(g.buffer(policy.radius(factor))) for g in routes):
+        if routes and coverage_known_mask(indexes, factor, np.array(routes, dtype=object), policy.radius(factor)).all():
             used.add(factor)
         else:
             available = [e.source for e in indexes.sources if e.source.factor == factor]

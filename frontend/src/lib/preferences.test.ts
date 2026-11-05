@@ -88,9 +88,16 @@ describe("preferences", () => {
     expect(loadEmergencyContacts()).toEqual([]);
   });
 
-  it("pins day/night by sending a fixed KST time, and nothing for auto", () => {
+  it("pins day/night on the current KST date, and sends nothing for auto", () => {
+    const now = new Date("2026-11-03T15:10:00Z"); // KST Wednesday, Nov 4.
     expect(routeTimeFor("auto")).toBeUndefined();
-    expect(routeTimeFor("day")).toBe("2000-01-01T12:00:00+09:00");
-    expect(routeTimeFor("night")).toBe("2000-01-01T23:00:00+09:00");
+    expect(routeTimeFor("day", now)).toBe("2026-11-04T12:00:00+09:00");
+    expect(routeTimeFor("night", now)).toBe("2026-11-04T23:00:00+09:00");
+    expect(new Date(routeTimeFor("night", now)!).getUTCDay()).toBe(3);
+  });
+
+  it("uses KST calendar rollover instead of the machine's calendar date", () => {
+    expect(routeTimeFor("day", new Date("2026-12-31T15:00:00Z"))).toBe("2027-01-01T12:00:00+09:00");
+    expect(routeTimeFor("night", new Date("2026-11-04T14:59:59Z"))).toBe("2026-11-04T23:00:00+09:00");
   });
 });

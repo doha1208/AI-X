@@ -8,13 +8,11 @@ import math
 import numpy as np
 
 from app.services.geo import haversine_km
+from app.services.facility_assessment import MODEL_VERSION, AssessmentSample, assess_facility_samples
 from app.services.poi_factors import to_meters
 from app.services.route_environment_gaps import summarize_gaps
 from app.services.route_environment_sources import EnvironmentIndex, eligible_factors
 from app.services.time_period import KST, period_for
-
-MODEL_VERSION = "facility-access-v1"
-
 
 @dataclass
 class RouteCell:
@@ -90,24 +88,24 @@ def sample_route(points, *, step_m: float) -> list[RouteCell]:
 
 def evaluate_route_environment(points, *, at, policy, indexes, sources=None, common_factors=frozenset(), excluded_factors=None,
                                comparison_group_id="") -> EnvironmentAssessment:
-    period = period_for(at)
     cells = sample_route(points, step_m=policy.step_m)
+    assessment, _ = evaluate_route_cells(cells, at=at, policy=policy, indexes=indexes, common_factors=common_factors,
+                                         excluded_factors=excluded_factors, comparison_group_id=comparison_group_id)
+    return assessment
+
+
+def evaluate_route_cells(cells, *, at, policy, indexes, common_factors=frozenset(), excluded_factors=None,
+                         comparison_group_id=""):
+    """One evaluation supplies both the route summary and its ordered facility observations."""
+    period = period_for(at)
     length = cells[-1].end_m if cells else 0.0
-    observations, coverage = {}, {}
+    shared = assess_facility_samples([AssessmentSample(str(i), c.midpoint, c.end_m - c.start_m) for i, c in enumerate(cells)],
+                                    scope="route", at=at, policy=policy, indexes=indexes, common_factors=common_factors,
+                                    excluded_factors=excluded_factors, comparison_basis_id=comparison_group_id)
+    observations = {f: [o.factors[f].comparison_present for o in shared.observations] for f in sorted(common_factors)}
+    coverage = shared.factor_coverage
     meters = to_meters([c.midpoint for c in cells])
-    for factor in sorted(common_factors):
-        present = np.zeros(len(cells), dtype=bool)
-        for entry in indexes.sources:
-            if entry.source.factor == factor and entry.source.eligible() and entry.source.is_open(at) and entry.tree is not None and cells:
-                present |= entry.tree.query_ball_point(meters, r=policy.radius(factor), return_length=True) > 0
-        observations[factor] = present.tolist()
-        coverage[factor] = sum((c.end_m - c.start_m) for c, p in zip(cells, present) if p) / length if length else 0.0
-    score = 100 * sum(coverage.values()) / len(coverage) if len(coverage) >= 2 and length else None
-    reference_factor = next(iter(coverage)) if len(coverage) == 1 and length else None
-    reference_score = 100 * coverage[reference_factor] if reference_factor else None
-    from app.services.route_environment_evidence import assess_available_evidence
-    evidence = assess_available_evidence(cells, at=at, period=period, policy=policy, indexes=indexes)
-    active = list(policy.active_factors(period))
+    active = shared.active_factors
     gaps = summarize_gaps(cells, observations, period=period, common_factors=common_factors)
     observed_counts, observed_coverage = {}, {}
     # Partial coordinates prove presence only. They never enter the composite score or gap ranking.
@@ -130,16 +128,18 @@ def evaluate_route_environment(points, *, at, policy, indexes, sources=None, com
             observed_counts["store_with_published_hours"] = len(schedule_hits)
         if factor != "open_store":
             observed_coverage[factor] = sum((c.end_m - c.start_m) for c, p in zip(cells, present) if p) / length if length else 0.0
-    basis = "multi_factor" if score is not None else "single_factor" if reference_score is not None else "partial_coverage" if evidence["bounds"] else "observed_only" if any(observed_counts.values()) else "unavailable"
-    return EnvironmentAssessment(MODEL_VERSION, policy.version, "available" if score is not None and len(coverage) == len(active) else "degraded" if basis in {"multi_factor", "single_factor", "partial_coverage"} else "unavailable",
-                                 period, length, score, active, sorted(common_factors), excluded_factors or {}, coverage,
-                                 len(common_factors) / len(active), source_versions={e.source.source_id: e.source.sha256 for e in indexes.sources if e.source.factor in set(evidence["evidence_factors"]) and e.source.presence_eligible()},
+    # Observations of inactive factors remain visible, without affecting the active-factor score.
+    basis = "observed_only" if shared.evaluation_basis == "unavailable" and any(observed_counts.values()) else shared.evaluation_basis
+    assessment = EnvironmentAssessment(MODEL_VERSION, policy.version, shared.status,
+                                 period, length, shared.score, active, sorted(common_factors), excluded_factors or {}, coverage,
+                                 len(common_factors) / len(active), source_versions=shared.source_versions,
                                  comparison_group_id=comparison_group_id, observed_facility_counts=observed_counts,
                                  observed_factor_coverage=observed_coverage, evaluation_basis=basis,
-                                 reference_score=reference_score, reference_factor=reference_factor,
-                                 score_bounds=evidence["bounds"] if basis == "partial_coverage" else None,
-                                 factor_evaluation_ratio=evidence["factor_evaluation_ratio"],
-                                 verified_distance_ratio=evidence["verified_distance_ratio"], evidence_factors=evidence["evidence_factors"], **gaps)
+                                 reference_score=shared.reference_score, reference_factor=shared.reference_factor,
+                                 score_bounds=shared.score_bounds,
+                                 factor_evaluation_ratio=shared.factor_evaluation_ratio,
+                                 verified_distance_ratio=shared.verified_distance_ratio, evidence_factors=shared.evidence_factors, **gaps)
+    return assessment, shared.observations
 
 
 def evaluate_route_group(candidates, *, at, policy, indexes: EnvironmentIndex) -> list[EvaluatedRoute]:
