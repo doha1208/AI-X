@@ -7,7 +7,8 @@ import { HAVEN_LABEL, havenDirectionsUrl } from "@/lib/havens";
 import { nearestSubway } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { routeTimeFor } from "@/lib/preferences";
-import { formatDistance, pathLength, walkingMinutes } from "@/lib/routeGuidance";
+import { environmentScoreText, formatDistance, guideOptions, pathLength, walkingMinutes } from "@/lib/routeGuidance";
+import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { withSearch } from "@/components/WithSearch";
@@ -19,7 +20,7 @@ import styles from "./report.module.css";
 const STATION_RADIUS_M = 3000;
 
 type NightWalk =
-  | { status: "ok"; station: Place; route: RouteResult; shortestM: number | null }
+  | { status: "ok"; station: Place; route: RouteResult; comparisonM: number | null }
   | { status: "none" | "error" };
 
 function scoreTone(score: number): string {
@@ -51,8 +52,8 @@ async function loadNightWalk(home: Place): Promise<NightWalk> {
   const station = await nearestSubway(home.lat, home.lng, STATION_RADIUS_M);
   if (!station) return { status: "none" };
   const route = await routeSafety(station.lat, station.lng, home.lat, home.lng, { at: routeTimeFor("night") });
-  const shortestM = route.shortest_route_points ? pathLength(route.shortest_route_points) : null;
-  return { status: "ok", station: { lat: station.lat, lng: station.lng, label: station.name }, route, shortestM };
+  const comparisonM = route.shortest_route_points ? pathLength(route.shortest_route_points) : null;
+  return { status: "ok", station: { lat: station.lat, lng: station.lng, label: station.name }, route, comparisonM };
 }
 
 export default withSearch(ReportPage);
@@ -104,7 +105,10 @@ function ReportPage({ search }: { search: string }) {
 
   if (!user) return null;
   const loading = place !== null && report === null && error === null;
-  const safeDistanceM = walk?.status === "ok" ? (walk.route.alternatives[0]?.distance_m ?? pathLength(walk.route.route_points)) : 0;
+  const nightOption = walk?.status === "ok" ? guideOptions(walk.route)[0] : undefined;
+  const nightAssessment = nightOption?.environmentAssessment;
+  const safeDistanceM = nightOption?.distanceM ?? 0;
+  const hasCompositeScore = environmentScoreText(nightAssessment) !== undefined;
 
   return (
     <main className={shared.page}>
@@ -202,20 +206,24 @@ function ReportPage({ search }: { search: string }) {
                   <strong>{walk.station.label}</strong>에서 밤 11시에 걸어서 귀가한다고 가정했어요.
                 </p>
                 <div className={styles.scoreRow}>
-                  <Score label="추천 경로 점수" value={walk.route.safety_score} />
+                  <div className={styles.score}>
+                    <span>{hasCompositeScore ? "추천 경로 시설 평가" : "밤 귀갓길 시설 평가"}</span>
+                    <div><RouteEnvironmentSummary assessment={nightAssessment} /></div>
+                  </div>
                   <div className={styles.score}>
                     <span>거리 · 걸음</span>
                     <strong>
                       {formatDistance(safeDistanceM)} · {walkingMinutes(safeDistanceM)}분
                     </strong>
                   </div>
-                  {walk.shortestM !== null && (
+                  {walk.comparisonM !== null && (
                     <div className={styles.score}>
-                      <span>최단 경로</span>
-                      <strong>{formatDistance(walk.shortestM)}</strong>
+                      <span>일반 비교 경로</span>
+                      <strong>{formatDistance(walk.comparisonM)}</strong>
                     </div>
                   )}
                 </div>
+                <RouteEnvironmentDetails assessment={nightAssessment} />
                 <Link
                   className={styles.action}
                   href={`/route?${placeQuery("start", walk.station)}&${placeQuery("end", place)}`}
