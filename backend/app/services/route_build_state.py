@@ -64,7 +64,8 @@ def update_builder_state(directory: Path, **changes) -> None:
 def public_builder_status(directory: Path) -> dict:
     state = read_builder_state(directory)
     allowed = ("status", "last_worker_heartbeat_at", "last_checked_at", "last_success_at", "environment_ready",
-               "environment_inputs_ready", "stale_reason", "source_snapshot_id", "source_counts", "source_diagnostics")
+               "environment_inputs_ready", "stale_reason", "source_snapshot_id", "source_counts", "source_diagnostics",
+               "area_environment_ready", "zone_environment_ready", "physical_walk_segments", "zone_summary_count", "boundary_diagnostics")
     result = {key: state[key] for key in allowed if key in state}
     try:
         age = (datetime.now(UTC) - datetime.fromisoformat(state["last_worker_heartbeat_at"])).total_seconds()

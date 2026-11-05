@@ -36,13 +36,18 @@ def _raise(exc: BaseException) -> None:
     raise exc
 
 
-def _artifact(version: str) -> RouteArtifact:
+def _artifact(version: str, schema: int = 4) -> RouteArtifact:
+    from app.services.walk_environment_samples import SAMPLING_VERSION, WalkEnvironmentIndex
     graph = nx.DiGraph()
     graph.add_node(1, y=37.5, x=127.0)
     graph.add_node(2, y=37.501, x=127.001)
     graph.add_edge(1, 2, length=140.0, edge_score=70.0, safety_cost=210.0)
     return RouteArtifact(
         version=version,
+        schema_version=schema,
+        walk_environment_index=WalkEnvironmentIndex((), "test-source") if schema == 4 else None,
+        sampling_version=SAMPLING_VERSION if schema == 4 else None,
+        boundary_version="test-boundary" if schema == 4 else None,
         region="seoul-gyeonggi",
         graph_by_period={"day": graph, "night": graph.copy()},
         environment_graph=graph, environment_index=EnvironmentIndex(),
@@ -86,7 +91,7 @@ def _seed_queued_build(session_local, *, active_version: str = "current-v1") -> 
 
 
 def test_batch_builder_publishes_the_built_artifact(monkeypatch, tmp_path):
-    monkeypatch.setattr(script, "build_route_artifact", lambda zones, **kwargs: _artifact(kwargs["version"]))
+    monkeypatch.setattr(script, "build_route_artifact", lambda zones, **kwargs: _artifact(kwargs["version"], kwargs["target_schema"]))
 
     artifact_dir = script.build_and_publish_route_artifact(
         zones=[object()], directory=tmp_path, version="v1", region="seoul-gyeonggi"
@@ -141,8 +146,8 @@ def test_queued_build_publishes_then_activates_candidate_profile(monkeypatch, tm
     publish_artifact(_artifact("stable-v1"), tmp_path)
     monkeypatch.setattr(script, "SessionLocal", session_local)
 
-    def publish_candidate(*, directory, version, profile, **_):
-        artifact = _artifact(version)
+    def publish_candidate(*, directory, version, profile, target_schema, **_):
+        artifact = _artifact(version, target_schema)
         object.__setattr__(artifact, "profile_version", profile.version)
         return publish_artifact(artifact, directory)
 
@@ -153,6 +158,8 @@ def test_queued_build_publishes_then_activates_candidate_profile(monkeypatch, tm
     db = session_local()
     build = db.get(ScoreBuildRecord, build_id)
     profiles = {profile.version: profile.status for profile in db.query(ScoringProfileRecord).all()}
+    assert load_current_artifact(tmp_path).schema_version == 3
+    assert db.query(ScoreBuildRecord).filter_by(target_schema=4, status="queued").count() == 1
     db.close()
     current = load_current_artifact(tmp_path)
 

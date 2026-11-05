@@ -75,7 +75,7 @@ def test_optional_source_that_was_never_present_does_not_block_repeat_builds(tmp
     monkeypatch.setattr(settings, "route_environment_sources_path", str(second.manifest_path))
     monkeypatch.setattr(safe_route, "_load_local_graph", _tiny_walk_graph)
     monkeypatch.setattr(safe_route, "route_input_data_version", lambda *a, **k: "fixture")
-    artifact = safe_route.build_route_artifact(_zones(), version="partial", region="gyeonggi")
+    artifact = safe_route.build_route_artifact(_zones(), version="partial", region="gyeonggi", target_schema=3)
     assert artifact.environment_index.sources
 
 

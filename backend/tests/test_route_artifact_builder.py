@@ -37,7 +37,7 @@ def test_build_route_artifact_precomputes_day_and_night_graphs(monkeypatch):
     monkeypatch.setattr(sr, "load_facility_index", lambda: None)
     monkeypatch.setattr(sr, "_build_scored_graph", lambda *a, **k: (_ for _ in ()).throw(AssertionError("legacy scoring must not run")))
 
-    artifact = sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi")
+    artifact = sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi", target_schema=3)
 
     assert set(artifact.graph_by_period) == {"day", "night"}
     assert artifact.node_ids == [1, 2]
@@ -47,7 +47,8 @@ def test_build_route_artifact_precomputes_day_and_night_graphs(monkeypatch):
     assert artifact.profile_version == DEFAULT_SCORING_PROFILE.version
     assert set(artifact.score_by_period) == {"day", "night"}
     assert artifact.score_by_period["day"]["TEST1"] == 50.0
-    assert artifact.data_version == sr.route_input_data_version(_zones())
+    assert artifact.schema_version == 3
+    assert artifact.data_version == sr.route_input_data_version(_zones(), target_schema=3)
 
 
 def test_build_route_artifact_leaves_out_car_only_roads(monkeypatch):
@@ -60,7 +61,7 @@ def test_build_route_artifact_leaves_out_car_only_roads(monkeypatch):
     monkeypatch.setattr(sr, "_load_local_graph", lambda: graph)
     monkeypatch.setattr(sr, "load_facility_index", lambda: None)
 
-    artifact = sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi")
+    artifact = sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi", target_schema=3)
 
     day = artifact.graph_by_period["day"]
     assert not day.has_edge(1, 3)
@@ -90,6 +91,20 @@ def test_route_input_data_version_changes_when_scoring_semantics_change(monkeypa
     assert first != second
 
 
+def test_schema4_builder_attaches_physical_index_without_changing_route_graph(monkeypatch):
+    from app.services.walk_environment_samples import SAMPLING_VERSION, build_walk_environment_index
+    graph = _tiny_walk_graph()
+    physical = build_walk_environment_index(graph, source_version="test-source")
+    monkeypatch.setattr(sr, "_load_local_graph", lambda: graph)
+    monkeypatch.setattr(sr, "_prepare_extended_environment", lambda *a: {
+        "walk_environment_index": physical, "zone_facility_summaries": {},
+        "sampling_version": SAMPLING_VERSION, "boundary_version": "test-boundary"})
+    value = sr.build_route_artifact(_zones(), version="v4", region="gyeonggi")
+    assert value.schema_version == 4 and value.walk_environment_index is physical
+    assert value.environment_graph[1][2]["length"] == 140
+    assert value.data_version != sr.route_input_data_version(_zones(), target_schema=3)
+
+
 def test_build_route_artifact_reloads_environment_sources_for_each_build(monkeypatch):
     from app.services import route_environment_sources
     from test_route_environment import source
@@ -110,7 +125,7 @@ def test_build_route_artifact_reloads_environment_sources_for_each_build(monkeyp
     monkeypatch.setattr(route_environment_sources, "load_environment_sources", load_current_facilities)
     monkeypatch.setattr(sr, "route_input_data_version", lambda *a, **k: "test-data")
 
-    sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi")
-    sr.build_route_artifact(_zones(), version="v2", region="seoul-gyeonggi")
+    sr.build_route_artifact(_zones(), version="v1", region="seoul-gyeonggi", target_schema=3)
+    sr.build_route_artifact(_zones(), version="v2", region="seoul-gyeonggi", target_schema=3)
 
     assert calls == 2

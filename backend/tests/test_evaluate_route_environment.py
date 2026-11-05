@@ -55,7 +55,7 @@ def test_offline_uses_feasible_production_pool_before_freezing_common_factors():
     candidates = [RouteCandidate("osm-0",POINTS,"osm"),RouteCandidate("outside",detour,"osm")]
     class Runtime:
         def environment_snapshot(self):
-            return SimpleNamespace(artifact=SimpleNamespace(environment_index=build_environment_index(sources)))
+            return SimpleNamespace(artifact=SimpleNamespace(version="test-snapshot", environment_index=build_environment_index(sources)))
         def find_environment_candidates(self,*a,**kw):
             return candidates
         def find_routes(self,*a,**kw):

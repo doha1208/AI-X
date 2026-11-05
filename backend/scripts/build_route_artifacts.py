@@ -18,7 +18,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
-from app.services.route_artifact import load_current_artifact, publish_artifact
+from app.services.route_artifact import SCHEMA_VERSION, load_current_artifact, publish_artifact
 from app.services.safe_route import build_route_artifact, route_input_data_version
 from app.services.scoring_profile import ScoringProfile, DEFAULT_SCORING_PROFILE
 from app.services.scoring_profile_store import claim_next_queued_build, queue_route_build
@@ -84,10 +84,13 @@ def ensure_build_profile(db: Session, *, bootstrap: bool, current_profile_versio
 def build_and_publish_route_artifact(
     *, zones: list[SafetyZone], directory: Path, version: str, region: str, profile: ScoringProfile = None,
     build_id: int | None = None, expected_input_fingerprint: str | None = None,
+    target_schema: int = SCHEMA_VERSION,
 ) -> Path:
     """주어진 안전구역 데이터로 산출물을 만들고, 성공했을 때만 최신 버전으로 게시한다."""
 
-    artifact = build_route_artifact(zones, version=version, region=region, **({"profile": profile} if profile else {}))
+    artifact = build_route_artifact(zones, version=version, region=region, target_schema=target_schema, **({"profile": profile} if profile else {}))
+    if artifact.schema_version != target_schema:
+        raise ValueError("target_schema_mismatch")
     if expected_input_fingerprint is not None and artifact.data_version != expected_input_fingerprint:
         raise ValueError("input_changed_during_build")
     cases_path = Path(settings.route_validation_cases_path)
@@ -95,10 +98,13 @@ def build_and_publish_route_artifact(
     report = validate_route_artifact(artifact, reference_cases=cases)
     report.update(build_id=build_id, source_snapshot_id=_source_snapshot_id())
     require_publishable(report, previous=current_validation(directory))
-    if expected_input_fingerprint is not None and route_input_data_version(zones, profile=profile or DEFAULT_SCORING_PROFILE) != expected_input_fingerprint:
+    if expected_input_fingerprint is not None and route_input_data_version(zones, profile=profile or DEFAULT_SCORING_PROFILE, target_schema=target_schema) != expected_input_fingerprint:
         raise ValueError("input_changed_during_build")
     result = publish_artifact(artifact, directory, validation_report=report)
     update_builder_state(directory, environment_ready=report["environment_ready"],
+                         area_environment_ready=report["area_environment_ready"], zone_environment_ready=report["zone_environment_ready"],
+                         physical_walk_segments=report["physical_walk_segments"], zone_summary_count=report["zone_summary_count"],
+                         boundary_diagnostics=report["boundary_diagnostics"],
                          environment_inputs_ready=report["environment_inputs_ready"], last_success_at=utc_now(),
                          stale_reason=None if report["environment_ready"] else "evaluation_evidence_incomplete")
     return result
@@ -126,16 +132,17 @@ def process_next_queued_build(*, directory: Path, region: str, version_override:
             prepare_environment_inputs(Path("data/osm"), Path(settings.route_source_catalog_path),
                                        Path(settings.route_environment_sources_path).parent)
             zones = scoped_zones_query(db).all()
-            fingerprint = route_input_data_version(zones, profile=profile)
+            fingerprint = route_input_data_version(zones, profile=profile, target_schema=build.target_schema)
             db.query(ScoreBuildRecord).filter(ScoreBuildRecord.id != build.id, ScoreBuildRecord.profile_id == build.profile_id,
-                                             ScoreBuildRecord.input_fingerprint == fingerprint, ScoreBuildRecord.status == "queued").update(
+                                             ScoreBuildRecord.input_fingerprint == fingerprint, ScoreBuildRecord.target_schema == build.target_schema,
+                                             ScoreBuildRecord.status == "queued").update(
                 {"status": "failed", "error_code": "superseded", "finished_at": datetime.now(UTC)})
             build.input_fingerprint = fingerprint
             db.commit()
             version = version_override or f"{_default_version()}-{profile.version}"
             update_builder_state(directory, status="building")
             build_and_publish_route_artifact(zones=zones, directory=directory, version=version, region=region, profile=profile,
-                                             build_id=build_id, expected_input_fingerprint=fingerprint)
+                                             build_id=build_id, expected_input_fingerprint=fingerprint, target_schema=build.target_schema)
         except Exception as error:
             import logging
             logging.getLogger(__name__).exception("Route artifact build failed")
@@ -152,6 +159,8 @@ def process_next_queued_build(*, directory: Path, region: str, version_override:
         profile_record.status = "active"
         db.commit()
         update_builder_state(directory, status="idle")
+        if build.target_schema < SCHEMA_VERSION:
+            queue_rebuild_if_active_artifact_is_stale(db, directory, region=region)
         return True
     finally:
         db.close()
@@ -207,7 +216,7 @@ def queue_rebuild_if_active_artifact_is_stale(db: Session, directory: Path, *, r
     profile = ScoringProfile(active.version, json.loads(active.weights_json), active.unknown_score)
     fingerprint = route_input_data_version(zones, profile=profile)
     if (
-        not force and active.status == "active" and metadata.get("schema_version") == 3
+        not force and active.status == "active" and metadata.get("schema_version") == SCHEMA_VERSION
         and metadata.get("profile_version") == active.version
         and metadata.get("data_version") == fingerprint
         and (directory / metadata["version"] / "route-artifact.pickle").exists()
@@ -217,7 +226,7 @@ def queue_rebuild_if_active_artifact_is_stale(db: Session, directory: Path, *, r
     pending = (
         db.query(ScoreBuildRecord)
         .filter(
-            ScoreBuildRecord.profile_id == active.id, ScoreBuildRecord.input_fingerprint == fingerprint,
+            ScoreBuildRecord.profile_id == active.id, ScoreBuildRecord.input_fingerprint == fingerprint, ScoreBuildRecord.target_schema == SCHEMA_VERSION,
             ScoreBuildRecord.status.in_(("queued", "building")),
         )
         .first()
@@ -233,7 +242,7 @@ def queue_rebuild_if_active_artifact_is_stale(db: Session, directory: Path, *, r
         if permanent or (last_failed.error_code not in ("interrupted", "input_changed_during_build") and age.total_seconds() < 1800):
             return False
     queue_route_build(db, profile_id=active.id, input_fingerprint=fingerprint, region=region,
-                      target_schema=3, reason="manual" if force else "inputs_changed")
+                      target_schema=SCHEMA_VERSION, reason="manual" if force else "inputs_changed")
     return True
 
 

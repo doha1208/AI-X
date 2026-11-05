@@ -645,16 +645,23 @@ class RouteArtifactRuntime:
         self._result_cache: OrderedDict[tuple[str, Period, int, int, int], list[dict]] = OrderedDict()
         self._manifest_mtime_ns: int | None = None
         self._last_reload_check = float("-inf")
+        self._capabilities = {"area_environment_ready": False, "zone_environment_ready": False}
 
     def install(self, artifact: RouteArtifact, *, published_at: datetime | None = None) -> None:
         """완성된 산출물과 그 노드 색인을 한 번에 교체한다."""
 
+        from app.services.route_artifact import extended_artifact_valid
+        from app.services.route_artifact_validation import validate_route_artifact
+        if not extended_artifact_valid(artifact):
+            raise ValueError("Invalid extended spatial artifact")
+        report = validate_route_artifact(artifact)
         tree = cKDTree(artifact.node_points)
         with self._lock:
             self._artifact = artifact
             self._artifact_published_at = published_at
             self._tree = tree
             self._result_cache.clear()
+            self._capabilities = {key: report[key] for key in ("area_environment_ready", "zone_environment_ready")}
 
     def clear(self) -> None:
         with self._lock:
@@ -663,6 +670,7 @@ class RouteArtifactRuntime:
             self._tree = None
             self._result_cache.clear()
             self._manifest_mtime_ns = None
+            self._capabilities = {"area_environment_ready": False, "zone_environment_ready": False}
 
     def status(self) -> dict[str, bool | str | None]:
         with self._lock:
@@ -670,6 +678,7 @@ class RouteArtifactRuntime:
                 "available": self._artifact is not None,
                 "version": self._artifact.version if self._artifact is not None else None,
                 "published_at": self._artifact_published_at.isoformat() if self._artifact_published_at else None,
+                **self._capabilities,
             }
 
     def published_at(self) -> datetime | None:
@@ -688,7 +697,7 @@ class RouteArtifactRuntime:
         from app.services.route_environment_policy import EnvironmentPolicy
         with self._lock:
             artifact, tree = self._artifact, self._tree
-            if artifact is None or tree is None or artifact.schema_version != 3 or artifact.environment_model_version != "facility-access-v1":
+            if artifact is None or tree is None or artifact.schema_version not in (3, 4) or artifact.environment_model_version != "facility-access-v1":
                 return None
             if artifact.environment_policy_fingerprint != EnvironmentPolicy().fingerprint():
                 return None
@@ -720,7 +729,7 @@ class RouteArtifactRuntime:
 
     def load(self, directory: Path) -> bool:
         try:
-            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") != 3:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") not in (3, 4):
                 return False
         except (OSError, ValueError, AttributeError):
             return False
@@ -751,7 +760,7 @@ class RouteArtifactRuntime:
             manifest_stat = (directory / "current.json").stat()
             manifest_mtime_ns = manifest_stat.st_mtime_ns
             published_at = datetime.fromtimestamp(manifest_stat.st_mtime, tz=UTC)
-            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") != 3:
+            if json.loads((directory / "current.json").read_text(encoding="utf-8")).get("schema_version") not in (3, 4):
                 return False
         except (OSError, ValueError, AttributeError):
             return False
@@ -833,8 +842,28 @@ class RouteArtifactRuntime:
 route_artifact_runtime = RouteArtifactRuntime()
 
 
+def _prepare_extended_environment(zones, environment_index, policy):
+    from app.services.walk_environment_samples import SAMPLING_VERSION, load_walk_source_for_sampling
+    from app.services.zone_environment_summaries import load_assessment_boundaries, build_zone_environment_summaries
+    def release_batch_source():
+        global _local_graph, _local_graph_attempted, _local_graph_fingerprint
+        with _local_graph_lock:
+            _local_graph, _local_graph_attempted, _local_graph_fingerprint = None, False, None
+    logger.info("Preparing physical walk index for area and zone assessments")
+    index = load_walk_source_for_sampling(LOCAL_WALK_NETWORK_PATH,
+        cache_path=LOCAL_WALK_NETWORK_PATH.with_name("walk-environment-index.pickle"), before_source_load=release_batch_source)
+    wanted = {z.dong_code for z in zones}
+    boundaries = load_assessment_boundaries(Path(settings.route_environment_sources_path), wanted)
+    summaries = build_zone_environment_summaries(index, boundaries.boundaries, wanted, policy=policy, indexes=environment_index,
+                                                boundary_version=boundaries.version)
+    return dict(walk_environment_index=index, zone_facility_summaries=summaries, boundary_version=boundaries.version,
+                sampling_version=SAMPLING_VERSION, boundary_diagnostics={"missing_codes": boundaries.missing_codes,
+                    "invalid_codes": boundaries.invalid_codes, "wanted_count": len(wanted), "matched_count": len(boundaries.boundaries)})
+
+
 def build_route_artifact(
-    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE
+    zones: list[SafetyZone], *, version: str, region: str, profile: ScoringProfile = DEFAULT_SCORING_PROFILE,
+    target_schema: int = 4,
 ) -> RouteArtifact:
     """배치 실행에서만 호출하는 낮·밤 안전 가중 경로 그래프 생성기.
 
@@ -844,15 +873,18 @@ def build_route_artifact(
 
     if not zones:
         raise ValueError("Safety zones are required to build a route artifact")
-    graph = _load_local_graph()
-    if graph is None or graph.number_of_nodes() == 0:
-        raise RuntimeError("Local walking graph is required to build a route artifact")
+    if target_schema not in (3, 4):
+        raise ValueError("unsupported_target_schema")
 
     from app.services.route_environment_policy import EnvironmentPolicy
     from app.services.route_environment_sources import build_environment_index, load_environment_sources
     from app.services.route_environment_search import annotate_environment_graph
     environment_policy = EnvironmentPolicy()
     environment_index = build_environment_index(load_environment_sources(Path(settings.route_environment_sources_path)))
+    extended = _prepare_extended_environment(zones, environment_index, environment_policy) if target_schema == 4 else {}
+    graph = _load_local_graph()
+    if graph is None or graph.number_of_nodes() == 0:
+        raise RuntimeError("Local walking graph is required to build a route artifact")
     environment_graph = _build_environment_graph(graph)
     if any(entry.source.eligible() for entry in environment_index.sources):
         annotate_environment_graph(environment_graph, environment_index, environment_policy)
@@ -876,13 +908,15 @@ def build_route_artifact(
         node_ids=node_ids,
         node_points=node_points,
         profile_version=profile.version,
-        data_version=route_input_data_version(zones, profile=profile),
+        data_version=route_input_data_version(zones, profile=profile, target_schema=target_schema),
+        schema_version=target_schema,
         score_by_period=score_by_period,
         environment_model_version="facility-access-v1",
         policy_version=environment_policy.version,
         environment_index=environment_index,
         environment_policy_fingerprint=environment_policy.fingerprint(),
         environment_graph=environment_graph,
+        **extended,
     )
 
 
@@ -926,6 +960,7 @@ def route_input_data_version(
     store_points_path: Path = STORE_POINTS_PATH,
     graph_path: Path | None = None,
     profile: ScoringProfile = DEFAULT_SCORING_PROFILE,
+    target_schema: int = 4,
 ) -> str:
     """동 원시 지표와 도로 구간 시설 좌표를 함께 식별하는 산출물 입력 지문."""
     payload = {
@@ -949,6 +984,16 @@ def route_input_data_version(
     payload["environment_graph_preparation"] = "walk-length-parallel-v1"
     payload["environment_manifest"] = _file_sha256(source_path)
     payload["environment_verified_files"] = [(s.source_id, s.sha256) for s in load_environment_sources(source_path)]
+    if target_schema == 4:
+        from app.services import facility_assessment, route_environment_sources, walk_environment_samples, zone_environment_summaries
+        payload["target_schema"] = target_schema
+        payload["assessment_implementations"] = [_file_sha256(Path(module.__file__)) for module in
+                                                (facility_assessment, route_environment_sources, walk_environment_samples, zone_environment_summaries)]
+        payload["sampling_version"] = walk_environment_samples.SAMPLING_VERSION
+        payload["physical_road_filter"] = _file_sha256(Path(__file__).with_name("road_score.py"))
+        payload["schedule_version"] = zone_environment_summaries.SCHEDULE_VERSION
+        from scripts import build_gyeonggi_boundaries
+        payload["boundary_mapping"] = _file_sha256(Path(build_gyeonggi_boundaries.__file__))
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

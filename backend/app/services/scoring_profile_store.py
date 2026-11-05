@@ -149,7 +149,8 @@ def queue_profile_build(db: Session, profile_id: int) -> ScoreBuildOut | None:
     profile = db.get(ScoringProfileRecord, profile_id)
     if profile is None:
         return None
-    build = ScoreBuildRecord(profile_id=profile_id, status="queued")
+    from app.services.route_artifact import SCHEMA_VERSION
+    build = ScoreBuildRecord(profile_id=profile_id, status="queued", target_schema=SCHEMA_VERSION)
     db.add(build)
     db.commit()
     db.refresh(build)

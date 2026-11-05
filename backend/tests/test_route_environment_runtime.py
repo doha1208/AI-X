@@ -16,7 +16,7 @@ def artifact():
     graph.add_edge(1, 2, length=111, edge_score=20, safety_cost=1000)
     return RouteArtifact("env", "gyeonggi", {"day": graph, "night": graph.copy()}, [1, 2],
                          np.array([(37.5,127*np.cos(np.radians(37.5))), (37.501,127*np.cos(np.radians(37.5)))]),
-                         environment_graph=graph.copy(), environment_index=EnvironmentIndex(), environment_model_version="facility-access-v1",
+                         schema_version=3, environment_graph=graph.copy(), environment_index=EnvironmentIndex(), environment_model_version="facility-access-v1",
                          environment_policy_fingerprint=EnvironmentPolicy().fingerprint())
 
 

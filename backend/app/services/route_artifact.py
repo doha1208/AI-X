@@ -15,7 +15,7 @@ from app.services.safety_score import Period
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 ARTIFACT_FILENAME = "route-artifact.pickle"
 CURRENT_MANIFEST_FILENAME = "current.json"
 
@@ -40,6 +40,24 @@ class RouteArtifact:
     environment_index: object | None = None
     environment_policy_fingerprint: str | None = None
     environment_graph: nx.DiGraph | None = None
+    walk_environment_index: object | None = None
+    zone_facility_summaries: dict = field(default_factory=dict)
+    boundary_version: str | None = None
+    sampling_version: str | None = None
+    boundary_diagnostics: dict = field(default_factory=dict)
+
+
+def extended_artifact_valid(artifact) -> bool:
+    if artifact.schema_version != 4 or artifact.environment_model_version is None:
+        return True
+    from app.services.walk_environment_samples import SAMPLING_VERSION, WalkEnvironmentIndex
+    index = getattr(artifact, "walk_environment_index", None)
+    if not isinstance(index, WalkEnvironmentIndex) or index.sampling_version != SAMPLING_VERSION:
+        return False
+    if artifact.sampling_version != SAMPLING_VERSION or not artifact.boundary_version:
+        return False
+    summaries = getattr(artifact, "zone_facility_summaries", None)
+    return isinstance(summaries, dict) and len(index._tree.geometries) == len(index.segments)
 
 
 def _validate_version(version: str) -> None:
@@ -84,6 +102,8 @@ def _validate_artifact(artifact: RouteArtifact, manifest: dict) -> bool:
         return False
     if len(artifact.node_ids) != len(artifact.node_points):
         return False
+    if not extended_artifact_valid(artifact):
+        return False
     return artifact.node_points.ndim == 2 and artifact.node_points.shape[1] == 2
 
 
@@ -91,6 +111,8 @@ def publish_artifact(artifact: RouteArtifact, directory: Path, *, validation_rep
     """완성된 산출물을 먼저 저장하고 마지막에 current 매니페스트를 바꾼다."""
 
     _validate_version(artifact.version)
+    if not extended_artifact_valid(artifact):
+        raise ValueError("Invalid extended spatial artifact")
     directory.mkdir(parents=True, exist_ok=True)
     version_dir = directory / artifact.version
     temporary_dir = directory / f".{artifact.version}.tmp"
@@ -161,7 +183,7 @@ def load_current_artifact(directory: Path) -> RouteArtifact | None:
         }
         if not isinstance(manifest, dict) or set(manifest) != required:
             raise ValueError("Route artifact manifest fields are invalid")
-        if manifest["schema_version"] not in (2, SCHEMA_VERSION):
+        if manifest["schema_version"] not in (2, 3, SCHEMA_VERSION):
             raise ValueError("Route artifact manifest schema is unsupported")
         if not all(isinstance(manifest[field], str) and manifest[field] for field in required - {"schema_version"}):
             raise ValueError("Route artifact manifest values are invalid")
