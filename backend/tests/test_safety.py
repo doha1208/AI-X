@@ -248,16 +248,16 @@ def test_route_returns_an_error_instead_of_a_straight_line_when_no_pedestrian_ro
     assert response.json()["detail"]["reason"] == "pedestrian_route_unavailable"
 
 
-def test_nearby_bells_limit_query_param_is_honored():
+def test_nearby_bells_limit_query_param_is_honored(monkeypatch):
     from app.services import bells as bells_module
 
-    bells_module._cached_points = [(37.5001 + 0.0001 * i, 127.0) for i in range(10)]
-    try:
-        res = client.get("/safety/bells", params={"lat": 37.5, "lng": 127.0, "radius_km": 5, "limit": 3})
-        assert res.status_code == 200
-        assert len(res.json()) == 3
-    finally:
-        bells_module._cached_points = None
+    points = [(37.5001 + 0.0001 * i, 127.0) for i in range(10)]
+    # Supply the API's input, not one field of the file/snapshot cache. The
+    # loader may invalidate that cache when CI has no local coordinate file.
+    monkeypatch.setattr(bells_module, "load_bell_points", lambda: points)
+    res = client.get("/safety/bells", params={"lat": 37.5, "lng": 127.0, "radius_km": 5, "limit": 3})
+    assert res.status_code == 200
+    assert res.json() == [{"lat": lat, "lng": lng} for lat, lng in points[:3]]
 
 
 def test_nearby_bells_excludes_seoul_with_gyeonggi_scope(monkeypatch):
@@ -265,7 +265,7 @@ def test_nearby_bells_excludes_seoul_with_gyeonggi_scope(monkeypatch):
     from app.services import bells as bells_module
 
     monkeypatch.setattr(settings, "region_scope_prefix", "41")
-    monkeypatch.setattr(bells_module, "_cached_points", [(37.4842, 126.9297)])
+    monkeypatch.setattr(bells_module, "load_bell_points", lambda: [(37.4842, 126.9297)])
 
     res = client.get(
         "/safety/bells",
@@ -282,7 +282,7 @@ def test_nearby_bells_excludes_seoul_points_near_gyeonggi(monkeypatch):
 
     gyeonggi_bell = (37.451, 126.92)
     monkeypatch.setattr(settings, "region_scope_prefix", "41")
-    monkeypatch.setattr(bells_module, "_cached_points", [(37.47, 126.91), gyeonggi_bell])
+    monkeypatch.setattr(bells_module, "load_bell_points", lambda: [(37.47, 126.91), gyeonggi_bell])
 
     res = client.get(
         "/safety/bells",
