@@ -10,7 +10,10 @@ import {
   type ScoreBuild,
   type ScoreWeights,
   type ScoringProfile,
+  assessmentStatus,
+  type AssessmentStatus,
 } from "@/lib/api";
+import { FACILITY_ALERT_POLICY } from "@/lib/facility_alerts";
 import { getSessionUser } from "@/lib/auth";
 
 const FACTORS = [
@@ -44,6 +47,13 @@ export default function ScoringAdminPage() {
   const [unknownScore, setUnknownScore] = useState(50);
   const [message, setMessage] = useState("관리자 권한을 확인하는 중입니다.");
   const [forbidden, setForbidden] = useState(false);
+  const [assessment, setAssessment] = useState<AssessmentStatus | null>(null);
+  const [assessmentError, setAssessmentError] = useState(false);
+
+  const refreshAssessment = useCallback(async () => {
+    try { setAssessment(await assessmentStatus()); setAssessmentError(false); }
+    catch { setAssessment(null); setAssessmentError(true); }
+  }, []);
 
   const totals = useMemo(
     () => ({ day: Object.values(weights.day).reduce((sum, value) => sum + value, 0), night: Object.values(weights.night).reduce((sum, value) => sum + value, 0) }),
@@ -58,12 +68,13 @@ export default function ScoringAdminPage() {
       setBuilds(nextBuilds);
       setForbidden(false);
       setMessage("");
+      void refreshAssessment();
     } catch (error) {
       const text = error instanceof Error ? error.message : "관리자 정보를 불러오지 못했습니다.";
       setForbidden(text.includes("관리자 권한") || text.includes("Request failed: 403"));
       setMessage(text);
     }
-  }, []);
+  }, [refreshAssessment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +90,8 @@ export default function ScoringAdminPage() {
         setBuilds(nextBuilds);
         setForbidden(false);
         setMessage("");
+        try { const status = await assessmentStatus(); if (!cancelled) { setAssessment(status); setAssessmentError(false); } }
+        catch { if (!cancelled) setAssessmentError(true); }
       } catch (error) {
         if (cancelled) return;
         const text = error instanceof Error ? error.message : "관리자 정보를 불러오지 못했습니다.";
@@ -140,7 +153,15 @@ export default function ScoringAdminPage() {
 
   return (
     <main style={{ maxWidth: 1040, margin: "0 auto", padding: "32px 20px", display: "grid", gap: 24 }}>
-      <header><h1>안전 점수 프로필 관리</h1><p>적용은 현재 데이터로 새 산출물을 빌드합니다. 성공한 빌드만 활성화되며 실패하면 기존 산출물을 유지합니다.</p></header>
+      <header><h1>지역 통계 지수 프로필 관리</h1><p>아래 가중치는 지역 통계 지수에만 적용합니다. 시설 반경·동일 비중 계산·실시간 알림 임계값은 변경하지 않습니다. 적용은 현재 데이터로 새 산출물을 빌드합니다. 성공한 빌드만 활성화되며 실패하면 기존 산출물을 유지합니다.</p></header>
+      <section><h2>시설 평가·알림 정책 (조회 전용)</h2>
+        {assessment ? <>
+          <p>모델 {assessment.facility_assessment.model_version ?? "미적용"} · 정책 {assessment.facility_assessment.policy_version} · {assessment.facility_assessment.applied ? "적용됨" : "준비 중"} · 산출물 {assessment.facility_assessment.artifact_version ?? "없음"}</p>
+          <p>{assessment.route_artifact.area_environment_ready ? "주변 평가 준비" : "주변 평가 준비 중"} · {assessment.route_artifact.zone_environment_ready ? "동별 평가 준비" : "동별 평가 준비 중"}</p>
+        </> : <p>{assessmentError ? "시설 적용 상태를 확인하지 못했습니다." : "시설 적용 상태 확인 중"}</p>}
+        <p>실시간 알림 {FACILITY_ALERT_POLICY.version} · 전방 {FACILITY_ALERT_POLICY.lookaheadM}m · 발동 {FACILITY_ALERT_POLICY.triggerM}m · 해제 {FACILITY_ALERT_POLICY.clearM}m · 반복 {FACILITY_ALERT_POLICY.cooldownMs / 1000}초 (현재 프런트엔드 정책)</p>
+        <button type="button" onClick={() => void refreshAssessment()}>시설 상태 다시 확인</button>
+      </section>
       {message && <p role="status">{message}</p>}
       <section style={{ display: "grid", gap: 12 }}>
         <h2>새 초안</h2>

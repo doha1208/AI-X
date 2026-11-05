@@ -57,8 +57,16 @@ app.include_router(safety_router)
 
 @app.get("/health")
 def health():
+    from app.services.route_environment_policy import EnvironmentPolicy
+
+    snapshot = route_artifact_runtime.environment_snapshot()
+    facility = {"model_version": snapshot.artifact.environment_model_version if snapshot else None,
+                "policy_version": EnvironmentPolicy().version,
+                "artifact_version": snapshot.artifact.version if snapshot else None,
+                "applied": snapshot is not None}
     return {"status": "ok", "route_artifact": route_artifact_runtime.status(),
-            "route_builder": public_builder_status(Path(settings.route_artifact_dir))}
+            "route_builder": public_builder_status(Path(settings.route_artifact_dir)),
+            "facility_assessment": facility}
 
 
 @app.get("/metrics", include_in_schema=False)

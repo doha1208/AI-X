@@ -40,4 +40,14 @@ it("shows daytime CCTV evidence without a lighting warning", () => {
   render(<LiveFacilityDetails report={daytime} />);
   expect(screen.getByText("CCTV: 인접 근거 있음")).toBeInTheDocument();
   expect(screen.queryByText(/보안등 접근 공백/)).not.toBeInTheDocument();
+  expect(screen.getByText(/실제 평가: KST 2026-11-05 12:00:00 · 낮/)).toBeInTheDocument();
+  expect(screen.getByText(/모델 facility-access-v1 · 정책 test · 산출물 one/)).toBeInTheDocument();
+});
+
+it("shows the server reference time and period even while local evidence is pending", () => {
+  render(<LiveFacilityDetails report={{ assessment: null, havens: [], route_evidence: {}, artifact_version: null,
+    period: "night", status: "pending", temporal_key: "pending", evaluated_at: "2026-11-04T16:30:00Z",
+    valid_until: "2026-11-04T16:31:00Z", local_environment: null }} />);
+  expect(screen.getByText(/실제 평가: KST 2026-11-05 01:30:00 · 밤/)).toBeInTheDocument();
+  expect(screen.getByText(/시설 근거 준비 중/)).toBeInTheDocument();
 });

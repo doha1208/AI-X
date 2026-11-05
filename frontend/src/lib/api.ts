@@ -249,11 +249,11 @@ export type SpotReport = {
   radius_m: number;
   zone: SafetyZoneDetail | null;
   /** @deprecated Use local_environment. */
-  here_score: number | null;
+  here_score: null;
   /** @deprecated Use area_environment.day. */
-  area_day_score: number | null;
+  area_day_score: null;
   /** @deprecated Use area_environment.night. */
-  area_night_score: number | null;
+  area_night_score: null;
   counts: { cctv: number | null; lights: number | null; convenience: number | null } | null;
   havens: SafeHaven[];
   area_environment: Record<RoutePeriod, AreaFacilityAssessment> | null;
@@ -463,6 +463,15 @@ export function routeEnvironment(routePoints: { lat: number; lng: number }[],
 
 export function listScoringProfiles() {
   return request<ScoringProfile[]>("/admin/scoring-profiles");
+}
+
+export type AssessmentStatus = {
+  route_artifact: { available: boolean; version: string | null; area_environment_ready: boolean; zone_environment_ready: boolean };
+  facility_assessment: { model_version: string | null; policy_version: string; artifact_version: string | null; applied: boolean };
+};
+
+export function assessmentStatus() {
+  return request<AssessmentStatus>("/health");
 }
 
 export function listScoreBuilds() {

@@ -18,6 +18,12 @@ def _offset(lat: float, lng: float, north_m: float, east_m: float) -> tuple[floa
     return lat + north_m / 111_320.0, lng + east_m / (111_320.0 * 0.794)
 
 
+def test_retired_spot_calculators_are_not_available_to_production_callers():
+    from app.services import spot_report
+    for name in ("edge_local_scores", "grid_around", "point_score", "area_scores", "facility_counts"):
+        assert not hasattr(spot_report, name)
+
+
 def test_nearest_havens_gives_one_per_kind_sorted_by_distance_and_drops_far_ones(tmp_path, monkeypatch):
     import json
     from app.services.route_environment_sources import build_environment_index

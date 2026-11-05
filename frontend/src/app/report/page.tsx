@@ -170,7 +170,7 @@ function ReportPage({ search }: { search: string }) {
           <>
             {report.zone && (
               <section className={shared.card}>
-                <h2 className={shared.cardTitle}>동네 안전지수 · {report.zone.dong_name}</h2>
+                <h2 className={shared.cardTitle}>지역 통계 지수 · {report.zone.dong_name}</h2>
                 <div className={styles.scoreRow}>
                   <Score label="낮" value={report.zone.day_safety_score} />
                   <Score label="밤" value={report.zone.night_safety_score} />

@@ -28,8 +28,14 @@ const LOCAL_FACTORS: Record<string, string> = { cctv: "CCTV", lighting: "보안�
 export function LiveFacilityDetails({ report }: { report: LiveFacilityReport | null }) {
   const point = report?.local_environment;
   const factors = point?.period === "night" ? ["lighting", "open_store"] : ["cctv", "open_store"];
+  const moment = report ? new Date(report.evaluated_at) : null;
+  const kst = moment && Number.isFinite(moment.getTime())
+    ? new Date(moment.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 19).replace("T", " ") : null;
+  const assessment = point ?? report?.assessment;
   return <details className={styles.liveDetails}>
     <summary>실시간 시설 정보</summary>
+    {report && <p className={styles.text}>실제 평가: {kst ? `KST ${kst}` : "시각 미확인"} · {report.period === "night" ? "밤" : "낮"}{report.status === "pending" ? " · 시설 근거 준비 중" : ""}</p>}
+    {report && <p className={styles.text}>모델 {assessment?.model_version ?? "미확인"} · 정책 {assessment?.policy_version ?? "미확인"} · 산출물 {report.artifact_version ?? "미준비"}</p>}
     {point ? factors.map(factor => {
       const state = point.factors[factor]?.state;
       const label = state === "present" ? "인접 근거 있음" : state === "absent_in_verified_inventory"
