@@ -42,8 +42,39 @@ export type RouteDataDisclosure = {
   fallback: { applied: boolean; mode: RouteMode; reason: RouteFallbackReason };
 };
 
+// Matches the running facility-assessment API; values are server calculations.
+export type RouteEnvironmentAssessment = {
+  model_version: string;
+  policy_version: string;
+  status: "available" | "degraded" | "unavailable";
+  period: RoutePeriod;
+  distance_m: number;
+  score: number | null;
+  active_factors: string[];
+  used_factors: string[];
+  excluded_factors: Record<string, string>;
+  factor_coverage: Record<string, number>;
+  data_factor_availability_ratio: number;
+  longest_support_gap_m: number | null;
+  total_support_gap_m: number | null;
+  gap_intervals: Record<string, number>[];
+  source_versions: Record<string, string>;
+  comparison_group_id: string;
+  evaluation_basis?: "multi_factor" | "single_factor" | "partial_coverage" | "observed_only" | "unavailable";
+  reference_score?: number | null;
+  reference_factor?: string | null;
+  score_bounds?: Record<string, number> | null;
+  per_factor_gaps?: Record<string, Record<string, number>[]>;
+  observed_facility_counts?: Record<string, number>;
+  observed_factor_coverage?: Record<string, number>;
+  factor_evaluation_ratio?: Record<string, number>;
+  verified_distance_ratio?: number;
+  evidence_factors?: string[];
+};
+
 export type RouteResult = {
-  safety_score: number;
+  // Newer route servers may omit the legacy safety index while still returning a walkable path.
+  safety_score: number | null;
   zones_passed: SafetyZone[];
   route_points: { lat: number; lng: number }[];
   mode: RouteMode;
@@ -53,13 +84,18 @@ export type RouteResult = {
   alternatives: RouteAlternative[];
   shortest_route_points: { lat: number; lng: number }[] | null;
   shortest_zones_passed?: SafetyZone[] | null;
+  environment_assessment?: RouteEnvironmentAssessment | null;
+  comparison_environment_assessment?: RouteEnvironmentAssessment | null;
+  environment_model_applied?: boolean;
+  environment_basis?: { artifact_version: string | null; evaluated_at: string } | null;
 };
 
 export type RouteAlternative = {
   route_points: { lat: number; lng: number }[];
-  safety_score: number;
+  safety_score: number | null;
   distance_m: number;
   zones_passed: SafetyZone[];
+  environment_assessment?: RouteEnvironmentAssessment | null;
 };
 
 // 점수를 만든 원자료와 경기도 안 순위. null은 지자체가 데이터를 안 올려 "모름"이라는 뜻.

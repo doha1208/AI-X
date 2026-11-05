@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import ReportPage from "./page";
 import type { SpotReport } from "@/lib/api";
+import { environmentRouteFixture } from "@/test/routeFixtures";
 
 const suggestions = vi.fn();
 const resolvePlace = vi.fn();
@@ -72,4 +73,13 @@ it("reloads a prefilled address when its report button is pressed", async () => 
   await waitFor(() => expect(spotReport).toHaveBeenCalledTimes(1));
   fireEvent.submit(screen.getByRole("search"));
   await waitFor(() => expect(spotReport).toHaveBeenCalledTimes(2));
+});
+
+it("shows the returned facility assessment for the night walk when legacy safety_score is null", async () => {
+  navigation.search = "at=37.263,127.028&atName=수원시청";
+  nearestSubway.mockResolvedValue({ name: "수원시청역", lat: 37.262, lng: 127.03 });
+  routeSafety.mockResolvedValue(environmentRouteFixture());
+  render(<ReportPage />);
+  expect(await screen.findByText("시설 97점")).toBeInTheDocument();
+  expect(screen.queryByText("안전지수 미제공")).not.toBeInTheDocument();
 });

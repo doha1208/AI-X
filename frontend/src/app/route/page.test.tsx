@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import RoutePage from "./page";
+import { loadHandoff } from "@/lib/guideHandoff";
+import { assessmentFixture, environmentRouteFixture } from "@/test/routeFixtures";
 
 const routeSafety = vi.fn();
 const searchAddressSuggestions = vi.fn();
@@ -83,6 +85,58 @@ describe("RoutePage responsive presentation", () => {
     expect(screen.getAllByTestId("safety-map")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "경로 결과 펼치기" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "출발지와 도착지 바꾸기" })).toBeInTheDocument();
+  });
+
+  it.each([null, 0, 55])("allows guidance when the legacy route score is %s", async (score) => {
+    sessionStorage.clear();
+    routeSafety.mockReset();
+    routeSafety.mockResolvedValue({
+      safety_score: score,
+      zones_passed: [],
+      route_points: [{ lat: 37.302, lng: 126.866 }, { lat: 37.31, lng: 126.87 }],
+      mode: "tmap", period: "day",
+      data_disclosure: { data_basis: ["tmap_pedestrian_route"], updated_at: null, missing_data: [],
+        fallback: { applied: true, mode: "tmap", reason: "safety_weighted_unavailable" } },
+      alternatives: [{ route_points: [{ lat: 37.302, lng: 126.866 }, { lat: 37.31, lng: 126.87 }],
+        safety_score: score, distance_m: 1200, zones_passed: [] }],
+      shortest_route_points: null, shortest_zones_passed: null,
+    });
+    render(<RoutePage />);
+    fireEvent.change(screen.getByRole("combobox", { name: "출발지 주소" }), { target: { value: "37.302, 126.866" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "도착지 주소" }), { target: { value: "37.31, 126.87" } });
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
+    expect(await screen.findByRole("region", { name: "경로 검색 결과" })).toBeInTheDocument();
+    if (score === null) {
+      expect(screen.getAllByText("안전지수 미제공").length).toBeGreaterThan(0);
+      expect(screen.queryByText("추천 1순위")).not.toBeInTheDocument();
+      expect(screen.queryByText(/0점/)).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByText(`참고 안전지수 ${score}점`)).toBeInTheDocument();
+    }
+    expect(screen.getAllByRole("button", { name: /실시간 안내 시작|이 경로로 안내 시작/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "실시간 안내 시작" }));
+    expect(loadHandoff({ lat: 37.31, lng: 126.87 })?.points).toEqual([
+      { lat: 37.302, lng: 126.866 }, { lat: 37.31, lng: 126.87 },
+    ]);
+  });
+
+  it("shows each server facility score and preserves the selected assessment for guidance", async () => {
+    const response = environmentRouteFixture();
+    const second = { ...response.alternatives[0], distance_m: 1250, environment_assessment: assessmentFixture({ score: 72.4 }) };
+    response.alternatives.push(second);
+    routeSafety.mockReset();
+    routeSafety.mockResolvedValue(response);
+    render(<RoutePage />);
+    fireEvent.change(screen.getByRole("combobox", { name: "출발지 주소" }), { target: { value: "37.302, 126.866" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "도착지 주소" }), { target: { value: "37.31, 126.87" } });
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
+    const results = await screen.findByRole("region", { name: "경로 검색 결과" });
+    expect(within(results).getByText("시설 97점")).toBeInTheDocument();
+    expect(within(results).getByText("시설 72점")).toBeInTheDocument();
+    expect(screen.queryByText("안전지수 미제공")).not.toBeInTheDocument();
+    fireEvent.click(within(results).getByRole("button", { name: /시설 72점/ }));
+    fireEvent.click(within(results).getByRole("button", { name: "실시간 안내 시작" }));
+    expect(loadHandoff({ lat: 37.31, lng: 126.87 })?.environment_assessment?.score).toBe(72.4);
   });
 
   it("clears the previous route when a replacement search fails", async () => {

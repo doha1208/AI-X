@@ -1,6 +1,7 @@
 import type { RouteResult, SafetyZone } from "./api";
 import { haversineMeters } from "./geo";
 import type { LatLng } from "./kakao";
+import { alternativeAssessment, comparisonAssessment, type RouteScoreSource } from "./routeAssessment";
 
 // 도보 평균 4km/h.
 const WALK_METERS_PER_MIN = 67;
@@ -93,7 +94,7 @@ export function nextTurn(points: LatLng[], here: LatLng, fromIndex: number): Nex
 }
 
 export type GuideKind = "safe" | "shortest";
-export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number };
+export type GuideOption = { kind: GuideKind; points: LatLng[]; zones: SafetyZone[]; distanceM: number } & RouteScoreSource;
 
 // 길안내에서 고를 수 있는 경로: 안전 경로(가장 안전한 대안)와, 있으면 최단 경로.
 export function guideOptions(result: RouteResult): GuideOption[] {
@@ -104,11 +105,12 @@ export function guideOptions(result: RouteResult): GuideOption[] {
       points: best?.route_points ?? result.route_points,
       zones: best?.zones_passed ?? result.zones_passed,
       distanceM: best?.distance_m ?? pathLength(result.route_points),
+      ...alternativeAssessment(result, best),
     },
   ];
   const shortest = result.shortest_route_points;
   if (shortest && shortest.length > 1) {
-    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest) });
+    options.push({ kind: "shortest", points: shortest, zones: result.shortest_zones_passed ?? [], distanceM: pathLength(shortest), ...comparisonAssessment(result) });
   }
   return options;
 }

@@ -4,6 +4,8 @@ import type { Place } from "@/lib/place";
 import { formatDistance, walkingMinutes, zoneSummary, type GuideKind, type GuideOption } from "@/lib/routeGuidance";
 import type { RoutePeriod } from "@/lib/api";
 import type { LatLng } from "@/lib/kakao";
+import { hasEnvironmentAssessment, routeScore } from "@/lib/routeAssessment";
+import { RouteAssessmentSummary } from "@/components/RouteAssessmentSummary";
 import styles from "./navigate.module.css";
 
 function scoreTone(score: number): string {
@@ -16,7 +18,7 @@ export type Choice = { options: GuideOption[]; safetyWeighted: boolean; period: 
 
 // 경로 이름. 비교 경로는 Tmap 도보 길찾기 결과라 안전 경로보다 길 때도 있다 — 실제로 짧을 때만 "최단"이라 부른다.
 export function choiceTitle(option: GuideOption, choice: Choice, safeOption: GuideOption | undefined): string {
-  if (option.kind === "safe") return choice.safetyWeighted ? "데이터 기반 추천 경로" : "도보 경로";
+  if (option.kind === "safe") return choice.safetyWeighted && (!hasEnvironmentAssessment(option) || routeScore(option).rankable) ? "데이터 기반 추천 경로" : "도보 경로";
   const reallyShortest = !safeOption || option.distanceM < safeOption.distanceM;
   return reallyShortest ? "최단 경로" : "일반 도보 경로";
 }
@@ -82,6 +84,8 @@ export function ChoicePanel({
           <div className={styles.choiceList}>
             {choice.options.map((option) => {
               const summary = zoneSummary(option.zones);
+              const environment = hasEnvironmentAssessment(option);
+              const display = routeScore(option);
               const isSafe = option.kind === "safe";
               const title = choiceTitle(option, choice, safeOption);
               const selected = option === previewOption;
@@ -96,19 +100,20 @@ export function ChoicePanel({
                     <span className={styles.choiceKind}>
                       <span className={selected ? styles.swatchLine : styles.swatchDash} aria-hidden />
                       {title}
-                      {isSafe && choice.safetyWeighted && <span className={styles.recommendTag}>추천</span>}
+                      {isSafe && choice.safetyWeighted && (!environment || display.rankable) && <span className={styles.recommendTag}>추천</span>}
                     </span>
                     <span className={styles.choiceTime}>
                       {walkingMinutes(option.distanceM)}분 <small>{formatDistance(option.distanceM)}</small>
                     </span>
                     <span className={styles.choiceMeta}>
-                      {summary.average !== null && (
+                      {environment ? <span className={display.toneValue != null ? scoreTone(display.toneValue) : undefined}>{display.text}</span> : summary.average !== null && (
                         <span className={scoreTone(summary.average)}>지나는 동 평균 {summary.average.toFixed(0)}점</span>
                       )}
-                      <span>{summary.cautionCount > 0 ? `주의 구역 ${summary.cautionCount}곳` : "주의 구역 없음"}</span>
+                      {!environment && <span>{summary.cautionCount > 0 ? `주의 구역 ${summary.cautionCount}곳` : "주의 구역 없음"}</span>}
                     </span>
                     {!selected && <span className={styles.choiceHint}>눌러서 지도에서 보기</span>}
                   </button>
+                  {selected && <RouteAssessmentSummary source={option} showScore={false} />}
                   {selected && (
                     <button type="button" className={styles.choiceStart} onClick={() => onChoose(option)}>
                       이 길로 안내 시작

@@ -41,6 +41,7 @@ import { bestHaven, HAVEN_LABEL, LOW_SPOT_SCORE } from "@/lib/havens";
 import { useArrivalCheck } from "@/lib/useArrivalCheck";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
+import { hasEnvironmentAssessment, routeScore } from "@/lib/routeAssessment";
 import { useRouteBells } from "@/lib/useRouteBells";
 import { useSafeHaven } from "@/lib/useSafeHaven";
 import { SafetyAlerts } from "@/components/SafetyAlerts";
@@ -50,6 +51,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { RoutePeek } from "@/components/RoutePeek";
+import { RouteAssessmentSummary } from "@/components/RouteAssessmentSummary";
 import { ChoicePanel, choiceTitle } from "./ChoicePanel";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapControls, PickConfirm, usePendingPick } from "@/components/MapOverlays";
@@ -714,6 +716,7 @@ function NavigatePage({ search }: { search: string }) {
                   안내 종료
                 </button>
               </div>
+              <RouteAssessmentSummary source={guided} />
               <div className={styles.progressLabels}>
                 <span className={zoneLevel?.tone}>{zoneLevel ? `${zoneLevel.label} 구역 통과 중` : "안내 준비 중"}</span>
                 <span>{progressPct}% 이동</span>
@@ -756,7 +759,7 @@ function NavigatePage({ search }: { search: string }) {
                     label: choiceTitle(option, choice, safeOption),
                     minutes: walkingMinutes(option.distanceM),
                     distance: formatDistance(option.distanceM),
-                    score: average === null ? undefined : `평균 ${average.toFixed(0)}점`,
+                    score: hasEnvironmentAssessment(option) ? routeScore(option).text : average === null ? undefined : `평균 ${average.toFixed(0)}점`,
                     active: option === previewOption,
                   };
                 })}

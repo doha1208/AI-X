@@ -8,9 +8,11 @@ import { nearestSubway } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { routeTimeFor } from "@/lib/preferences";
 import { formatDistance, pathLength, walkingMinutes } from "@/lib/routeGuidance";
+import { alternativeAssessment, routeScore } from "@/lib/routeAssessment";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
+import { RouteAssessmentSummary } from "@/components/RouteAssessmentSummary";
 import { withSearch } from "@/components/WithSearch";
 import { AlertIcon, InfoIcon, SearchIcon } from "@/components/icons";
 import shared from "../me/me.module.css";
@@ -108,6 +110,8 @@ function ReportPage({ search }: { search: string }) {
   if (!user) return null;
   const loading = place !== null && report === null && error === null;
   const safeDistanceM = walk?.status === "ok" ? (walk.route.alternatives[0]?.distance_m ?? pathLength(walk.route.route_points)) : 0;
+  const nightSource = walk?.status === "ok" ? alternativeAssessment(walk.route, walk.route.alternatives[0]) : null;
+  const nightScore = nightSource ? routeScore(nightSource) : null;
 
   return (
     <main className={shared.page}>
@@ -206,7 +210,10 @@ function ReportPage({ search }: { search: string }) {
                   <strong>{walk.station.label}</strong>에서 밤 11시에 걸어서 귀가한다고 가정했어요.
                 </p>
                 <div className={styles.scoreRow}>
-                  <Score label="추천 경로 점수" value={walk.route.safety_score} />
+                  <div className={styles.score}>
+                    <span>밤 귀갓길 평가</span>
+                    <strong className={nightScore?.toneValue != null ? scoreTone(nightScore.toneValue) : undefined}>{nightScore?.text}</strong>
+                  </div>
                   <div className={styles.score}>
                     <span>거리 · 걸음</span>
                     <strong>
@@ -220,6 +227,7 @@ function ReportPage({ search }: { search: string }) {
                     </div>
                   )}
                 </div>
+                {nightSource && <RouteAssessmentSummary source={nightSource} showScore={false} />}
                 <Link
                   className={styles.action}
                   href={`/route?${placeQuery("start", walk.station)}&${placeQuery("end", place)}`}
