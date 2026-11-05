@@ -108,7 +108,66 @@ export type SafetyZoneDetail = SafetyZone & {
   accident_dist_m: number | null;
   night_floating_pop: number | null;
   store_count: number;
+  facility_environment?: Record<RoutePeriod, FacilityZoneAssessment> | null;
 };
+
+export type ZoneLocation = Pick<SafetyZone, "dong_code" | "dong_name" | "lat" | "lng">;
+export type DisplayMetric = "regional_statistics" | "facility_access";
+export type FacilityZoneAssessment = {
+  status: "available" | "degraded" | "unavailable" | "pending";
+  evaluation_basis: NonNullable<RouteEnvironmentAssessment["evaluation_basis"]>;
+  score: number | null;
+  reference_score: number | null;
+  reference_factor: string | null;
+  score_bounds: { lower: number; upper: number } | null;
+  sampled_length_m: number;
+  used_factors: string[];
+  factor_coverage: Record<string, number>;
+  factor_evaluation_ratio: Record<string, number>;
+  verified_distance_ratio: number;
+  basis_id: string | null;
+  artifact_version: string | null;
+  model_version: string | null;
+  policy_version: string | null;
+  schedule_key: string;
+  assessed_at: string | null;
+  reference_at: string | null;
+  unavailable_reason: string | null;
+};
+export type FacilityZone = ZoneLocation & {
+  assessment: FacilityZoneAssessment;
+  rank: number | null;
+  result_group_id: string | null;
+};
+export type FacilityBasisGroup = { basis_id: string; result_group_id: string; used_factors: string[]; zone_count: number };
+export type FacilityZoneComparison = {
+  dong_codes: string[];
+  used_factors: string[];
+  evaluation_basis: "multi_factor" | "single_factor" | "not_comparable";
+  scores: Record<string, number>;
+};
+export type FacilityZoneResponse = {
+  status: "available" | "pending";
+  period: RoutePeriod;
+  weekday: number;
+  reference_hour: number;
+  basis_id: string | null;
+  artifact_version: string | null;
+  groups: FacilityBasisGroup[];
+  zones: FacilityZone[];
+  comparison: FacilityZoneComparison | null;
+};
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly detail: unknown) { super(message); }
+}
+
+export function changedFacilityGroups(error: unknown): FacilityBasisGroup[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || !error.detail || typeof error.detail !== "object"
+    || !("reason" in error.detail) || error.detail.reason !== "comparison_basis_changed"
+    || !("groups" in error.detail) || !Array.isArray(error.detail.groups)) return null;
+  return error.detail.groups as FacilityBasisGroup[];
+}
 
 export type SafeHavenKind = "police" | "convenience" | "bell";
 export type SafeHaven = {
@@ -291,7 +350,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(errorMessage(body.detail, `Request failed: ${res.status}`));
+    throw new ApiError(errorMessage(body.detail, `Request failed: ${res.status}`), res.status, body.detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -360,6 +419,16 @@ export function spotReport(lat: number, lng: number, { at, radiusM, ...options }
 
 export function zoneDetail(dongCode: string) {
   return request<SafetyZoneDetail>(`/safety/zones/${encodeURIComponent(dongCode)}`);
+}
+
+export function facilityZones({ period, basisId, codes, signal }: {
+  period?: RoutePeriod; basisId?: string; codes?: string[]; signal?: AbortSignal;
+} = {}) {
+  const params = new URLSearchParams();
+  if (period) params.set("period", period);
+  if (basisId) params.set("basis_id", basisId);
+  codes?.forEach(code => params.append("dong_codes", code));
+  return request<FacilityZoneResponse>(`/safety/facility-zones?${params}`, { signal });
 }
 
 export function routeSafety(

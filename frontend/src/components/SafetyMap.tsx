@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import type { SafetyZone } from "@/lib/api";
+import type { DisplayMetric } from "@/lib/api";
+import { zoneDisplay, zoneDisplayColor, type DisplayZone } from "@/lib/zoneDisplay";
 import {
   loadKakaoSdk,
   type KakaoMap,
@@ -27,8 +28,9 @@ export type MapLabel = { position: LatLng; text: string; tone: "start" | "end" }
 
 type Props = {
   ref?: Ref<SafetyMapHandle>;
-  zones?: SafetyZone[];
-  rankedZones?: SafetyZone[];
+  zones?: DisplayZone[];
+  rankedZones?: DisplayZone[];
+  displayMetric?: DisplayMetric;
   bells?: LatLng[];
   center?: LatLng;
   myLocation?: LatLng;
@@ -37,10 +39,10 @@ type Props = {
   routePath?: LatLng[];
   comparePath?: LatLng[];
   labels?: MapLabel[];
-  focusZone?: SafetyZone | null;
+  focusZone?: DisplayZone | null;
   followLocation?: boolean;
   onSelect?: (latlng: LatLng) => void;
-  onZoneSelect?: (zone: SafetyZone) => void;
+  onZoneSelect?: (zone: DisplayZone) => void;
   onContextMenu?: (info: ContextMenuInfo) => void;
   height?: number | string;
 };
@@ -49,12 +51,6 @@ type Props = {
 function currentInsets(container: HTMLElement | null): MapInsets {
   const sheetHeight = parsePx(container ? getComputedStyle(container).getPropertyValue("--adaptive-sheet-height") : "");
   return visibleMapInsets(window.matchMedia(MOBILE_QUERY).matches, sheetHeight);
-}
-
-function scoreColor(score: number): string {
-  if (score >= 70) return "#2e7d32"; // 안전
-  if (score >= 40) return "#f9a825"; // 보통
-  return "#c62828"; // 주의
 }
 
 function escapeHtml(text: string): string {
@@ -130,6 +126,7 @@ export function SafetyMap({
   ref,
   zones = EMPTY,
   rankedZones = EMPTY,
+  displayMetric = "regional_statistics",
   bells = EMPTY,
   center = DEFAULT_CENTER,
   myLocation,
@@ -366,6 +363,7 @@ export function SafetyMap({
 
     overlaysRef.current.forEach((overlay) => overlay.setMap(null));
     overlaysRef.current = [];
+    const closeTooltips: (() => void)[] = [];
 
     function addOverlay(position: LatLng, content: HTMLElement, zIndex: number, yAnchor = 0.5) {
       const overlay = new kakao.maps.CustomOverlay({
@@ -385,15 +383,17 @@ export function SafetyMap({
       const strokeColor = isFocused ? "#1a1a1a" : "#ffffff";
       const strokeWeight = isFocused ? 3 : 1;
       const strokeOpacity = isFocused ? 0.9 : 0.7;
-      const fillColor = scoreColor(zone.safety_score);
+      const display = zoneDisplay(zone, displayMetric);
+      const fillColor = zoneDisplayColor(display.value);
       const fillOpacity = isFocused ? 0.45 : 0.25;
       const zIndex = isFocused ? 5 : 1;
 
       const infowindow = new kakao.maps.InfoWindow({
         position: new kakao.maps.LatLng(zone.lat, zone.lng),
-        content: `<div style="padding:4px 8px;font-size:12px;">${escapeHtml(zone.dong_name)} (${zone.safety_score.toFixed(0)}점)</div>`,
+        content: `<div style="padding:4px 8px;font-size:12px;">${escapeHtml(zone.dong_name)} (${escapeHtml(display.text)})</div>`,
         removable: false,
       });
+      closeTooltips.push(() => infowindow.close());
 
       const parts = boundaries?.get(zone.dong_code);
       const shapes: KakaoOverlay[] =
@@ -433,8 +433,9 @@ export function SafetyMap({
     });
 
     rankedZones.forEach((zone) => {
-      const pin = circleElement(36, scoreColor(zone.safety_score), HOUSE_SVG);
-      pin.title = `${zone.dong_name} ${zone.safety_score.toFixed(0)}점`;
+      const display = zoneDisplay(zone, displayMetric);
+      const pin = circleElement(36, zoneDisplayColor(display.value), HOUSE_SVG);
+      pin.title = `${zone.dong_name} ${display.text}`;
       pin.style.cursor = "pointer";
       pin.addEventListener("click", () => onZoneSelectRef.current?.(zone));
       addOverlay(zone, pin, 8);
@@ -498,7 +499,12 @@ export function SafetyMap({
       if (!followLocation) marker.style.boxShadow = "0 0 0 3px rgba(66,133,244,0.35), 0 1px 4px rgba(0,0,0,0.3)";
       addOverlay(myLocation, marker, 10);
     }
-  }, [loaded, zones, rankedZones, bells, routePath, comparePath, labels, myLocation, accuracyRadiusM, followLocation, focusZone, boundaries]);
+    return () => {
+      closeTooltips.forEach(close => close());
+      overlaysRef.current.forEach(overlay => overlay.setMap(null));
+      overlaysRef.current = [];
+    };
+  }, [loaded, zones, rankedZones, displayMetric, bells, routePath, comparePath, labels, myLocation, accuracyRadiusM, followLocation, focusZone, boundaries]);
 
   // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
   useEffect(() => {

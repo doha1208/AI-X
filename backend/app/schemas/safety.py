@@ -47,6 +47,69 @@ class SafetyZoneOut(BaseModel):
         from_attributes = True
 
 
+class FacilityZoneAssessment(BaseModel):
+    status: Literal["available", "degraded", "unavailable", "pending"]
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"] = "unavailable"
+    score: float | None = None
+    reference_score: float | None = None
+    reference_factor: str | None = None
+    score_bounds: dict[str, float] | None = None
+    sampled_length_m: float = 0
+    used_factors: list[str] = Field(default_factory=list)
+    factor_coverage: dict[str, float] = Field(default_factory=dict)
+    factor_evaluation_ratio: dict[str, float] = Field(default_factory=dict)
+    verified_distance_ratio: float = 0
+    basis_id: str | None = None
+    artifact_version: str | None = None
+    model_version: str | None = None
+    policy_version: str | None = None
+    schedule_key: str
+    assessed_at: datetime | None = None
+    reference_at: datetime | None = None
+    unavailable_reason: str | None = None
+
+
+class FacilityZonePeriods(BaseModel):
+    day: FacilityZoneAssessment
+    night: FacilityZoneAssessment
+
+
+class FacilityZone(BaseModel):
+    dong_code: str
+    dong_name: str
+    lat: float
+    lng: float
+    assessment: FacilityZoneAssessment
+    rank: int | None = None
+    result_group_id: str | None = None
+
+
+class FacilityBasisGroup(BaseModel):
+    basis_id: str
+    result_group_id: str
+    used_factors: list[str]
+    zone_count: int
+
+
+class FacilityZoneComparison(BaseModel):
+    dong_codes: list[str]
+    used_factors: list[str]
+    evaluation_basis: Literal["multi_factor", "single_factor", "not_comparable"]
+    scores: dict[str, float]
+
+
+class FacilityZoneResponse(BaseModel):
+    status: Literal["available", "pending"]
+    period: Period
+    weekday: int
+    reference_hour: int
+    basis_id: str | None
+    artifact_version: str | None
+    groups: list[FacilityBasisGroup]
+    zones: list[FacilityZone]
+    comparison: FacilityZoneComparison | None = None
+
+
 class SafetyZoneDetail(SafetyZoneOut):
     """동네 비교용 — 점수와 함께 점수를 만든 원자료와 경기도 안 순위를 보여준다. None은 '모름'."""
 
@@ -60,6 +123,7 @@ class SafetyZoneDetail(SafetyZoneOut):
     accident_dist_m: float | None
     night_floating_pop: float | None
     store_count: int
+    facility_environment: FacilityZonePeriods | None = None
 
 
 class SafeHaven(BaseModel):

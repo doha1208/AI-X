@@ -12,6 +12,7 @@ from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.core.config import settings
 from app.core.security import decode_token
 from app.schemas.safety import (
+    FacilityZoneResponse,
     LiveRouteEnvironmentRequest,
     LiveRouteEnvironmentResponse,
     RouteAlternative,
@@ -29,10 +30,11 @@ from app.services.geo import haversine_km
 from app.services.safe_route import route_artifact_runtime
 from app.services.area_environment_service import assess_area_environment
 from app.services.live_route_environment import OutsideLiveServiceArea, assess_live_route
+from app.services.zone_environment_service import ComparisonBasisChanged, facility_zone_periods, list_facility_zones
 from app.services.spot_report import REPORT_RADIUS_M
 from app.services.safety_score import compute_zone_period_scores
 from app.services.service_area import is_in_service_area
-from app.services.time_period import KST, period_for
+from app.services.time_period import KST, Period, period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
 from app.observability import log_route, metrics
@@ -224,8 +226,37 @@ def zone_detail(dong_code: str, db: Session = Depends(get_db)):
     zone = next((z for z in zones if z.dong_code == dong_code), None)
     if zone is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="해당 동네를 찾을 수 없어요.")
+    now = datetime.now(KST)
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
     score_maps, _ = _period_score_maps(zones)
-    return _zone_detail(zone, score_maps, period_for(), zones)
+    result = _zone_detail(zone, score_maps, period_for(now), zones)
+    result.facility_environment = facility_zone_periods(snapshot=snapshot, dong_code=dong_code, weekday=now.weekday())
+    return result
+
+
+@router.get("/facility-zones", response_model=FacilityZoneResponse)
+def facility_zones(
+    period: Period | None = Query(None),
+    basis_id: str | None = Query(None, min_length=1, max_length=64),
+    dong_codes: list[str] = Query(default_factory=list, max_length=5),
+    db: Session = Depends(get_db),
+):
+    now = datetime.now(KST)
+    zones = scoped_zones_query(db).all()
+    codes = list(dict.fromkeys(dong_codes))
+    known = {zone.dong_code for zone in zones}
+    if any(code not in known for code in codes):
+        raise HTTPException(status_code=404, detail="비교할 동네를 찾을 수 없어요.")
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    try:
+        return list_facility_zones(snapshot=route_artifact_runtime.environment_snapshot(), zones=zones,
+            period=period or period_for(now), weekday=now.weekday(), basis_id=basis_id, compare_codes=codes)
+    except ComparisonBasisChanged as exc:
+        raise HTTPException(status_code=409, detail={
+            "reason": "comparison_basis_changed", "action": "현재 적용할 비교 기준을 다시 선택해 주세요.",
+            "groups": [group.model_dump() for group in exc.groups],
+        }) from exc
 
 
 @router.get("/spot", response_model=SpotReport)
