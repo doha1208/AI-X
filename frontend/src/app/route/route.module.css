@@ -98,7 +98,23 @@
 .historyControls { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-muted); }
 .historyControls label { display: flex; align-items: center; gap: 6px; }
 .historyControls button { border: 0; background: none; color: var(--brand); font-weight: 700; cursor: pointer; }
-.historyItem { min-height: 40px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--text); text-align: left; cursor: pointer; }
+.historyItem {
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  height: auto;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+  cursor: pointer;
+}
 
 .fields {
   position: relative;
