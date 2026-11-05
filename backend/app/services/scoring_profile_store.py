@@ -2,6 +2,8 @@ import json
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 
 from app.models.scoring_profile import ScoreBuildRecord, ScoringProfileRecord
 from app.schemas.scoring_profile import ScoringProfileDraftIn, ScoringProfileOut, ScoreBuildOut
@@ -101,8 +103,12 @@ def claim_next_queued_build(
     if build is None:
         return None
 
-    build.status = "building"
-    build.started_at = datetime.now(UTC)
+    claimed = db.execute(update(ScoreBuildRecord).where(ScoreBuildRecord.id == build.id, ScoreBuildRecord.status == "queued")
+                         .values(status="building", started_at=datetime.now(UTC)))
+    if claimed.rowcount != 1:
+        db.rollback()
+        return None
+    db.refresh(build)
     profile = db.get(ScoringProfileRecord, build.profile_id)
     if profile is None:
         build.status = "failed"
@@ -115,11 +121,36 @@ def claim_next_queued_build(
     return build, profile
 
 
+def queue_route_build(db: Session, *, profile_id: int, input_fingerprint: str, region: str, target_schema: int, reason: str) -> ScoreBuildRecord:
+    query = db.query(ScoreBuildRecord).filter(
+        ScoreBuildRecord.profile_id == profile_id, ScoreBuildRecord.input_fingerprint == input_fingerprint,
+        ScoreBuildRecord.region == region, ScoreBuildRecord.target_schema == target_schema,
+        ScoreBuildRecord.status.in_(("queued", "building")),
+    )
+    existing = query.first()
+    if existing is not None:
+        return existing
+    record = ScoreBuildRecord(profile_id=profile_id, input_fingerprint=input_fingerprint, region=region,
+                              target_schema=target_schema, reason=reason, status="queued")
+    db.add(record)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing = query.first()
+        if existing is None:
+            raise
+        return existing
+    db.refresh(record)
+    return record
+
+
 def queue_profile_build(db: Session, profile_id: int) -> ScoreBuildOut | None:
     profile = db.get(ScoringProfileRecord, profile_id)
     if profile is None:
         return None
-    build = ScoreBuildRecord(profile_id=profile_id, status="queued")
+    from app.services.route_artifact import SCHEMA_VERSION
+    build = ScoreBuildRecord(profile_id=profile_id, status="queued", target_schema=SCHEMA_VERSION)
     db.add(build)
     db.commit()
     db.refresh(build)

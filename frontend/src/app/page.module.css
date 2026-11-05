@@ -118,6 +118,28 @@
   color: var(--text-muted);
 }
 
+.metricPicker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.metricPicker select {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.scoreNeutral {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+}
+
 .panelEmpty {
   flex: 1;
   padding: 24px 20px;

@@ -66,6 +66,29 @@ def test_newer_xml_invalidates_cache(tmp_path):
     assert parser.calls == 2
 
 
+def test_changed_content_invalidates_cache_even_with_the_same_mtime(tmp_path):
+    xml, cache = tmp_path / "walk.osm", tmp_path / "walk.pickle"
+    xml.write_text("<osm/>")
+    original_mtime = xml.stat().st_mtime_ns
+    parser = _CountingParser()
+    sr._read_graph_cached(xml, cache, parser)
+    xml.write_text("<osm version='new'/>")
+    os.utime(xml, ns=(original_mtime, original_mtime))
+    sr._read_graph_cached(xml, cache, parser)
+    assert parser.calls == 2
+
+
+def test_cache_without_source_fingerprint_is_reparsed_even_if_its_timestamp_is_newer(tmp_path):
+    import pickle
+    xml, cache = tmp_path / "walk.osm", tmp_path / "walk.pickle"
+    xml.write_text("<osm version='replacement'/>")
+    cache.write_bytes(pickle.dumps(_tiny_graph()))
+    _set_mtime(xml, cache.stat().st_mtime - 100)
+    parser = _CountingParser()
+    sr._read_graph_cached(xml, cache, parser)
+    assert parser.calls == 1
+
+
 def test_corrupt_cache_falls_back_to_parsing_and_is_repaired(tmp_path):
     xml, cache = tmp_path / "walk.osm", tmp_path / "walk.pickle"
     xml.write_text("<osm/>")

@@ -2,17 +2,16 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { routeSafety, spotReport, type RouteResult, type SpotReport } from "@/lib/api";
-import { HAVEN_LABEL, havenDirectionsUrl } from "@/lib/havens";
+import { routeSafety, spotReport, type NearbyFacilityObservation, type RouteResult, type SpotReport } from "@/lib/api";
+import { HAVEN_LABEL, havenAvailabilityText, havenDirectionsUrl } from "@/lib/havens";
 import { nearestSubway } from "@/lib/kakao";
 import { placeFromQuery, placeQuery, resolvePlace, type Place } from "@/lib/place";
 import { routeTimeFor } from "@/lib/preferences";
-import { formatDistance, pathLength, walkingMinutes } from "@/lib/routeGuidance";
-import { alternativeAssessment, routeScore } from "@/lib/routeAssessment";
+import { environmentPeekText, environmentScoreText, formatDistance, guideOptions, pathLength, walkingMinutes } from "@/lib/routeGuidance";
+import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
-import { RouteAssessmentSummary } from "@/components/RouteAssessmentSummary";
 import { withSearch } from "@/components/WithSearch";
 import { AlertIcon, InfoIcon, SearchIcon } from "@/components/icons";
 import shared from "../me/me.module.css";
@@ -22,7 +21,7 @@ import styles from "./report.module.css";
 const STATION_RADIUS_M = 3000;
 
 type NightWalk =
-  | { status: "ok"; station: Place; route: RouteResult; shortestM: number | null }
+  | { status: "ok"; station: Place; route: RouteResult; comparisonM: number | null }
   | { status: "none" | "error" };
 
 function scoreTone(score: number): string {
@@ -40,22 +39,44 @@ function Score({ value, label }: { value: number | null; label: string }) {
   );
 }
 
-function Count({ value, label }: { value: number | null | undefined; label: string }) {
-  const unknown = value === null || value === undefined;
+const FACILITY_LABELS: Record<string, string> = {
+  cctv: "CCTV", lighting: "보안등", bell: "비상벨", store: "상점", open_store: "영업 확인 상점",
+  store_with_published_hours: "공개 시간표가 있는 상점",
+};
+
+const LOCAL_STATE = {
+  present: "인접 근거 있음",
+  absent_in_verified_inventory: "검증 목록에서 인접 시설 미관측",
+  unknown: "자료 미확인",
+};
+
+const KST_TIME = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+function Count({ observation, label }: { observation?: NearbyFacilityObservation; label: string }) {
+  const count = observation?.count;
   return (
     <div className={styles.count}>
-      <strong>{unknown ? "–" : value}</strong>
-      <span>{unknown ? `${label} (자료 없음)` : label}</span>
+      <span>{label}</span>
+      <strong>{count == null ? "자료 미확인" : `확인된 ${count}개`}</strong>
     </div>
   );
 }
 
-async function loadNightWalk(home: Place): Promise<NightWalk> {
+function areaUnavailable(report: SpotReport): string {
+  if (report.status === "pending" || !report.status) return "주변 보행 평가 자료를 준비 중이에요.";
+  if (report.unavailable_reason === "no_walk_samples") return "이 반경에서 평가할 보행로를 찾지 못했어요.";
+  if (report.unavailable_reason === "walk_sample_limit_exceeded") return "이 반경의 보행로가 너무 많아 주변 평가를 제공하지 못했어요.";
+  return "주변 보행 시설을 평가할 자료가 충분하지 않아요.";
+}
+
+async function loadNightWalk(home: Place, now: Date): Promise<NightWalk> {
   const station = await nearestSubway(home.lat, home.lng, STATION_RADIUS_M);
   if (!station) return { status: "none" };
-  const route = await routeSafety(station.lat, station.lng, home.lat, home.lng, { at: routeTimeFor("night") });
-  const shortestM = route.shortest_route_points ? pathLength(route.shortest_route_points) : null;
-  return { status: "ok", station: { lat: station.lat, lng: station.lng, label: station.name }, route, shortestM };
+  const route = await routeSafety(station.lat, station.lng, home.lat, home.lng, { at: routeTimeFor("night", now) });
+  const comparisonM = route.shortest_route_points ? pathLength(route.shortest_route_points) : null;
+  return { status: "ok", station: { lat: station.lat, lng: station.lng, label: station.name }, route, comparisonM };
 }
 
 export default withSearch(ReportPage);
@@ -73,14 +94,16 @@ function ReportPage({ search }: { search: string }) {
   useEffect(() => {
     if (!place) return;
     let cancelled = false;
-    spotReport(place.lat, place.lng)
+    const now = new Date();
+    const controller = new AbortController();
+    spotReport(place.lat, place.lng, { at: now.toISOString(), signal: controller.signal })
       .then((r) => {
         if (!cancelled) setReport(r);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "리포트를 불러오지 못했어요");
       });
-    loadNightWalk(place)
+    loadNightWalk(place, now)
       .then((w) => {
         if (!cancelled) setWalk(w);
       })
@@ -89,6 +112,7 @@ function ReportPage({ search }: { search: string }) {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [place]);
 
@@ -109,9 +133,10 @@ function ReportPage({ search }: { search: string }) {
 
   if (!user) return null;
   const loading = place !== null && report === null && error === null;
-  const safeDistanceM = walk?.status === "ok" ? (walk.route.alternatives[0]?.distance_m ?? pathLength(walk.route.route_points)) : 0;
-  const nightSource = walk?.status === "ok" ? alternativeAssessment(walk.route, walk.route.alternatives[0]) : null;
-  const nightScore = nightSource ? routeScore(nightSource) : null;
+  const nightOption = walk?.status === "ok" ? guideOptions(walk.route)[0] : undefined;
+  const nightAssessment = nightOption?.environmentAssessment;
+  const safeDistanceM = nightOption?.distanceM ?? 0;
+  const hasCompositeScore = environmentScoreText(nightAssessment) !== undefined;
 
   return (
     <main className={shared.page}>
@@ -122,7 +147,7 @@ function ReportPage({ search }: { search: string }) {
             <InfoIcon size={16} />집 주소 안전 리포트
           </h1>
           <p className={shared.infoText}>
-            살 집을 보러 가기 전에 주소를 넣어 보세요. 그 집 주변 300m의 낮·밤 안전 점수, 가까운 파출소·편의점·비상벨,
+            살 집을 보러 가기 전에 주소를 넣어 보세요. 집 주변 300m의 낮·밤 보행 시설 접근성, 가까운 파출소·편의점·비상벨,
             가장 가까운 역에서 집까지 <strong>밤 귀갓길</strong>을 한 번에 보여드려요.
           </p>
           <form className={styles.search} onSubmit={handleSearch} role="search">
@@ -149,7 +174,7 @@ function ReportPage({ search }: { search: string }) {
           <>
             {report.zone && (
               <section className={shared.card}>
-                <h2 className={shared.cardTitle}>동네 안전지수 · {report.zone.dong_name}</h2>
+                <h2 className={shared.cardTitle}>지역 통계 지수 · {report.zone.dong_name}</h2>
                 <div className={styles.scoreRow}>
                   <Score label="낮" value={report.zone.day_safety_score} />
                   <Score label="밤" value={report.zone.night_safety_score} />
@@ -164,27 +189,61 @@ function ReportPage({ search }: { search: string }) {
             )}
 
             <section className={shared.card}>
-              <h2 className={shared.cardTitle}>집 주변 {report.radius_m}m</h2>
-              <div className={styles.scoreRow}>
-                <Score label="낮 골목 점수" value={report.area_day_score} />
-                <Score label="밤 골목 점수" value={report.area_night_score} />
-              </div>
+              <h2 className={shared.cardTitle}>집 주변 {report.radius_m}m 보행 시설 접근성</h2>
+              {report.status === "unavailable" || !report.area_environment ? (
+                <p className={shared.infoText}>{areaUnavailable(report)}</p>
+              ) : (
+                <div className={styles.scoreRow}>
+                  {(["day", "night"] as const).map((period) => (
+                    <div className={styles.score} key={period}>
+                      <span>{period === "day" ? "낮" : "밤"}</span>
+                      <strong>{environmentPeekText(report.area_environment?.[period])}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className={styles.countRow}>
-                <Count label="CCTV" value={report.counts?.cctv} />
-                <Count label="보안등" value={report.counts?.lights} />
-                <Count label="편의점" value={report.counts?.convenience} />
+                {(["cctv", "lighting", "bell", "store"] as const).map((key) => (
+                  <Count key={key} label={FACILITY_LABELS[key]} observation={report.facility_observations?.[key]} />
+                ))}
               </div>
+              {report.area_environment && (
+                <details className={styles.details}>
+                  <summary>평가 상세</summary>
+                  {Object.entries(report.area_environment).map(([period, value]) => (
+                    <p key={period}>{period === "day" ? "낮" : "밤"} <time dateTime={value.reference_at}>{KST_TIME.format(new Date(value.reference_at))}</time> 기준 · 평가 보행로 {value.sampled_length_m === 0 ? "0m" : formatDistance(value.sampled_length_m)}
+                      {value.sampled_length_m > 0 && ` · 시설 근거가 확인된 길이 ${((value.verified_distance_ratio ?? 0) * 100).toFixed(0)}%`}
+                      {value.used_factors.length > 0 && ` · 사용 지표: ${value.used_factors.map((factor) => FACILITY_LABELS[factor] ?? factor).join(", ")}`}
+                    </p>
+                  ))}
+                  <p>공개 자료와 지도에 있는 보행로 기준이에요. 확인된 시설 수는 주변 전체 시설 수와 다를 수 있어요.</p>
+                </details>
+              )}
+            </section>
+
+            <section className={shared.card}>
+              <h2 className={shared.cardTitle}>가까운 시설 확인</h2>
+              {report.local_environment ? (
+                <>
+                  <p className={shared.infoText}>입력한 위치 · <time dateTime={report.local_environment.assessed_at}>{KST_TIME.format(new Date(report.local_environment.assessed_at))}</time> 기준</p>
+                  <ul className={styles.localEvidence}>
+                    {Object.entries(report.local_environment.factors).map(([factor, value]) => (
+                      <li key={factor}>{FACILITY_LABELS[factor] ?? factor}: {LOCAL_STATE[value.state]}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : <p className={shared.infoText}>이 위치의 시설 확인 자료가 아직 준비되지 않았어요.</p>}
             </section>
 
             <section className={shared.card}>
               <h2 className={shared.cardTitle}>가까운 안심 거점</h2>
               {report.havens.length === 0 ? (
-                <p className={shared.infoText}>1.5km 안에 파출소·24시 편의점·비상벨이 없어요.</p>
+                <p className={shared.infoText}>현재 자료에서 1.5km 안의 안심 거점을 확인하지 못했어요.</p>
               ) : (
                 <ul className={styles.havens}>
                   {report.havens.map((h) => (
                     <li key={h.kind}>
-                      <span>{HAVEN_LABEL[h.kind]}</span>
+                      <span>{HAVEN_LABEL[h.kind]} <small>{havenAvailabilityText(h)}</small><small>{h.source_label}</small></span>
                       <strong>{formatDistance(h.distance_m)}</strong>
                       <a href={havenDirectionsUrl(h)} target="_blank" rel="noopener noreferrer">
                         위치 보기
@@ -211,8 +270,8 @@ function ReportPage({ search }: { search: string }) {
                 </p>
                 <div className={styles.scoreRow}>
                   <div className={styles.score}>
-                    <span>밤 귀갓길 평가</span>
-                    <strong className={nightScore?.toneValue != null ? scoreTone(nightScore.toneValue) : undefined}>{nightScore?.text}</strong>
+                    <span>{hasCompositeScore ? "추천 경로 시설 평가" : "밤 귀갓길 시설 평가"}</span>
+                    <div><RouteEnvironmentSummary assessment={nightAssessment} /></div>
                   </div>
                   <div className={styles.score}>
                     <span>거리 · 걸음</span>
@@ -220,14 +279,14 @@ function ReportPage({ search }: { search: string }) {
                       {formatDistance(safeDistanceM)} · {walkingMinutes(safeDistanceM)}분
                     </strong>
                   </div>
-                  {walk.shortestM !== null && (
+                  {walk.comparisonM !== null && (
                     <div className={styles.score}>
-                      <span>최단 경로</span>
-                      <strong>{formatDistance(walk.shortestM)}</strong>
+                      <span>일반 비교 경로</span>
+                      <strong>{formatDistance(walk.comparisonM)}</strong>
                     </div>
                   )}
                 </div>
-                {nightSource && <RouteAssessmentSummary source={nightSource} showScore={false} />}
+                <RouteEnvironmentDetails assessment={nightAssessment} />
                 <Link
                   className={styles.action}
                   href={`/route?${placeQuery("start", walk.station)}&${placeQuery("end", place)}`}

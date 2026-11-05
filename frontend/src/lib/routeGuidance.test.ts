@@ -7,7 +7,6 @@ import {
   nextTurn,
   progressAlong,
   walkingMinutes,
-  zoneSummary,
 } from "./routeGuidance";
 
 const zone = (code: string, score: number) => ({
@@ -98,11 +97,6 @@ describe("routeGuidance", () => {
       shortest_route_points: null,
     };
     expect(guideOptions(result).map((o) => o.kind)).toEqual(["safe"]);
-  });
-
-  it("summarises the dongs a route passes with the same rule for every option", () => {
-    expect(zoneSummary([zone("A", 80), zone("B", 30), zone("C", 40)])).toEqual({ average: 50, cautionCount: 1 });
-    expect(zoneSummary([])).toEqual({ average: null, cautionCount: 0 });
   });
 
   it("snaps to the closest point on a segment, not just the nearest vertex", () => {

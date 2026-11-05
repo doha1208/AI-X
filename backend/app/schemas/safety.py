@@ -2,7 +2,7 @@ from datetime import datetime
 from math import asin, cos, radians, sin, sqrt
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.services.time_period import Period
 
@@ -47,6 +47,69 @@ class SafetyZoneOut(BaseModel):
         from_attributes = True
 
 
+class FacilityZoneAssessment(BaseModel):
+    status: Literal["available", "degraded", "unavailable", "pending"]
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"] = "unavailable"
+    score: float | None = None
+    reference_score: float | None = None
+    reference_factor: str | None = None
+    score_bounds: dict[str, float] | None = None
+    sampled_length_m: float = 0
+    used_factors: list[str] = Field(default_factory=list)
+    factor_coverage: dict[str, float] = Field(default_factory=dict)
+    factor_evaluation_ratio: dict[str, float] = Field(default_factory=dict)
+    verified_distance_ratio: float = 0
+    basis_id: str | None = None
+    artifact_version: str | None = None
+    model_version: str | None = None
+    policy_version: str | None = None
+    schedule_key: str
+    assessed_at: datetime | None = None
+    reference_at: datetime | None = None
+    unavailable_reason: str | None = None
+
+
+class FacilityZonePeriods(BaseModel):
+    day: FacilityZoneAssessment
+    night: FacilityZoneAssessment
+
+
+class FacilityZone(BaseModel):
+    dong_code: str
+    dong_name: str
+    lat: float
+    lng: float
+    assessment: FacilityZoneAssessment
+    rank: int | None = None
+    result_group_id: str | None = None
+
+
+class FacilityBasisGroup(BaseModel):
+    basis_id: str
+    result_group_id: str
+    used_factors: list[str]
+    zone_count: int
+
+
+class FacilityZoneComparison(BaseModel):
+    dong_codes: list[str]
+    used_factors: list[str]
+    evaluation_basis: Literal["multi_factor", "single_factor", "not_comparable"]
+    scores: dict[str, float]
+
+
+class FacilityZoneResponse(BaseModel):
+    status: Literal["available", "pending"]
+    period: Period
+    weekday: int
+    reference_hour: int
+    basis_id: str | None
+    artifact_version: str | None
+    groups: list[FacilityBasisGroup]
+    zones: list[FacilityZone]
+    comparison: FacilityZoneComparison | None = None
+
+
 class SafetyZoneDetail(SafetyZoneOut):
     """동네 비교용 — 점수와 함께 점수를 만든 원자료와 경기도 안 순위를 보여준다. None은 '모름'."""
 
@@ -60,6 +123,7 @@ class SafetyZoneDetail(SafetyZoneOut):
     accident_dist_m: float | None
     night_floating_pop: float | None
     store_count: int
+    facility_environment: FacilityZonePeriods | None = None
 
 
 class SafeHaven(BaseModel):
@@ -67,12 +131,88 @@ class SafeHaven(BaseModel):
     lat: float
     lng: float
     distance_m: int
+    source_id: str
+    source_label: str
+    source_url: str | None
+    source_version: str
+    schedule_status: Literal["published_schedule", "verified_weekly_schedule", "unverified", "not_applicable"]
+    opening_status: Literal["scheduled_open", "scheduled_closed", "unverified", "not_applicable"]
+    staffing_status: Literal["unverified", "not_applicable"]
+    operation_status: Literal["unverified", "not_applicable"]
 
 
 class FacilityCounts(BaseModel):
     cctv: int | None
     lights: int | None
     convenience: int | None
+
+
+class AreaFacilityAssessment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    scope: Literal["area"]
+    weight_unit: Literal["metre"]
+    period: Period
+    sampled_length_m: float
+    score: float | None
+    reference_score: float | None
+    reference_factor: str | None
+    score_bounds: dict[str, float] | None
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"]
+    status: Literal["available", "degraded", "unavailable"]
+    active_factors: list[str]
+    used_factors: list[str]
+    excluded_factors: dict[str, str]
+    factor_coverage: dict[str, float]
+    factor_evaluation_ratio: dict[str, float]
+    verified_distance_ratio: float
+    evidence_factors: list[str]
+    source_versions: dict[str, str]
+    model_version: str
+    policy_version: str
+    artifact_version: str
+    assessed_at: datetime
+    reference_at: datetime
+    comparison_basis_id: str
+    unavailable_reason: str | None
+
+
+class AreaEnvironment(BaseModel):
+    day: AreaFacilityAssessment
+    night: AreaFacilityAssessment
+
+
+class LocalFactorEvidence(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    state: Literal["present", "absent_in_verified_inventory", "unknown"]
+    comparison_present: bool
+    comparison_known: bool
+    observed_present: bool
+
+
+class LocalEnvironment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    point: tuple[float, float]
+    factors: dict[str, LocalFactorEvidence]
+    period: Period
+    model_version: str
+    policy_version: str
+    assessed_at: datetime
+    source_versions: dict[str, str]
+    artifact_version: str
+
+
+class FacilityObservationSource(BaseModel):
+    version: str
+    url: str | None
+
+
+class NearbyFacilityObservation(BaseModel):
+    count: int | None
+    coverage: Literal["verified_inventory", "partial", "unknown"]
+    sources: dict[str, FacilityObservationSource]
 
 
 class SpotReport(BaseModel):
@@ -83,12 +223,17 @@ class SpotReport(BaseModel):
     period: Period
     radius_m: int
     zone: SafetyZoneDetail | None
-    # 지금 이 자리의 구간 점수(현재 시간대). 구간 데이터가 없으면 None.
-    here_score: float | None
-    area_day_score: float | None
-    area_night_score: float | None
+    here_score: None = Field(None, deprecated=True)
+    area_day_score: None = Field(None, deprecated=True)
+    area_night_score: None = Field(None, deprecated=True)
     counts: FacilityCounts | None
     havens: list[SafeHaven]
+    area_environment: AreaEnvironment | None
+    local_environment: LocalEnvironment | None
+    facility_observations: dict[str, NearbyFacilityObservation]
+    artifact_version: str | None
+    status: Literal["available", "degraded", "pending", "unavailable"]
+    unavailable_reason: str | None
 
 
 class RouteRequest(BaseModel):
@@ -112,11 +257,33 @@ class RoutePoint(BaseModel):
     lng: float
 
 
+class LiveRoutePoint(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class LiveRouteEnvironmentRequest(BaseModel):
+    route_points: list[LiveRoutePoint] = Field(min_length=2, max_length=5000)
+    position: LiveRoutePoint | None = None
+    at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_polyline(self) -> "LiveRouteEnvironmentRequest":
+        points = self.route_points
+        distance = sum(_haversine_km(a.lat, a.lng, b.lat, b.lng) for a, b in zip(points, points[1:]))
+        if not 0 < distance <= 20:
+            raise ValueError("시설 평가 경로의 총 길이는 0m 초과, 20km 이하여야 합니다")
+        if self.at is not None and not 1 < self.at.year < 9999:
+            raise ValueError("평가 시각을 지원 범위 안으로 입력해 주세요")
+        return self
+
+
 class RouteAlternative(BaseModel):
     route_points: list[RoutePoint]
-    safety_score: float
+    safety_score: float | None
     distance_m: float
     zones_passed: list[SafetyZoneOut]
+    environment_assessment: "RouteEnvironmentAssessment | None" = None
 
 
 class RouteMissingData(BaseModel):
@@ -139,8 +306,64 @@ class RouteDataDisclosure(BaseModel):
     fallback: RouteFallback
 
 
+class RouteEnvironmentAssessment(BaseModel):
+    model_version: str
+    policy_version: str
+    status: Literal["available", "degraded", "unavailable"]
+    period: Period
+    distance_m: float
+    score: float | None
+    active_factors: list[str]
+    used_factors: list[str]
+    excluded_factors: dict[str, str]
+    factor_coverage: dict[str, float]
+    data_factor_availability_ratio: float
+    longest_support_gap_m: float | None
+    total_support_gap_m: float | None
+    gap_intervals: list[dict[str, float]]
+    source_versions: dict[str, str]
+    comparison_group_id: str
+    per_factor_gaps: dict[str, list[dict[str, float]]] = Field(default_factory=dict)
+    observed_facility_counts: dict[str, int] = Field(default_factory=dict)
+    observed_factor_coverage: dict[str, float] = Field(default_factory=dict)
+    evaluation_basis: Literal["multi_factor", "single_factor", "partial_coverage", "observed_only", "unavailable"] = "unavailable"
+    reference_score: float | None = None
+    reference_factor: str | None = None
+    score_bounds: dict[str, float] | None = None
+    factor_evaluation_ratio: dict[str, float] = Field(default_factory=dict)
+    verified_distance_ratio: float = 0.0
+    evidence_factors: list[str] = Field(default_factory=list)
+
+
+RouteAlternative.model_rebuild()
+
+
+class RouteFacilityInterval(BaseModel):
+    start_m: float
+    end_m: float
+    state: Literal["present", "absent_in_verified_inventory", "unknown"]
+
+
+class LiveRouteEnvironmentResponse(BaseModel):
+    assessment: RouteEnvironmentAssessment | None
+    route_evidence: dict[str, list[RouteFacilityInterval]]
+    local_environment: LocalEnvironment | None
+    havens: list[SafeHaven]
+    artifact_version: str | None
+    evaluated_at: datetime
+    valid_until: datetime
+    temporal_key: str
+    period: Period
+    status: Literal["available", "degraded", "pending", "unavailable"]
+
+
+class RouteEnvironmentBasis(BaseModel):
+    artifact_version: str | None
+    evaluated_at: datetime
+
+
 class RouteResponse(BaseModel):
-    safety_score: float
+    safety_score: float | None
     zones_passed: list[SafetyZoneOut]
     route_points: list[RoutePoint]
     mode: RouteMode
@@ -153,3 +376,8 @@ class RouteResponse(BaseModel):
     shortest_route_points: list[RoutePoint] | None = None
     # 최단경로가 지나는 동 — 길안내에서 안전 경로와 최단 경로를 같은 기준(동 안전지수)으로 비교하게 한다.
     shortest_zones_passed: list[SafetyZoneOut] | None = None
+    environment_assessment: RouteEnvironmentAssessment | None = None
+    comparison_environment_assessment: RouteEnvironmentAssessment | None = None
+    environment_model_applied: bool = False
+    baseline_source: Literal["tmap", "osm_shortest"] | None = None
+    environment_basis: RouteEnvironmentBasis | None = None

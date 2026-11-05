@@ -1,0 +1,28 @@
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.controls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.controls select {
+  max-width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.controls p {
+  flex-basis: 100%;
+}

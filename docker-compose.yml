@@ -10,10 +10,15 @@ services:
       APP_ENV: production
       DATABASE_URL: sqlite:////data/app.db
       ROUTE_ARTIFACT_DIR: /artifacts
+      ROUTE_BUILDER_AUTO_START: "false"
+      ROUTE_ENVIRONMENT_SOURCES_PATH: /data/route_sources/environment_sources.json
+      ROUTE_SOURCE_CATALOG_PATH: /app/data/route_source_catalog.json
     volumes:
       - ./backend/data/production:/data
       - ./backend/data/production/route_artifacts:/artifacts
       - ./backend/data/osm:/app/data/osm:ro
+      - ./backend/data/route_source_catalog.json:/app/data/route_source_catalog.json:ro
+      - ./backend/data/route_validation_cases.json:/app/data/route_validation_cases.json:ro
 
   artifact-builder:
     build: ./backend
@@ -25,7 +30,12 @@ services:
       APP_ENV: production
       DATABASE_URL: sqlite:////data/app.db
       ROUTE_ARTIFACT_DIR: /artifacts
+      ROUTE_BUILDER_AUTO_START: "false"
+      ROUTE_ENVIRONMENT_SOURCES_PATH: /data/route_sources/environment_sources.json
+      ROUTE_SOURCE_CATALOG_PATH: /app/data/route_source_catalog.json
     volumes:
       - ./backend/data/production:/data
       - ./backend/data/production/route_artifacts:/artifacts
       - ./backend/data/osm:/app/data/osm:ro
+      - ./backend/data/route_source_catalog.json:/app/data/route_source_catalog.json:ro
+      - ./backend/data/route_validation_cases.json:/app/data/route_validation_cases.json:ro

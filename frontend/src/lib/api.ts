@@ -42,38 +42,7 @@ export type RouteDataDisclosure = {
   fallback: { applied: boolean; mode: RouteMode; reason: RouteFallbackReason };
 };
 
-// Matches the running facility-assessment API; values are server calculations.
-export type RouteEnvironmentAssessment = {
-  model_version: string;
-  policy_version: string;
-  status: "available" | "degraded" | "unavailable";
-  period: RoutePeriod;
-  distance_m: number;
-  score: number | null;
-  active_factors: string[];
-  used_factors: string[];
-  excluded_factors: Record<string, string>;
-  factor_coverage: Record<string, number>;
-  data_factor_availability_ratio: number;
-  longest_support_gap_m: number | null;
-  total_support_gap_m: number | null;
-  gap_intervals: Record<string, number>[];
-  source_versions: Record<string, string>;
-  comparison_group_id: string;
-  evaluation_basis?: "multi_factor" | "single_factor" | "partial_coverage" | "observed_only" | "unavailable";
-  reference_score?: number | null;
-  reference_factor?: string | null;
-  score_bounds?: Record<string, number> | null;
-  per_factor_gaps?: Record<string, Record<string, number>[]>;
-  observed_facility_counts?: Record<string, number>;
-  observed_factor_coverage?: Record<string, number>;
-  factor_evaluation_ratio?: Record<string, number>;
-  verified_distance_ratio?: number;
-  evidence_factors?: string[];
-};
-
 export type RouteResult = {
-  // Newer route servers may omit the legacy safety index while still returning a walkable path.
   safety_score: number | null;
   zones_passed: SafetyZone[];
   route_points: { lat: number; lng: number }[];
@@ -87,7 +56,8 @@ export type RouteResult = {
   environment_assessment?: RouteEnvironmentAssessment | null;
   comparison_environment_assessment?: RouteEnvironmentAssessment | null;
   environment_model_applied?: boolean;
-  environment_basis?: { artifact_version: string | null; evaluated_at: string } | null;
+  baseline_source?: "tmap" | "osm_shortest" | null;
+  environment_basis?: RouteEnvironmentBasis | null;
 };
 
 export type RouteAlternative = {
@@ -96,6 +66,34 @@ export type RouteAlternative = {
   distance_m: number;
   zones_passed: SafetyZone[];
   environment_assessment?: RouteEnvironmentAssessment | null;
+};
+
+export type RouteEnvironmentAssessment = {
+  evaluation_basis?: "multi_factor" | "single_factor" | "partial_coverage" | "observed_only" | "unavailable";
+  reference_score?: number | null;
+  reference_factor?: string | null;
+  score_bounds?: {lower:number;upper:number} | null;
+  factor_evaluation_ratio?: Record<string,number>;
+  verified_distance_ratio?: number;
+  evidence_factors?: string[];
+  observed_facility_counts?: Record<string, number>;
+  observed_factor_coverage?: Record<string, number>;
+  model_version: string;
+  policy_version: string;
+  status: "available" | "degraded" | "unavailable";
+  period: RoutePeriod;
+  distance_m: number;
+  score: number | null;
+  active_factors: string[];
+  used_factors: string[];
+  excluded_factors: Record<string, string>;
+  factor_coverage: Record<string, number>;
+  data_factor_availability_ratio: number;
+  longest_support_gap_m: number | null;
+  total_support_gap_m: number | null;
+  gap_intervals: { start_m: number; end_m: number }[];
+  source_versions: Record<string, string>;
+  comparison_group_id: string;
 };
 
 // 점수를 만든 원자료와 경기도 안 순위. null은 지자체가 데이터를 안 올려 "모름"이라는 뜻.
@@ -110,10 +108,139 @@ export type SafetyZoneDetail = SafetyZone & {
   accident_dist_m: number | null;
   night_floating_pop: number | null;
   store_count: number;
+  facility_environment?: Record<RoutePeriod, FacilityZoneAssessment> | null;
 };
 
+export type ZoneLocation = Pick<SafetyZone, "dong_code" | "dong_name" | "lat" | "lng">;
+export type DisplayMetric = "regional_statistics" | "facility_access";
+export type FacilityZoneAssessment = {
+  status: "available" | "degraded" | "unavailable" | "pending";
+  evaluation_basis: NonNullable<RouteEnvironmentAssessment["evaluation_basis"]>;
+  score: number | null;
+  reference_score: number | null;
+  reference_factor: string | null;
+  score_bounds: { lower: number; upper: number } | null;
+  sampled_length_m: number;
+  used_factors: string[];
+  factor_coverage: Record<string, number>;
+  factor_evaluation_ratio: Record<string, number>;
+  verified_distance_ratio: number;
+  basis_id: string | null;
+  artifact_version: string | null;
+  model_version: string | null;
+  policy_version: string | null;
+  schedule_key: string;
+  assessed_at: string | null;
+  reference_at: string | null;
+  unavailable_reason: string | null;
+};
+export type FacilityZone = ZoneLocation & {
+  assessment: FacilityZoneAssessment;
+  rank: number | null;
+  result_group_id: string | null;
+};
+export type FacilityBasisGroup = { basis_id: string; result_group_id: string; used_factors: string[]; zone_count: number };
+export type FacilityZoneComparison = {
+  dong_codes: string[];
+  used_factors: string[];
+  evaluation_basis: "multi_factor" | "single_factor" | "not_comparable";
+  scores: Record<string, number>;
+};
+export type FacilityZoneResponse = {
+  status: "available" | "pending";
+  period: RoutePeriod;
+  weekday: number;
+  reference_hour: number;
+  basis_id: string | null;
+  artifact_version: string | null;
+  groups: FacilityBasisGroup[];
+  zones: FacilityZone[];
+  comparison: FacilityZoneComparison | null;
+};
+
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number, readonly detail: unknown) { super(message); }
+}
+
+export function changedFacilityGroups(error: unknown): FacilityBasisGroup[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409 || !error.detail || typeof error.detail !== "object"
+    || !("reason" in error.detail) || error.detail.reason !== "comparison_basis_changed"
+    || !("groups" in error.detail) || !Array.isArray(error.detail.groups)) return null;
+  return error.detail.groups as FacilityBasisGroup[];
+}
+
 export type SafeHavenKind = "police" | "convenience" | "bell";
-export type SafeHaven = { kind: SafeHavenKind; lat: number; lng: number; distance_m: number };
+export type SafeHaven = {
+  kind: SafeHavenKind;
+  lat: number;
+  lng: number;
+  distance_m: number;
+  source_id: string;
+  source_label: string;
+  source_url: string | null;
+  source_version: string;
+  schedule_status: "published_schedule" | "verified_weekly_schedule" | "unverified" | "not_applicable";
+  opening_status: "scheduled_open" | "scheduled_closed" | "unverified" | "not_applicable";
+  staffing_status: "unverified" | "not_applicable";
+  operation_status: "unverified" | "not_applicable";
+};
+
+export type FacilityScoreDisplay = Pick<RouteEnvironmentAssessment,
+  "model_version" | "policy_version" | "score" | "evaluation_basis" | "reference_score" | "reference_factor" | "score_bounds">;
+
+export type AreaFacilityAssessment = Required<FacilityScoreDisplay & Pick<RouteEnvironmentAssessment,
+  "status" | "period" | "active_factors" | "used_factors" | "excluded_factors" | "factor_coverage" |
+  "factor_evaluation_ratio" | "verified_distance_ratio" | "evidence_factors" | "source_versions">> & {
+  scope: "area";
+  weight_unit: "metre";
+  sampled_length_m: number;
+  artifact_version: string;
+  assessed_at: string;
+  reference_at: string;
+  comparison_basis_id: string;
+  unavailable_reason: string | null;
+};
+
+export type LocalEnvironment = {
+  point: [number, number];
+  factors: Record<string, {
+    state: "present" | "absent_in_verified_inventory" | "unknown";
+    comparison_present: boolean;
+    comparison_known: boolean;
+    observed_present: boolean;
+  }>;
+  period: RoutePeriod;
+  model_version: string;
+  policy_version: string;
+  assessed_at: string;
+  source_versions: Record<string, string>;
+  artifact_version: string;
+};
+
+export type NearbyFacilityObservation = {
+  count: number | null;
+  coverage: "verified_inventory" | "partial" | "unknown";
+  sources: Record<string, { version: string; url: string | null }>;
+};
+
+export type RouteEnvironmentBasis = { artifact_version: string | null; evaluated_at: string };
+
+export type RouteFacilityInterval = {
+  start_m: number;
+  end_m: number;
+  state: LocalEnvironment["factors"][string]["state"];
+};
+
+export type LiveFacilityReport = RouteEnvironmentBasis & {
+  assessment: RouteEnvironmentAssessment | null;
+  route_evidence: Record<string, RouteFacilityInterval[]>;
+  local_environment: LocalEnvironment | null;
+  havens: SafeHaven[];
+  valid_until: string;
+  temporal_key: string;
+  period: RoutePeriod;
+  status: "available" | "degraded" | "pending" | "unavailable";
+};
 
 export type SpotReport = {
   lat: number;
@@ -121,11 +248,20 @@ export type SpotReport = {
   period: RoutePeriod;
   radius_m: number;
   zone: SafetyZoneDetail | null;
-  here_score: number | null;
-  area_day_score: number | null;
-  area_night_score: number | null;
+  /** @deprecated Use local_environment. */
+  here_score: null;
+  /** @deprecated Use area_environment.day. */
+  area_day_score: null;
+  /** @deprecated Use area_environment.night. */
+  area_night_score: null;
   counts: { cctv: number | null; lights: number | null; convenience: number | null } | null;
   havens: SafeHaven[];
+  area_environment: Record<RoutePeriod, AreaFacilityAssessment> | null;
+  local_environment: LocalEnvironment | null;
+  facility_observations: Record<string, NearbyFacilityObservation>;
+  artifact_version: string | null;
+  status: "available" | "degraded" | "pending" | "unavailable";
+  unavailable_reason: string | null;
 };
 
 export type User = { id: number; email: string };
@@ -214,7 +350,7 @@ async function request<T>(path: string, options: RequestInit = {}, retried = fal
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(errorMessage(body.detail, `Request failed: ${res.status}`));
+    throw new ApiError(errorMessage(body.detail, `Request failed: ${res.status}`), res.status, body.detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
@@ -274,12 +410,25 @@ export function nearbyBells(lat: number, lng: number, radiusKm = 1, limit?: numb
   return request<{ lat: number; lng: number }[]>(`/safety/bells?lat=${lat}&lng=${lng}&radius_km=${radiusKm}${limitParam}`, options);
 }
 
-export function spotReport(lat: number, lng: number, options: RequestInit = {}) {
-  return request<SpotReport>(`/safety/spot?lat=${lat}&lng=${lng}`, options);
+export function spotReport(lat: number, lng: number, { at, radiusM, ...options }: RequestInit & { at?: string; radiusM?: number } = {}) {
+  const params = new URLSearchParams({ lat: String(lat), lng: String(lng) });
+  if (at !== undefined) params.set("at", at);
+  if (radiusM !== undefined) params.set("radius_m", String(radiusM));
+  return request<SpotReport>(`/safety/spot?${params}`, options);
 }
 
 export function zoneDetail(dongCode: string) {
   return request<SafetyZoneDetail>(`/safety/zones/${encodeURIComponent(dongCode)}`);
+}
+
+export function facilityZones({ period, basisId, codes, signal }: {
+  period?: RoutePeriod; basisId?: string; codes?: string[]; signal?: AbortSignal;
+} = {}) {
+  const params = new URLSearchParams();
+  if (period) params.set("period", period);
+  if (basisId) params.set("basis_id", basisId);
+  codes?.forEach(code => params.append("dong_codes", code));
+  return request<FacilityZoneResponse>(`/safety/facility-zones?${params}`, { signal });
 }
 
 export function routeSafety(
@@ -303,8 +452,26 @@ export function routeSafety(
   });
 }
 
+export function routeEnvironment(routePoints: { lat: number; lng: number }[],
+  options: { position?: { lat: number; lng: number }; signal?: AbortSignal } = {}) {
+  return request<LiveFacilityReport>("/safety/route-environment", {
+    method: "POST",
+    body: JSON.stringify({ route_points: routePoints, position: options.position }),
+    signal: options.signal,
+  });
+}
+
 export function listScoringProfiles() {
   return request<ScoringProfile[]>("/admin/scoring-profiles");
+}
+
+export type AssessmentStatus = {
+  route_artifact: { available: boolean; version: string | null; area_environment_ready: boolean; zone_environment_ready: boolean };
+  facility_assessment: { model_version: string | null; policy_version: string; artifact_version: string | null; applied: boolean };
+};
+
+export function assessmentStatus() {
+  return request<AssessmentStatus>("/health");
 }
 
 export function listScoreBuilds() {

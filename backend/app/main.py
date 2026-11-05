@@ -13,6 +13,8 @@ from app.db.schema import ensure_database_schema
 from app.models import safety_zone, scoring_profile, user  # noqa: F401 (register models before create_all)
 from app.services.safe_route import route_artifact_runtime
 from app.observability import configure_observability, metrics_response
+from app.services.route_builder_supervisor import start_builder_supervisor
+from app.services.route_build_state import public_builder_status
 
 Base.metadata.create_all(bind=engine)
 ensure_database_schema(engine)
@@ -26,7 +28,15 @@ def load_route_artifact() -> None:
     """완성된 최신 경로 산출물을 읽는다. 부재·손상 시 API 폴백은 계속 동작한다."""
 
     validate_runtime_settings(settings)
+    app.state.builder_supervisor = start_builder_supervisor()
     route_artifact_runtime.load(Path(settings.route_artifact_dir))
+
+
+@app.on_event("shutdown")
+def stop_route_builder() -> None:
+    supervisor = getattr(app.state, "builder_supervisor", None)
+    if supervisor is not None:
+        supervisor.close()
 
 # CORS_ALLOW_ORIGINS(.env)로 배포/터널 환경마다 허용 origin을 바꾼다.
 # 인증 쿠키를 보내므로 허용 origin은 반드시 구체적인 목록이어야 한다.
@@ -47,7 +57,16 @@ app.include_router(safety_router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "route_artifact": route_artifact_runtime.status()}
+    from app.services.route_environment_policy import EnvironmentPolicy
+
+    snapshot = route_artifact_runtime.environment_snapshot()
+    facility = {"model_version": snapshot.artifact.environment_model_version if snapshot else None,
+                "policy_version": EnvironmentPolicy().version,
+                "artifact_version": snapshot.artifact.version if snapshot else None,
+                "applied": snapshot is not None}
+    return {"status": "ok", "route_artifact": route_artifact_runtime.status(),
+            "route_builder": public_builder_status(Path(settings.route_artifact_dir)),
+            "facility_assessment": facility}
 
 
 @app.get("/metrics", include_in_schema=False)

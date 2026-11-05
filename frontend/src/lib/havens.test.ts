@@ -2,18 +2,26 @@ import { describe, expect, it } from "vitest";
 import { bestHaven, havenDirectionsUrl } from "./havens";
 
 describe("bestHaven", () => {
-  it("prefers the nearest staffed place over a closer emergency bell", () => {
+  it("does not infer that any location is staffed when picking the closest known position", () => {
     const pick = bestHaven([
       { kind: "bell", lat: 0, lng: 0, distance_m: 30 },
       { kind: "police", lat: 0, lng: 0, distance_m: 400 },
       { kind: "convenience", lat: 0, lng: 0, distance_m: 120 },
     ]);
-    expect(pick?.kind).toBe("convenience");
+    expect(pick?.kind).toBe("bell");
   });
 
-  it("falls back to a bell when nothing staffed is near, and to null when nothing is", () => {
+  it("uses a bell position when that is the only observation, and null when nothing is observed", () => {
     expect(bestHaven([{ kind: "bell", lat: 0, lng: 0, distance_m: 30 }])?.kind).toBe("bell");
     expect(bestHaven([])).toBeNull();
+  });
+
+  it("does not recommend a store outside its verified scheduled hours", () => {
+    const pick = bestHaven([
+      { kind: "convenience", lat: 0, lng: 0, distance_m: 10, opening_status: "scheduled_closed" },
+      { kind: "bell", lat: 0, lng: 0, distance_m: 30, opening_status: "not_applicable" },
+    ]);
+    expect(pick?.kind).toBe("bell");
   });
 });
 

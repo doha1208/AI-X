@@ -98,6 +98,23 @@ def test_store_extraction_keeps_street_level_food_and_retail_and_convenience():
     assert result["convenience"] == [[37.5, 127.0]]
 
 
+def test_store_extraction_keeps_identity_for_future_hours_matching():
+    from scripts.extract_store_points import extract
+    result = extract([{"상가업소번호": "shop-001", "상호명": "금촌점", "도로명주소": "경기도 파주시 문화로 105", "지번주소": "경기도 파주시 금촌동", "상권업종대분류명": "소매", "상권업종소분류명": "편의점", "층정보": "", "위도": "37.75", "경도": "126.77"}])
+    place = result["places"][0]
+    assert place["source_id"] == "shop-001"
+    assert place["name"] == "금촌점"
+    assert place["road_address"] == "경기도 파주시 문화로 105"
+    assert place["hours_status"] == "unknown" and place["staffed"] is None
+    assert not place["street_level_confirmed"]
+
+
+def test_store_extraction_does_not_keep_nonfinite_coordinates():
+    from scripts.extract_store_points import extract
+    result = extract([{"상권업종대분류명": "소매", "상권업종소분류명": "편의점", "층정보": "1", "위도": "nan", "경도": "127"}])
+    assert result["stores"] == []
+
+
 def test_police_points_keep_staffed_facilities_including_neighbouring_regions():
     # 경계의 동은 가장 가까운 지구대가 서울·인천일 수 있어 지역으로 거르지 않는다.
     from scripts.fetch_police_points import staffed_points

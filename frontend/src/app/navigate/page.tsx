@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { routeSafety, type RoutePeriod, type SafetyZone } from "@/lib/api";
+import { routeSafety, type RoutePeriod } from "@/lib/api";
+import { RouteEnvironmentDetails, RouteEnvironmentSummary } from "@/components/RouteEnvironmentSummary";
 import { haversineMeters } from "@/lib/geo";
 import type { LatLng } from "@/lib/kakao";
 import {
@@ -28,30 +29,30 @@ import {
 import {
   formatDistance,
   guideOptions,
-  nearestPointOnPath,
   nextTurn,
   progressAlong,
+  projectOnPath,
+  routeGeometryId,
   walkingMinutes,
-  zoneSummary,
+  environmentPeekText,
   type GuideKind,
   type GuideOption,
   type TurnDirection,
 } from "@/lib/routeGuidance";
-import { bestHaven, HAVEN_LABEL, LOW_SPOT_SCORE } from "@/lib/havens";
+import { bestHaven } from "@/lib/havens";
+import { deriveFacilityAlert, facilityAlertContext, facilityAlertText, type FacilityAlert, type FacilityAlertState } from "@/lib/facility_alerts";
 import { useArrivalCheck } from "@/lib/useArrivalCheck";
 import { useMyLocation } from "@/lib/useMyLocation";
 import { useMapZoomGuard } from "@/lib/useMapZoomGuard";
-import { hasEnvironmentAssessment, routeScore } from "@/lib/routeAssessment";
 import { useRouteBells } from "@/lib/useRouteBells";
-import { useSafeHaven } from "@/lib/useSafeHaven";
-import { SafetyAlerts } from "@/components/SafetyAlerts";
+import { liveReportExpiresAt, useSafeHaven } from "@/lib/useSafeHaven";
+import { LiveFacilityDetails, SafetyAlerts } from "@/components/SafetyAlerts";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { userInitial, useSessionUser } from "@/lib/useSessionUser";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressSearchInput } from "@/components/AddressSearchInput";
 import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { RoutePeek } from "@/components/RoutePeek";
-import { RouteAssessmentSummary } from "@/components/RouteAssessmentSummary";
 import { ChoicePanel, choiceTitle } from "./ChoicePanel";
 import { SafetyMap, type MapLabel, type SafetyMapHandle } from "@/components/SafetyMap";
 import { MapControls, PickConfirm, usePendingPick } from "@/components/MapOverlays";
@@ -80,8 +81,6 @@ const REROUTE_MIN_INTERVAL_MS = 5000;
 const TOAST_MS = 2500;
 // 목적지까지 이보다 가까워지면 한 번 "곧 도착"을 안내한다(30m 도착 안내와는 별개).
 const NEAR_ARRIVAL_M = 100;
-// 이 점수 미만이면 scoreLevel()이 "주의"로 분류한다 — 새로 진입할 때 한 번 음성으로 알린다.
-const CAUTION_SCORE = 40;
 // 경로 칩 + 안내 시작 버튼이 접힌 시트 안에 들어가는 높이(손잡이 44 + 칩 약 87 + 버튼 44 + 여백, 실측 기준).
 const PEEK_SHEET_HEIGHT = 204;
 // 안내 중에는 위쪽 방향 안내 카드(다음 회전)가 항상 보여야 한다 — 시트를 맨 위로 올려도 카드 아래에서 멈추게 한다.
@@ -90,19 +89,6 @@ const GUIDING_SHEET_TOP_GAP = 180;
 const SNAP_TO_ROUTE_M = 25;
 
 const TURN_TEXT: Record<TurnDirection, string> = { left: "좌회전", right: "우회전", arrive: "앞 목적지" };
-
-function scoreLevel(score: number): { label: string; tone: string } {
-  if (score >= 70) return { label: "안전", tone: styles.toneSafe };
-  if (score >= CAUTION_SCORE) return { label: "보통", tone: styles.toneCaution };
-  return { label: "주의", tone: styles.toneWarning };
-}
-
-function nearestZone(zones: SafetyZone[], here: LatLng): SafetyZone | null {
-  return zones.reduce<SafetyZone | null>(
-    (best, z) => (!best || haversineMeters(here, z) < haversineMeters(here, best) ? z : best),
-    null
-  );
-}
 
 function speak(text: string, volume: number) {
   if (!("speechSynthesis" in window)) return;
@@ -178,8 +164,8 @@ function NavigatePage({ search }: { search: string }) {
     const progress = progressAlong(guided.points, position);
     return {
       progress,
+      projection: projectOnPath(guided.points, position),
       turn: nextTurn(guided.points, position, progress.index),
-      zone: nearestZone(guided.zones, position),
     };
   }, [guided, position]);
 
@@ -195,7 +181,7 @@ function NavigatePage({ search }: { search: string }) {
       });
       const found = guideOptions(result);
       if (purpose === "options") {
-        setChoice({ options: found, safetyWeighted: result.mode === "safety_weighted", period: result.period });
+        setChoice({ options: found, safetyWeighted: result.environment_model_applied === true && result.environment_assessment?.score != null, period: result.period });
         // 지도앱처럼 시트는 접어 두고(경로 칩만 보임) 지도를 넓게 보여준다.
         setSheetSnap("collapsed");
       } else {
@@ -298,40 +284,42 @@ function NavigatePage({ search }: { search: string }) {
     wasReroutingRef.current = rerouting;
   }, [rerouting, settings.voiceOn, settings.voiceVolume]);
 
-  const cautionZoneCode = guidance?.zone && guidance.zone.safety_score < CAUTION_SCORE ? guidance.zone.dong_code : null;
-  useEffect(() => {
-    if (!cautionZoneCode || !settings.voiceOn) return;
-    speak("주의 구역에 들어섰어요", settings.voiceVolume);
-    // 같은 주의 구역 안에서 위치가 갱신될 때마다 다시 말하지 않도록 동 코드가 바뀔 때만 반응한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cautionZoneCode, settings.voiceOn]);
-
-  // 소리를 끄고 걷는 사람도 알 수 있게 음성과 함께 화면 배너로도 바로 알린다. 음성 설정이 바뀔 때 다시 뜨지 않도록 동 코드에만 반응한다.
-  const cautionZoneName = guidance?.zone?.dong_name;
-  useEffect(() => {
-    if (cautionZoneCode) showToast(`주의 구역에 들어섰어요: ${cautionZoneName}`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cautionZoneCode]);
-
-  // 안심 거점 안내: 지금 자리의 구간 점수가 낮으면 가장 가까운 파출소·24시 편의점을 알려준다.
   const guidingActive = mode !== null && guided !== null && destination !== null && !arrived;
-  const spot = useSafeHaven(position, guidingActive);
-  const lowSpot = spot?.here_score != null && spot.here_score < LOW_SPOT_SCORE;
-  const haven = lowSpot && spot ? bestHaven(spot.havens) : null;
+  const routeId = useMemo(() => guided ? routeGeometryId(guided.points) : "", [guided]);
+  const projection = guidance?.projection;
+  const liveActive = guidingActive && !rerouting && !headingToStart && !denied && !routeError
+    && projection !== undefined && projection.distanceM <= OFF_ROUTE_M;
+  const facilityReport = useSafeHaven(position, liveActive, { routePoints: guided?.points, routeId });
+  const haven = facilityReport ? bestHaven(facilityReport.havens) : null;
+  const alertMemory = useRef<FacilityAlertState | null>(null);
+  const [shownFacilityAlert, setShownFacilityAlert] = useState<FacilityAlert | null>(null);
+  const liveContext = facilityReport?.artifact_version
+    ? facilityAlertContext(routeId, facilityReport.artifact_version, facilityReport.temporal_key) : null;
+  const facilityAlert = liveActive && shownFacilityAlert?.contextId === liveContext ? shownFacilityAlert : null;
+  const progressM = projection?.progressM;
+
   useEffect(() => {
-    if (!lowSpot) return;
-    navigator.vibrate?.([200, 100, 200]);
-    if (settings.voiceOn) {
-      speak(
-        haven
-          ? `밝은 시설이 적은 길이에요. 가장 가까운 ${HAVEN_LABEL[haven.kind]}은 ${formatDistance(haven.distance_m)} 거리예요`
-          : "밝은 시설이 적은 길이에요. 큰길로 걸어 주세요",
-        settings.voiceVolume
-      );
-    }
-    // 낮은 구간에 새로 들어설 때만 한 번 알린다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lowSpot]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      const now = Date.now();
+      if (!liveActive || !facilityReport?.artifact_version || progressM === undefined || now >= liveReportExpiresAt(facilityReport)) {
+        setShownFacilityAlert(null);
+        return;
+      }
+      const result = deriveFacilityAlert({
+        routeId, artifactVersion: facilityReport.artifact_version, temporalKey: facilityReport.temporal_key,
+        period: facilityReport.period, progressM, routeEvidence: facilityReport.route_evidence,
+        localEnvironment: facilityReport.local_environment, previousState: alertMemory.current, nowMs: now,
+      });
+      alertMemory.current = result.nextState;
+      setShownFacilityAlert(previous => previous?.id === result.alert?.id ? previous : result.alert);
+      if (!result.announce || !result.alert) return;
+      navigator.vibrate?.([200, 100, 200]);
+      if (settings.voiceOn) speak(facilityAlertText(result.alert), settings.voiceVolume);
+    });
+    return () => { cancelled = true; };
+  }, [facilityReport, liveActive, progressM, routeId, settings.voiceOn, settings.voiceVolume]);
 
   // 귀가 완료 확인: 예상 시간을 넘겨도 도착하지 않으면 괜찮은지 묻는다.
   const arrival = useArrivalCheck(guidingActive && settings.arrivalCheck, guided?.distanceM ?? 0);
@@ -358,10 +346,9 @@ function NavigatePage({ search }: { search: string }) {
   // GPS 떨림 때문에 내 위치 마커가 경로 옆에서 흔들리지 않도록, 경로에 충분히 가까우면
   // 마커를 경로 위 가장 가까운 지점에 붙여서 보여준다(실제 위치 계산에는 원본 좌표를 그대로 쓴다).
   const snappedLocation = useMemo(() => {
-    if (!mode || !guided || !position || arrived || guided.points.length < 2) return null;
-    const snapped = nearestPointOnPath(guided.points, position);
-    return snapped.distanceM <= SNAP_TO_ROUTE_M ? snapped.point : null;
-  }, [mode, guided, position, arrived]);
+    if (!mode || arrived || !projection) return null;
+    return projection.distanceM <= SNAP_TO_ROUTE_M ? projection.point : null;
+  }, [mode, arrived, projection]);
 
   function updateVoice(patch: Partial<Pick<Settings, "voiceOn" | "voiceVolume">>) {
     if (patch.voiceOn === false && "speechSynthesis" in window) window.speechSynthesis.cancel();
@@ -507,7 +494,6 @@ function NavigatePage({ search }: { search: string }) {
   const progressPct = guidance
     ? Math.min(100, Math.max(0, Math.round((1 - guidance.progress.remainingM / Math.max(1, guidance.progress.totalM)) * 100)))
     : 0;
-  const zoneLevel = guidance?.zone ? scoreLevel(guidance.zone.safety_score) : null;
 
   return (
     <main className={styles.page}>
@@ -653,26 +639,21 @@ function NavigatePage({ search }: { search: string }) {
             )}
 
             <SafetyAlerts
-              lowSpot={lowSpot}
+              facilityAlert={facilityAlert}
               haven={haven}
               overdue={arrival.overdue}
               onSnooze={arrival.snooze}
-              onNotifyGuardians={() => smsGuardians("[귀가 확인] 예상 시간이 지났는데 아직 도착하지 못했어요.")}
+              onNotifyGuardians={() =>
+                smsGuardians("[귀가 확인] 예상 시간이 지났는데 아직 도착하지 못했어요.")
+              }
             />
 
-            {guidance?.zone && zoneLevel && (
-              <section className={styles.zoneCard} aria-label="현재 구간 안전도">
-                <p className={styles.zoneLabel}>현재 구간 안전도</p>
-                <p className={`${styles.zoneScore} ${zoneLevel.tone}`}>
-                  {guidance.zone.safety_score.toFixed(0)}
-                  <small>점</small>
-                </p>
-                <p className={styles.zoneName}>
-                  {guidance.zone.dong_name} · <span className={zoneLevel.tone}>{zoneLevel.label}</span>
-                </p>
-                <div className={styles.meter}>
-                  <span className={`${styles.meterFill} ${zoneLevel.tone}`} style={{ width: `${guidance.zone.safety_score}%` }} />
-                </div>
+            {guided && (
+              <section className={styles.zoneCard} aria-label="선택 경로 시설 정보">
+                <small>{facilityReport?.assessment ? "현재 시각 기준" : "경로 검색 시각 기준"}</small>
+                <RouteEnvironmentSummary assessment={facilityReport?.assessment ?? guided.environmentAssessment} />
+                <RouteEnvironmentDetails assessment={facilityReport?.assessment ?? guided.environmentAssessment} />
+                <LiveFacilityDetails report={facilityReport} />
               </section>
             )}
 
@@ -717,19 +698,20 @@ function NavigatePage({ search }: { search: string }) {
                   안내 종료
                 </button>
               </div>
-              <RouteAssessmentSummary source={guided} />
+              <RouteEnvironmentSummary assessment={guided.environmentAssessment} />
               <div className={styles.progressLabels}>
-                <span className={zoneLevel?.tone}>{zoneLevel ? `${zoneLevel.label} 구역 통과 중` : "안내 준비 중"}</span>
+                <span>{guidance ? "선택 경로 안내 중" : "안내 준비 중"}</span>
                 <span>{progressPct}% 이동</span>
               </div>
               <div className={styles.progress}>
                 <span className={styles.progressFill} style={{ width: `${progressPct}%` }} />
               </div>
-              {guidance?.zone && zoneLevel && (
-                <div className={styles.mobileZoneDetail} aria-label="현재 구간 안전 안내">
-                  <span>현재 구간</span>
-                  <strong className={zoneLevel.tone}>{guidance.zone.dong_name} · {guidance.zone.safety_score.toFixed(0)}점</strong>
-                  <span className={zoneLevel.tone}>{zoneLevel.label} 구역을 통과하고 있어요</span>
+              {guided && (
+                <div className={styles.mobileZoneDetail} aria-label="선택 경로 시설 정보">
+                  <small>{facilityReport?.assessment ? "현재 시각 기준" : "경로 검색 시각 기준"}</small>
+                  <RouteEnvironmentSummary assessment={facilityReport?.assessment ?? guided.environmentAssessment} />
+                  <RouteEnvironmentDetails assessment={facilityReport?.assessment ?? guided.environmentAssessment} />
+                  <LiveFacilityDetails report={facilityReport} />
                 </div>
               )}
               <div className={styles.mobileGuidanceActions}>
@@ -753,14 +735,13 @@ function NavigatePage({ search }: { search: string }) {
             collapsedHeight={choice ? PEEK_SHEET_HEIGHT : undefined}
             summary={choice && previewOption ? (
               <RoutePeek
-                items={choice.options.map((option) => {
-                  const average = zoneSummary(option.zones).average;
+                items={choice.options.filter((option) => option.kind !== "shortest").map((option) => {
                   return {
                     key: option.kind,
                     label: choiceTitle(option, choice, safeOption),
                     minutes: walkingMinutes(option.distanceM),
                     distance: formatDistance(option.distanceM),
-                    score: hasEnvironmentAssessment(option) ? routeScore(option).text : average === null ? undefined : `평균 ${average.toFixed(0)}점`,
+                    score: environmentPeekText(option.environmentAssessment),
                     active: option === previewOption,
                   };
                 })}

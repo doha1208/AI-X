@@ -40,13 +40,56 @@ vi.mock("@/lib/useRouteBells", () => ({ useRouteBells: () => [] }));
 vi.mock("@/components/SafetyMap", async () => {
   const React = await import("react");
   return {
-    SafetyMap: React.forwardRef(function MockSafetyMap() {
-      return <div data-testid="safety-map" />;
+    SafetyMap: React.forwardRef<HTMLDivElement, { comparePath?: unknown[] }>(function MockSafetyMap(props, ref) {
+      return <div ref={ref} data-testid="safety-map" data-compare-points={props.comparePath?.length ?? 0} />;
     }),
   };
 });
 
 describe("RoutePage responsive presentation", () => {
+  it("explains unknown portions as bounds for partial assessments", async () => {
+    routeSafety.mockReset();
+    searchAddressSuggestions.mockResolvedValue([]);
+    const points = [{lat:37.2636,lng:127.0286},{lat:37.2666,lng:127.0316}];
+    const assessment = {model_version:"facility-access-v1",policy_version:"environment-v1-draft",status:"degraded",period:"day",
+      distance_m:700,score:null,active_factors:["cctv","bell","open_store"],used_factors:[],excluded_factors:{},
+      factor_coverage:{},data_factor_availability_ratio:0,longest_support_gap_m:null,total_support_gap_m:null,
+      gap_intervals:[],source_versions:{},comparison_group_id:"test",evaluation_basis:"partial_coverage",score_bounds:{lower:20,upper:80}};
+    routeSafety.mockResolvedValueOnce({safety_score:null,zones_passed:[],route_points:points,mode:"tmap",period:"day",
+      environment_model_applied:true,environment_assessment:assessment,
+      data_disclosure:{data_basis:["tmap_pedestrian_route"],updated_at:null,missing_data:[],fallback:{applied:false,mode:"tmap",reason:"none"}},
+      alternatives:[{route_points:points,safety_score:null,distance_m:700,zones_passed:[],environment_assessment:assessment}]});
+    render(<RoutePage/>);
+    fireEvent.change(screen.getByLabelText("출발지 주소"),{target:{value:"37.2636, 127.0286"}});
+    fireEvent.change(screen.getByLabelText("도착지 주소"),{target:{value:"37.2666, 127.0316"}});
+    fireEvent.click(screen.getByRole("button",{name:"추천 경로 찾기"}));
+    await screen.findByLabelText("경로 검색 결과");
+    fireEvent.click(screen.getByText("경로 데이터 안내"));
+    expect(screen.getByText(/미확인 부분은 제외하지 않고/)).toBeVisible();
+    expect(screen.queryByText(/확인할 수 없는 지표는 점수 계산에서 빼고/)).not.toBeInTheDocument();
+  });
+  it("removes the comparison card and chip while preserving the map comparison", async () => {
+    routeSafety.mockReset();
+    searchAddressSuggestions.mockResolvedValue([]);
+    const points = [{ lat: 37.2636, lng: 127.0286 }, { lat: 37.2666, lng: 127.0316 }];
+    routeSafety.mockResolvedValueOnce({
+      safety_score: 70, zones_passed: [], route_points: points, mode: "safety_weighted", period: "day",
+      environment_model_applied: false,
+      data_disclosure: { data_basis: ["osm_walking_network"], updated_at: null, missing_data: [], fallback: { applied: false, mode: "safety_weighted", reason: null } },
+      alternatives: [{ route_points: points, safety_score: 70, distance_m: 700, zones_passed: [] }],
+      shortest_route_points: points, shortest_zones_passed: [],
+    });
+    render(<RoutePage />);
+    fireEvent.change(screen.getByLabelText("출발지 주소"), { target: { value: "37.2636, 127.0286" } });
+    fireEvent.change(screen.getByLabelText("도착지 주소"), { target: { value: "37.2666, 127.0316" } });
+    fireEvent.click(screen.getByRole("button", { name: "추천 경로 찾기" }));
+    const results = await screen.findByLabelText("경로 검색 결과");
+    expect(within(results).getAllByRole("article")).toHaveLength(1);
+    expect(within(screen.getByRole("group", { name: "경로 선택" })).getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByTestId("safety-map")).toHaveAttribute("data-compare-points", "2");
+    expect(within(results).getByText("점수 미산정")).toBeInTheDocument();
+    expect(within(results).queryByText("추천 1순위")).not.toBeInTheDocument();
+  });
   it("shows a failed route search error in the mobile search screen", async () => {
     routeSafety.mockReset();
     routeSafety.mockRejectedValue(new Error("직선거리 10km를 초과하는 보행 경로는 지원하지 않습니다"));

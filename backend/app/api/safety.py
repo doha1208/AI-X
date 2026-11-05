@@ -1,6 +1,8 @@
-import asyncio
 import math
 import time
+from dataclasses import asdict
+from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -10,12 +12,12 @@ from app.models.safety_zone import SafetyZone, scoped_zones_query
 from app.core.config import settings
 from app.core.security import decode_token
 from app.schemas.safety import (
+    FacilityZoneResponse,
+    LiveRouteEnvironmentRequest,
+    LiveRouteEnvironmentResponse,
     RouteAlternative,
     RouteDataDisclosure,
     RouteFallback,
-    RouteFallbackReason,
-    RouteMissingData,
-    RouteMode,
     RouteRequest,
     RoutePoint,
     RouteResponse,
@@ -25,21 +27,18 @@ from app.schemas.safety import (
 )
 from app.services.bells import DEFAULT_BELL_LIMIT, nearby_bells
 from app.services.geo import haversine_km
-from app.services.safe_route import _facility_index, find_safe_routes, route_artifact_runtime
-from app.services.spot_report import (
-    REPORT_RADIUS_M,
-    area_scores,
-    facility_counts,
-    load_haven_index,
-    nearest_havens,
-    point_score,
-)
+from app.services.safe_route import route_artifact_runtime
+from app.services.area_environment_service import assess_area_environment
+from app.services.live_route_environment import OutsideLiveServiceArea, assess_live_route
+from app.services.zone_environment_service import ComparisonBasisChanged, facility_zone_periods, list_facility_zones
+from app.services.spot_report import REPORT_RADIUS_M
 from app.services.safety_score import compute_zone_period_scores
 from app.services.service_area import is_in_service_area
-from app.services.time_period import period_for
+from app.services.time_period import KST, Period, period_for
 from app.services.tmap import get_pedestrian_route
 from app.services.route_request_limit import RouteRequestGate
 from app.observability import log_route, metrics
+from app.services.route_environment_service import calculate_environment_routes
 
 router = APIRouter(prefix="/safety", tags=["safety"])
 
@@ -90,31 +89,10 @@ async def limit_route_requests(request: Request):
         admission.release()
 
 
-def _route_distance_m(points: list[Point]) -> float:
-    return sum(
-        haversine_km(a[0], a[1], b[0], b[1]) * 1000 for a, b in zip(points[:-1], points[1:])
-    )
 
 
-def _sample_route_score(
-    points: list[Point], zones: list[SafetyZone], score_map: dict[str, float]
-) -> float:
-    scores = [
-        score_map[min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)).dong_code]
-        for lat, lng in points
-    ]
-    return sum(scores) / len(scores) if scores else 0.0
 
 
-def _zones_passed(points: list[Point], zones: list[SafetyZone]) -> list[SafetyZone]:
-    passed: list[SafetyZone] = []
-    seen_codes: set[str] = set()
-    for lat, lng in points:
-        nearest = min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng))
-        if nearest.dong_code not in seen_codes:
-            seen_codes.add(nearest.dong_code)
-            passed.append(nearest)
-    return passed
 
 
 def _period_score_maps(
@@ -162,47 +140,8 @@ def _artifact_score_map_for_zones(
     return scores
 
 
-def _missing_route_data(zones: list[SafetyZone]) -> list[RouteMissingData]:
-    checks = {
-        "streetlight_data": lambda zone: not zone.lights_known,
-        "cctv_data": lambda zone: zone.cctv_known is False,
-        "crime_rate": lambda zone: zone.crime_rate is None,
-        "police_distance": lambda zone: zone.police_dist_m is None,
-        "emergency_bell_distance": lambda zone: zone.bell_dist_m is None or zone.bell_known is False,
-        "accident_hotspot_distance": lambda zone: zone.accident_dist_m is None,
-        "night_floating_population": lambda zone: zone.night_floating_pop is None,
-    }
-    return [
-        RouteMissingData(factor=factor, affected_zone_count=sum(check(zone) for zone in zones))
-        for factor, check in checks.items()
-        if any(check(zone) for zone in zones)
-    ]
 
 
-def _route_data_disclosure(
-    *,
-    mode: RouteMode,
-    zones_passed: list[SafetyZone],
-    artifact_used: bool,
-) -> RouteDataDisclosure:
-    data_basis = ["zone_safety_indicators"]
-    if mode == "safety_weighted":
-        data_basis.extend(["osm_walking_network", "facility_density"])
-    elif mode == "tmap":
-        data_basis.insert(0, "tmap_pedestrian_route")
-    else:
-        raise ValueError(f"Unsupported route mode for disclosure: {mode}")
-
-    reason: RouteFallbackReason = "none"
-    if mode == "tmap":
-        reason = "safety_weighted_unavailable"
-
-    return RouteDataDisclosure(
-        data_basis=data_basis,
-        updated_at=route_artifact_runtime.published_at() if artifact_used else None,
-        missing_data=_missing_route_data(zones_passed),
-        fallback=RouteFallback(applied=mode != "safety_weighted", mode=mode, reason=reason),
-    )
 
 
 @router.get("/zones", response_model=list[SafetyZoneOut])
@@ -287,8 +226,37 @@ def zone_detail(dong_code: str, db: Session = Depends(get_db)):
     zone = next((z for z in zones if z.dong_code == dong_code), None)
     if zone is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="해당 동네를 찾을 수 없어요.")
+    now = datetime.now(KST)
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
     score_maps, _ = _period_score_maps(zones)
-    return _zone_detail(zone, score_maps, period_for(), zones)
+    result = _zone_detail(zone, score_maps, period_for(now), zones)
+    result.facility_environment = facility_zone_periods(snapshot=snapshot, dong_code=dong_code, weekday=now.weekday())
+    return result
+
+
+@router.get("/facility-zones", response_model=FacilityZoneResponse)
+def facility_zones(
+    period: Period | None = Query(None),
+    basis_id: str | None = Query(None, min_length=1, max_length=64),
+    dong_codes: list[str] = Query(default_factory=list, max_length=5),
+    db: Session = Depends(get_db),
+):
+    now = datetime.now(KST)
+    zones = scoped_zones_query(db).all()
+    codes = list(dict.fromkeys(dong_codes))
+    known = {zone.dong_code for zone in zones}
+    if any(code not in known for code in codes):
+        raise HTTPException(status_code=404, detail="비교할 동네를 찾을 수 없어요.")
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    try:
+        return list_facility_zones(snapshot=route_artifact_runtime.environment_snapshot(), zones=zones,
+            period=period or period_for(now), weekday=now.weekday(), basis_id=basis_id, compare_codes=codes)
+    except ComparisonBasisChanged as exc:
+        raise HTTPException(status_code=409, detail={
+            "reason": "comparison_basis_changed", "action": "현재 적용할 비교 기준을 다시 선택해 주세요.",
+            "groups": [group.model_dump() for group in exc.groups],
+        }) from exc
 
 
 @router.get("/spot", response_model=SpotReport)
@@ -296,6 +264,7 @@ def spot_report(
     lat: float = Query(ge=-90, le=90),
     lng: float = Query(ge=-180, le=180),
     radius_m: int = Query(int(REPORT_RADIUS_M), ge=100, le=1000),
+    at: datetime | None = Query(None),
     db: Session = Depends(get_db),
 ):
     """한 지점 주변 요약 — 집 주소 안전 리포트와 실시간 안내의 안심 거점 안내가 함께 쓴다."""
@@ -304,13 +273,13 @@ def spot_report(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"reason": "outside_service_area", "action": "안전 리포트는 경기도 지역에서만 지원합니다."},
         )
-    period = period_for()
+    moment = at or datetime.now(KST)
+    period = period_for(moment)
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
+    assessment = assess_area_environment(snapshot=snapshot, lat=lat, lng=lng, radius_m=radius_m, at=moment)
     zones = scoped_zones_query(db).all()
     zone = min(zones, key=lambda z: haversine_km(lat, lng, z.lat, z.lng)) if zones else None
-    lights_known = zone is None or zone.lights_known is not False
-    cctv_known = zone is None or zone.cctv_known is not False
-    facilities = _facility_index()
-    area = area_scores(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None
     zone_detail_out = None
     if zone is not None:
         score_maps, _ = _period_score_maps(zones)
@@ -321,187 +290,81 @@ def spot_report(
         period=period,
         radius_m=radius_m,
         zone=zone_detail_out,
-        here_score=point_score(facilities, lat, lng, period, lights_known, cctv_known) if facilities else None,
-        area_day_score=area["day"] if area else None,
-        area_night_score=area["night"] if area else None,
-        counts=facility_counts(facilities, lat, lng, lights_known, cctv_known, radius_m) if facilities else None,
-        havens=nearest_havens(load_haven_index(), lat, lng),
+        **vars(assessment),
     )
+
+
+@router.post("/route-environment", response_model=LiveRouteEnvironmentResponse)
+def live_route_environment(
+    payload: LiveRouteEnvironmentRequest,
+    _request_limit: None = Depends(limit_route_requests),
+):
+    route_artifact_runtime.reload_if_changed(Path(settings.route_artifact_dir), now=time.monotonic())
+    snapshot = route_artifact_runtime.environment_snapshot()
+    try:
+        return assess_live_route(
+            snapshot=snapshot, points=[(point.lat, point.lng) for point in payload.route_points],
+            position=(payload.position.lat, payload.position.lng) if payload.position else None,
+            at=payload.at, contains=lambda lat, lng: is_in_service_area(lat, lng, region_scope_prefix=settings.region_scope_prefix),
+        )
+    except OutsideLiveServiceArea as exc:
+        raise HTTPException(status_code=422, detail={
+            "reason": "outside_service_area", "action": "현재 시설 안내는 경기도 지역에서만 지원합니다.", "field": str(exc),
+        }) from exc
 
 
 @router.post("/route", response_model=RouteResponse)
 async def route_safety(
     payload: RouteRequest,
-    db: Session = Depends(get_db),
     _request_limit: None = Depends(limit_route_requests),
 ):
-    """출발지→도착지 경로를 3단계 우선순위로 계산한다.
-
-    1) safety_weighted: OSM 도로망 그래프 위에서 안전점수를 비용으로 반영해
-       실제로 더 안전한 길을 고르는 자체 경로 탐색. 대안 경로 여러 개를
-       안전점수 순으로 함께 반환한다.
-    2) tmap: 위 그래프 탐색이 실패(지역 미지원/네트워크 오류)하면 Tmap
-       보행자 최단경로를 받아 그 위에 안전점수만 표시(대안 없음).
-    둘 다 실패하면 직선을 보행 경로처럼 반환하지 않고 503 오류를 반환한다.
-    """
+    """Evaluate every walking candidate with facility access and continuous gaps."""
     started_at = time.perf_counter()
-    points = {
-        "start": (payload.start_lat, payload.start_lng),
-        "end": (payload.end_lat, payload.end_lng),
-    }
-    unsupported_points = [
-        name
-        for name, (lat, lng) in points.items()
-        if not is_in_service_area(
-            lat,
-            lng,
-            region_scope_prefix=settings.region_scope_prefix,
-        )
-    ]
-    if unsupported_points:
-        metrics.record_route(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            duration_seconds=time.perf_counter() - started_at,
-            mode="failed",
-            fallback_reason="outside_service_area",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "reason": "outside_service_area",
-                "action": "현재 길찾기는 경기도 지역에서만 지원합니다.",
-                "points": unsupported_points,
-            },
-        )
-    zones = scoped_zones_query(db).all()
-    if not zones:
-        metrics.record_route(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            duration_seconds=time.perf_counter() - started_at,
-            mode="failed",
-            fallback_reason="safety_zones_unavailable",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "reason": "safety_zones_unavailable",
-                "action": "안전 데이터가 준비될 때까지 잠시 후 다시 시도해 주세요.",
-            },
-        )
-    period = period_for(payload.at)
-    score_maps, artifact_scores_used = _period_score_maps(zones)
-    score_map = score_maps[period]
-
-    safe_route_task = asyncio.to_thread(
-        find_safe_routes,
-        payload.start_lat,
-        payload.start_lng,
-        payload.end_lat,
-        payload.end_lng,
-        zones,
-        period=period,
-    )
-    if payload.include_comparison:
-        # 직접 검색은 비교선을 유지하므로 두 경로를 병렬로 가져온다.
-        safe_routes, tmap_points = await asyncio.gather(
-            safe_route_task,
-            get_pedestrian_route(payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng),
-        )
-    else:
-        # 실시간 재경로는 안전 경로만 요청한다. 자체 경로가 없을 때만 Tmap 폴백을 쓴다.
-        safe_routes = await safe_route_task
-        tmap_points = None
-        if not safe_routes:
-            tmap_points = await get_pedestrian_route(
-                payload.start_lat, payload.start_lng, payload.end_lat, payload.end_lng
-            )
-
-    shortest_route_points: list[RoutePoint] | None = None
-    shortest_zones_passed: list[SafetyZoneOut] | None = None
-    candidates: list[dict]
-    if safe_routes:
-        mode: RouteMode = "safety_weighted"
-        candidates = safe_routes
-        # 안전 가중 경로가 실제 최단경로와 다르다는 걸 지도에서 비교해 보여주는 참고선.
-        if tmap_points:
-            shortest_route_points = [RoutePoint(lat=lat, lng=lng) for lat, lng in tmap_points]
-            shortest_zones_passed = [
-                _zone_out(z, score_maps, period) for z in _zones_passed(tmap_points, zones)
-            ]
-    else:
-        if tmap_points:
-            mode = "tmap"
-            sample_points = tmap_points
-        else:
-            duration_seconds = time.perf_counter() - started_at
-            metrics.record_route(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                duration_seconds=duration_seconds,
-                mode="failed",
-                fallback_reason="tmap_unavailable",
-            )
-            log_route(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                duration_seconds=duration_seconds,
-                mode="failed",
-                fallback_reason="tmap_unavailable",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "reason": "pedestrian_route_unavailable",
-                    "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.",
-                },
-            )
-        candidates = [
-            {
-                "points": sample_points,
-                "score": _sample_route_score(sample_points, zones, score_map),
-                "distance_m": _route_distance_m(sample_points),
-            }
-        ]
-
-    best = candidates[0]
-    passed = [_zone_out(z, score_maps, period) for z in _zones_passed(best["points"], zones)]
-    alternatives = [
-        RouteAlternative(
-            route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in c["points"]],
-            safety_score=c["score"],
-            distance_m=c["distance_m"],
-            zones_passed=[
-                _zone_out(z, score_maps, period)
-                for z in _zones_passed(c["points"], zones)
-            ],
-        )
-        for c in candidates
-    ]
-
+    unsupported = [name for name, lat, lng in (
+        ("start", payload.start_lat, payload.start_lng),
+        ("end", payload.end_lat, payload.end_lng),
+    ) if not is_in_service_area(lat, lng, region_scope_prefix=settings.region_scope_prefix)]
+    if unsupported:
+        metrics.record_route(status_code=422, duration_seconds=time.perf_counter() - started_at,
+                             mode="failed", fallback_reason="outside_service_area")
+        raise HTTPException(status_code=422, detail={
+            "reason": "outside_service_area", "action": "현재 길찾기는 경기도 지역에서만 지원합니다.", "points": unsupported,
+        })
+    result = await calculate_environment_routes(payload, runtime=route_artifact_runtime, tmap_provider=get_pedestrian_route)
+    if result is None:
+        metrics.record_route(status_code=503, duration_seconds=time.perf_counter() - started_at,
+                             mode="failed", fallback_reason="tmap_unavailable")
+        raise HTTPException(status_code=503, detail={
+            "reason": "pedestrian_route_unavailable", "action": "현재 보행 경로를 찾을 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        })
+    best = result.selected[0]
+    mode = "safety_weighted" if best.candidate.source == "osm" else "tmap"
+    alternatives = [RouteAlternative(
+        route_points=[RoutePoint(lat=a, lng=b) for a, b in route.candidate.points],
+        safety_score=None, distance_m=route.assessment.distance_m, zones_passed=[],
+        environment_assessment=asdict(route.assessment),
+    ) for route in result.selected]
+    comparison = result.comparison
+    basis = ["osm_walking_network" if mode == "safety_weighted" else "tmap_pedestrian_route"]
+    if best.assessment.used_factors:
+        basis.append("facility_density")
+    fallback = mode == "tmap" and not result.osm_available
     response = RouteResponse(
-        safety_score=best["score"],
-        zones_passed=passed,
-        route_points=[RoutePoint(lat=lat, lng=lng) for lat, lng in best["points"]],
-        mode=mode,
-        period=period,
-        data_disclosure=_route_data_disclosure(
-            mode=mode,
-            zones_passed=_zones_passed(best["points"], zones),
-            artifact_used=mode == "safety_weighted" or artifact_scores_used[period],
+        safety_score=None, zones_passed=[], route_points=alternatives[0].route_points,
+        mode=mode, period=period_for(payload.at), alternatives=alternatives,
+        environment_assessment=asdict(best.assessment),
+        comparison_environment_assessment=asdict(comparison.assessment) if comparison else None,
+        environment_model_applied=True, baseline_source=result.baseline_source,
+        environment_basis={"artifact_version": result.artifact_version, "evaluated_at": result.evaluated_at},
+        shortest_route_points=[RoutePoint(lat=a, lng=b) for a, b in comparison.candidate.points] if comparison else None,
+        shortest_zones_passed=[] if comparison else None,
+        data_disclosure=RouteDataDisclosure(
+            data_basis=basis, updated_at=route_artifact_runtime.published_at() if result.artifact_used else None,
+            missing_data=[], fallback=RouteFallback(applied=fallback, mode=mode,
+                                                  reason="safety_weighted_unavailable" if fallback else "none"),
         ),
-        alternatives=alternatives,
-        shortest_route_points=shortest_route_points,
-        shortest_zones_passed=shortest_zones_passed,
     )
-    fallback_reason = "none" if mode == "safety_weighted" else "safe_route_unavailable"
-    metrics.record_route(
-        status_code=status.HTTP_200_OK,
-        duration_seconds=time.perf_counter() - started_at,
-        mode=mode,
-        fallback_reason=fallback_reason,
-    )
-    log_route(
-        status_code=status.HTTP_200_OK,
-        duration_seconds=time.perf_counter() - started_at,
-        mode=mode,
-        fallback_reason=fallback_reason,
-    )
+    reason = "safe_route_unavailable" if fallback else "none"
+    metrics.record_route(status_code=200, duration_seconds=time.perf_counter() - started_at, mode=mode, fallback_reason=reason)
+    log_route(status_code=200, duration_seconds=time.perf_counter() - started_at, mode=mode, fallback_reason=reason)
     return response

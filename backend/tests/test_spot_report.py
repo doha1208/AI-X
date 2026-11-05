@@ -1,17 +1,14 @@
+import os
+from datetime import datetime
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.db.session import SessionLocal
 from app.main import app
 from app.models.safety_zone import SafetyZone
-from app.services.facility_density import build_facility_index
-from app.services.spot_report import (
-    area_scores,
-    build_haven_index,
-    facility_counts,
-    grid_around,
-    nearest_havens,
-)
+from app.services.spot_report import nearest_havens
 
 client = TestClient(app)
 HOME = (37.2665, 127.0005)
@@ -21,35 +18,32 @@ def _offset(lat: float, lng: float, north_m: float, east_m: float) -> tuple[floa
     return lat + north_m / 111_320.0, lng + east_m / (111_320.0 * 0.794)
 
 
-def test_grid_stays_inside_the_radius_and_includes_the_center():
-    grid = grid_around(*HOME, radius_m=300, step_m=50)
-    assert HOME in grid
-    assert len(grid) > 100
+def test_retired_spot_calculators_are_not_available_to_production_callers():
+    from app.services import spot_report
+    for name in ("edge_local_scores", "grid_around", "point_score", "area_scores", "facility_counts"):
+        assert not hasattr(spot_report, name)
 
 
-def test_nearest_havens_gives_one_per_kind_sorted_by_distance_and_drops_far_ones():
-    index = build_haven_index(
-        police=[_offset(*HOME, 800, 0)],
-        convenience=[_offset(*HOME, 100, 0), _offset(*HOME, 50, 0)],
-        bells=[_offset(*HOME, 3000, 0)],
-    )
-    havens = nearest_havens(index, *HOME, max_m=1500)
-    assert [h["kind"] for h in havens] == ["convenience", "police"]
+def test_nearest_havens_gives_one_per_kind_sorted_by_distance_and_drops_far_ones(tmp_path, monkeypatch):
+    import json
+    from app.services.route_environment_sources import build_environment_index
+    from test_facility_assessment import source
+
+    police = tmp_path / "police.json"
+    police.write_text(json.dumps({"police": [(37.2735, HOME[1])]}))
+    original_stat = police.stat()
+    monkeypatch.setattr("app.services.spot_report.POLICE_POINTS_PATH", police)
+    value = build_environment_index([source("bell", [_offset(*HOME, 100, 0), _offset(*HOME, 50, 0)]),
+                                     source("open_store", [_offset(*HOME, 20, 0)])])
+    at = datetime(2026, 11, 5, 23)
+    havens = nearest_havens(value, *HOME, at=at)
+    assert [h["kind"] for h in havens] == ["bell", "police"]
     assert havens[0]["distance_m"] == pytest.approx(50, abs=2)
-
-
-def test_area_with_cctv_and_lights_scores_higher_at_night_than_a_bare_area():
-    lit = [_offset(*HOME, n, e) for n in range(-300, 301, 30) for e in range(-300, 301, 30)]
-    busy = build_facility_index(cctv=lit, lights=lit)
-    bare = build_facility_index(cctv=[], lights=[])
-    assert area_scores(busy, *HOME, True, True)["night"] > area_scores(bare, *HOME, True, True)["night"]
-
-
-def test_counts_are_unknown_not_zero_when_the_region_did_not_submit_the_data():
-    index = build_facility_index(cctv=[HOME], lights=[HOME])
-    counts = facility_counts(index, *HOME, lights_known=False, cctv_known=True)
-    assert counts["cctv"] == 1
-    assert counts["lights"] is None
+    assert havens[0]["operation_status"] == "unverified"
+    police.write_text(json.dumps({"police": [(37.2935, HOME[1])]}))
+    os.utime(police, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    assert police.stat().st_size == original_stat.st_size and police.stat().st_mtime_ns == original_stat.st_mtime_ns
+    assert [h["kind"] for h in nearest_havens(value, *HOME, at=at)] == ["bell"]
 
 
 @pytest.fixture
@@ -59,7 +53,7 @@ def spot_api(monkeypatch):
     db = SessionLocal()
     db.add_all(
         [
-            SafetyZone(dong_code="4111100001", dong_name="가동", lat=HOME[0], lng=HOME[1], cctv_count=30,
+            SafetyZone(dong_code="4111100001", dong_name="가동", lat=HOME[0], lng=HOME[1], cctv_count=30, cctv_known=False,
                        streetlight_count=50, crime_rate=10.0, police_dist_m=300.0, bell_dist_m=80.0, safety_score=80),
             SafetyZone(dong_code="4111100002", dong_name="나동", lat=HOME[0] + 0.02, lng=HOME[1], cctv_count=3,
                        streetlight_count=5, cctv_known=False, crime_rate=40.0, police_dist_m=2000.0, safety_score=20),
@@ -68,25 +62,39 @@ def spot_api(monkeypatch):
     db.commit()
     db.close()
     monkeypatch.setattr(safety_api, "is_in_service_area", lambda *a, **k: True)
-    monkeypatch.setattr(safety_api, "_facility_index", lambda: build_facility_index(cctv=[HOME], lights=[HOME]))
-    monkeypatch.setattr(
-        safety_api, "load_haven_index",
-        lambda: build_haven_index(police=[_offset(*HOME, 300, 0)], convenience=[_offset(*HOME, 40, 0)], bells=[]),
-    )
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from app.services.route_environment_sources import build_environment_index
+    from test_facility_assessment import source
+    from test_route_artifact_schema4 import extended
+    from test_walk_environment_samples import index
+
+    store = replace(source("open_store", [HOME]), source_id="published-hours-emart24",
+                    completeness="partial", schedule_status="published_schedule")
+    artifact = replace(extended(), walk_environment_index=index([(1, 2, HOME, _offset(*HOME, 120, 0), {})]),
+                       environment_index=build_environment_index([source("cctv", [HOME]), source("lighting", [HOME]), store]))
+    monkeypatch.setattr(safety_api.route_artifact_runtime, "reload_if_changed", lambda *a, **k: None)
+    monkeypatch.setattr(safety_api.route_artifact_runtime, "environment_snapshot", lambda: SimpleNamespace(artifact=artifact))
+    monkeypatch.setattr("app.services.spot_report.POLICE_POINTS_PATH", Path("missing-police-fixture.json"))
     return safety_api
 
 
-def test_spot_report_returns_nearest_zone_scores_counts_and_havens(spot_api):
-    res = client.get("/safety/spot", params={"lat": HOME[0], "lng": HOME[1]})
+def test_spot_report_returns_nearest_zone_scores_counts_and_havens(spot_api, monkeypatch):
+    def reject_legacy_score(*args, **kwargs):
+        pytest.fail("the endpoint must not use the legacy grid or point score")
+    monkeypatch.setattr("app.services.facility_density.edge_local_scores", reject_legacy_score)
+    res = client.get("/safety/spot", params={"lat": HOME[0], "lng": HOME[1], "at": "2026-11-04T16:30:00Z"})
     assert res.status_code == 200
     body = res.json()
     assert body["zone"]["dong_name"] == "가동"
     assert body["zone"]["rank"] == 1 and body["zone"]["total"] == 2
-    # 편의점 좌표를 안 넣은 시설 색인이라 0개가 아니라 모름(None)
-    assert body["counts"] == {"cctv": 1, "lights": 1, "convenience": None}
-    assert [h["kind"] for h in body["havens"]] == ["convenience", "police"]
-    assert 0 <= body["here_score"] <= 100
-    assert body["area_day_score"] is not None and body["area_night_score"] is not None
+    assert body["facility_observations"]["cctv"]["count"] == 1
+    assert body["area_environment"]["night"]["artifact_version"] == body["artifact_version"]
+    assert body["local_environment"]["period"] == "night"
+    assert body["havens"][0]["kind"] == "convenience"
+    assert body["havens"][0]["opening_status"] == "unverified"
+    assert body["havens"][0]["staffing_status"] == "unverified"
+    assert all(body[key] is None for key in ("here_score", "area_day_score", "area_night_score"))
 
 
 def test_spot_report_rejects_points_outside_the_service_area(spot_api, monkeypatch):
