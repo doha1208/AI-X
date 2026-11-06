@@ -66,6 +66,39 @@ def test_equal_group_sizes_choose_factor_names_and_stale_basis_returns_choices()
     assert {g.basis_id for g in exc.value.groups} == {"b", "l"}
 
 
+def test_relative_percentile_uses_the_selected_groups_displayed_ties_and_includes_zero():
+    scores = [0, *([10] * 17), 71, 71.2]
+    codes = [f"A{i:02d}" for i in range(20)]
+    rows = {(code, 3, "day"): summary("main", {"bell": .5, "cctv": .5}, score=score)
+            for code, score in zip(codes, scores)}
+    rows["B", 3, "day"] = summary("other", {"bell": .9, "lighting": .9})
+    rows["C", 3, "day"] = summary("main", {"bell": .9}, evaluation_basis="single_factor", score=None)
+    result = listing(rows, [*codes, "B", "C"], compare_codes=["A00", "A19"])
+    by_code = {row.dong_code: row for row in result.zones}
+    assert result.relative_method == "midrank-percentile-v1"
+    assert result.groups[0].relative_status == "available"
+    assert by_code["A00"].assessment.score == 0
+    assert by_code["A00"].relative_percentile == 2.5
+    assert by_code["A01"].relative_percentile == 47.5
+    assert by_code["A18"].relative_percentile == by_code["A19"].relative_percentile == 95
+    assert by_code["A18"].rank == by_code["A19"].rank == 1
+    assert by_code["A18"].rank_tied and by_code["A19"].rank_tied
+    assert by_code["B"].relative_percentile is by_code["C"].relative_percentile is None
+
+    switched = listing(rows, [*codes, "B", "C"], basis_id="other")
+    assert all(row.relative_percentile is None for row in switched.zones)
+    assert next(group for group in switched.groups if group.basis_id == "other").relative_status == "insufficient_group"
+
+
+@pytest.mark.parametrize(("count", "expected"), [(19, "insufficient_group"), (20, "no_variation")])
+def test_relative_percentile_requires_enough_members_and_score_variation(count, expected):
+    codes = [str(i) for i in range(count)]
+    rows = {(code, 3, "day"): summary("main", {"bell": .5, "cctv": .5}) for code in codes}
+    result = listing(rows, codes)
+    assert result.groups[0].relative_status == expected
+    assert all(row.relative_percentile is None for row in result.zones)
+
+
 def test_comparison_recalculates_common_factors_and_keeps_noncomparable_evidence():
     rows = {
         ("A", 3, "day"): summary("a", {"bell": .8, "cctv": .2, "lighting": .9}),
@@ -121,6 +154,9 @@ def test_facility_api_provides_basis_conflict_and_zone_details(monkeypatch):
     client = TestClient(app)
     res = client.get("/safety/facility-zones", params={"period": "day"})
     assert res.status_code == 200 and len(res.json()["zones"]) == 2
+    assert res.json()["relative_method"] == "midrank-percentile-v1"
+    assert res.json()["groups"][0]["relative_status"] == "insufficient_group"
+    assert res.json()["zones"][0]["relative_percentile"] is None
     conflict = client.get("/safety/facility-zones", params={"period": "day", "basis_id": "old"})
     assert conflict.status_code == 409
     assert conflict.json()["detail"]["groups"][0]["basis_id"] == "group-day"

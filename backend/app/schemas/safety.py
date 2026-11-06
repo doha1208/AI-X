@@ -81,6 +81,8 @@ class FacilityZone(BaseModel):
     lng: float
     assessment: FacilityZoneAssessment
     rank: int | None = None
+    rank_tied: bool = False
+    relative_percentile: float | None = None
     result_group_id: str | None = None
 
 
@@ -89,6 +91,7 @@ class FacilityBasisGroup(BaseModel):
     result_group_id: str
     used_factors: list[str]
     zone_count: int
+    relative_status: Literal["available", "insufficient_group", "no_variation"] | None = None
 
 
 class FacilityZoneComparison(BaseModel):
@@ -105,6 +108,7 @@ class FacilityZoneResponse(BaseModel):
     reference_hour: int
     basis_id: str | None
     artifact_version: str | None
+    relative_method: Literal["midrank-percentile-v1"] | None = None
     groups: list[FacilityBasisGroup]
     zones: list[FacilityZone]
     comparison: FacilityZoneComparison | None = None

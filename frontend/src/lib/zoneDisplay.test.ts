@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { FacilityZoneAssessment } from "./api";
-import { zoneDisplay, zoneDisplayColor } from "./zoneDisplay";
+import { facilityPercentileBand, zoneDisplay, zoneDisplayColor } from "./zoneDisplay";
 
 const base = { dong_code: "A", dong_name: "A동", lat: 37.5, lng: 127, safety_score: 99 };
 const assessment: FacilityZoneAssessment = {
@@ -26,4 +26,14 @@ it("shows verified zero, partial bounds and missing boundaries without substitut
     .toEqual({ value: null, text: "부분자료 20~81점" });
   expect(zoneDisplay({ ...base, assessment: { ...assessment, evaluation_basis: "unavailable", unavailable_reason: "boundary_missing" } }, "facility_access"))
     .toEqual({ value: null, text: "경계 자료 미확인" });
+});
+
+it.each([
+  [9.9, "하위권", "#c62828"],
+  [10, "중간권", "#f9a825"],
+  [59.9, "중간권", "#f9a825"],
+  [60, "상위권", "#2e7d32"],
+] as const)("shows facility percentile %s as %s", (percentile, text, color) => {
+  expect(facilityPercentileBand(percentile).text).toBe(text);
+  expect(zoneDisplayColor(percentile, "facility_access")).toBe(color);
 });

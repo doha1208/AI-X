@@ -1,6 +1,6 @@
 import type { DisplayMetric, FacilityZone, RoutePeriod, SafetyZone, ZoneLocation } from "./api";
 import { readJson, writeJson } from "./preferences";
-import { zoneDisplay, type DisplayZone } from "./zoneDisplay";
+import { facilityAccessScore, zoneDisplay, type DisplayZone } from "./zoneDisplay";
 
 type Basis = {
   basis_id: string | null;
@@ -47,7 +47,8 @@ export function saveWatchedZones(list: WatchedZone[]): void {
 function watchedValue(zone: DisplayZone & { period?: RoutePeriod }, metric: DisplayMetric, period?: RoutePeriod): WatchedZone {
   const { dong_code, dong_name, lat, lng } = zone;
   const assessment = metric === "facility_access" ? zone.assessment : undefined;
-  return { dong_code, dong_name, lat, lng, metric, period: period ?? zone.period ?? null, score: zoneDisplay(zone, metric).value,
+  const score = metric === "facility_access" ? facilityAccessScore(zone) : zoneDisplay(zone, metric).value;
+  return { dong_code, dong_name, lat, lng, metric, period: period ?? zone.period ?? null, score,
     ...(assessment ? { basis_id: assessment.basis_id, artifact_version: assessment.artifact_version,
       model_version: assessment.model_version, policy_version: assessment.policy_version, schedule_key: assessment.schedule_key } : EMPTY_BASIS) };
 }

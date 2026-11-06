@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
-import type { DisplayMetric } from "@/lib/api";
-import { zoneDisplay, zoneDisplayColor, type DisplayZone } from "@/lib/zoneDisplay";
+import type { DisplayMetric, FacilityBasisGroup } from "@/lib/api";
+import { facilityPercentileBand, residenceZoneDisplay, zoneDisplayColor, type DisplayZone, type ZoneDisplayValue } from "@/lib/zoneDisplay";
 import {
   loadKakaoSdk,
   type KakaoMap,
@@ -31,6 +31,7 @@ type Props = {
   zones?: DisplayZone[];
   rankedZones?: DisplayZone[];
   displayMetric?: DisplayMetric;
+  facilityGroup?: FacilityBasisGroup;
   bells?: LatLng[];
   center?: LatLng;
   myLocation?: LatLng;
@@ -69,6 +70,15 @@ function panToVisible(map: KakaoMap, position: LatLng, container: HTMLElement | 
 
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+function zoneHoverLabel(zone: DisplayZone, metric: DisplayMetric, display: ZoneDisplayValue): string {
+  if (metric === "regional_statistics") return display.text;
+  if (display.value != null) return facilityPercentileBand(display.value).text;
+  if (display.hasFacilityScore) return "비교 제외";
+  if (zone.assessment?.evaluation_basis === "single_factor") return "단일 지표";
+  if (zone.assessment?.evaluation_basis === "partial_coverage") return "부분자료";
+  return display.text;
 }
 
 const HOUSE_SVG =
@@ -141,6 +151,7 @@ export function SafetyMap({
   zones = EMPTY,
   rankedZones = EMPTY,
   displayMetric = "regional_statistics",
+  facilityGroup,
   bells = EMPTY,
   center = DEFAULT_CENTER,
   myLocation,
@@ -397,14 +408,16 @@ export function SafetyMap({
       const strokeColor = isFocused ? "#1a1a1a" : "#ffffff";
       const strokeWeight = isFocused ? 3 : 1;
       const strokeOpacity = isFocused ? 0.9 : 0.7;
-      const display = zoneDisplay(zone, displayMetric);
-      const fillColor = zoneDisplayColor(display.value);
-      const fillOpacity = isFocused ? 0.45 : 0.25;
+      const display = residenceZoneDisplay(zone, displayMetric, facilityGroup);
+      const tooltip = zoneHoverLabel(zone, displayMetric, display);
+      const fillColor = zoneDisplayColor(display.value, displayMetric, display.hasFacilityScore);
+      const hasFacilityColor = displayMetric === "facility_access" && (display.value != null || display.hasFacilityScore);
+      const fillOpacity = (isFocused ? 0.45 : 0.25) + (hasFacilityColor ? 0.15 : 0);
       const zIndex = isFocused ? 5 : 1;
 
       const infowindow = new kakao.maps.InfoWindow({
         position: new kakao.maps.LatLng(zone.lat, zone.lng),
-        content: `<div style="padding:4px 8px;font-size:12px;">${escapeHtml(zone.dong_name)} (${escapeHtml(display.text)})</div>`,
+        content: `<div style="padding:4px 8px;font-size:12px;">${escapeHtml(zone.dong_name)} (${escapeHtml(tooltip)})</div>`,
         removable: false,
       });
       closeTooltips.push(() => infowindow.close());
@@ -447,9 +460,9 @@ export function SafetyMap({
     });
 
     rankedZones.forEach((zone) => {
-      const display = zoneDisplay(zone, displayMetric);
-      const pin = circleElement(36, zoneDisplayColor(display.value), HOUSE_SVG);
-      pin.title = `${zone.dong_name} ${display.text}`;
+      const display = residenceZoneDisplay(zone, displayMetric, facilityGroup);
+      const pin = circleElement(36, zoneDisplayColor(display.value, displayMetric, display.hasFacilityScore), HOUSE_SVG);
+      pin.title = `${zone.dong_name} ${zoneHoverLabel(zone, displayMetric, display)}`;
       pin.style.cursor = "pointer";
       pin.addEventListener("click", () => onZoneSelectRef.current?.(zone));
       addOverlay(zone, pin, 8);
@@ -518,7 +531,7 @@ export function SafetyMap({
       overlaysRef.current.forEach(overlay => overlay.setMap(null));
       overlaysRef.current = [];
     };
-  }, [loaded, zones, rankedZones, displayMetric, bells, routePath, comparePath, labels, myLocation, accuracyRadiusM, followLocation, focusZone, boundaries]);
+  }, [loaded, zones, rankedZones, displayMetric, facilityGroup, bells, routePath, comparePath, labels, myLocation, accuracyRadiusM, followLocation, focusZone, boundaries]);
 
   // focusZone(사용자가 방금 클릭한 구역)이 실제로 바뀌었을 때만 그쪽으로 이동+확대한다.
   useEffect(() => {

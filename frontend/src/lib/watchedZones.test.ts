@@ -102,3 +102,13 @@ it("reports a changed displayed facility score only for new data with the same c
   expect(next.messages).toEqual(["A동 공개 자료 기준 시설 점수가 70점에서 80점으로 바뀌었어요"]);
   expect(JSON.parse(localStorage.getItem("ansim:watched-zones")!).schema).toBe(2);
 });
+
+it("keeps the raw facility value when only its percentile changes", () => {
+  const initial: FacilityZone = { ...facility(), relative_percentile: 42 };
+  const latest: FacilityZone = { ...facility({ artifact_version: "v2" }), relative_percentile: 85 };
+  const saved = toggleWatchedZone(initial, "facility_access", "day");
+  expect(saved[0].score).toBe(70);
+  const updated = applyFacilityScoreChanges(saved, [latest], "day");
+  expect(updated.messages).toEqual([]);
+  expect(updated.next[0].score).toBe(70);
+});

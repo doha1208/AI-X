@@ -2,10 +2,12 @@
 from collections import defaultdict
 from hashlib import sha256
 import json
-from math import floor
+from math import floor, isfinite
 
 from app.schemas.safety import FacilityBasisGroup, FacilityZone, FacilityZoneAssessment, FacilityZoneComparison, FacilityZonePeriods, FacilityZoneResponse
 from app.services.zone_environment_summaries import SCHEDULE_VERSION
+
+MIN_RELATIVE_GROUP_SIZE = 20
 
 
 class ComparisonBasisChanged(ValueError):
@@ -57,6 +59,36 @@ def _compare(by_code, codes):
         evaluation_basis="multi_factor" if len(factors) >= 2 else "single_factor" if factors else "not_comparable")
 
 
+def _rank_group(rows: list[FacilityZone], group: FacilityBasisGroup) -> list[FacilityZone]:
+    by_score: dict[int, list[FacilityZone]] = defaultdict(list)
+    for row in rows:
+        score = row.assessment.score
+        assert score is not None  # Only eligible multi-factor rows enter a group.
+        by_score[floor(score + .5)].append(row)
+
+    count = len(rows)
+    if count < MIN_RELATIVE_GROUP_SIZE:
+        group.relative_status = "insufficient_group"
+    elif len(by_score) == 1:
+        group.relative_status = "no_variation"
+    else:
+        group.relative_status = "available"
+
+    ranked: list[FacilityZone] = []
+    for score in sorted(by_score, reverse=True):
+        tied_rows = sorted(by_score[score], key=lambda row: row.dong_code)
+        rank = len(ranked) + 1
+        lower_count = count - len(ranked) - len(tied_rows)
+        percentile = (round(100 * (lower_count + len(tied_rows) / 2) / count, 1)
+                      if group.relative_status == "available" else None)
+        for row in tied_rows:
+            row.rank = rank
+            row.rank_tied = len(tied_rows) > 1
+            row.relative_percentile = percentile
+        ranked.extend(tied_rows)
+    return ranked
+
+
 def list_facility_zones(*, snapshot, zones, period, weekday, basis_id=None, compare_codes=()) -> FacilityZoneResponse:
     artifact, summaries = _prepared(snapshot)
     members, by_code = defaultdict(list), {}
@@ -66,7 +98,7 @@ def list_facility_zones(*, snapshot, zones, period, weekday, basis_id=None, comp
         row = FacilityZone(dong_code=code, dong_name=zone.dong_name, lat=zone.lat, lng=zone.lng, assessment=assessment)
         by_code[code] = row
         if (assessment.basis_id and assessment.evaluation_basis == "multi_factor"
-                and len(assessment.used_factors) >= 2 and assessment.score is not None):
+                and len(assessment.used_factors) >= 2 and assessment.score is not None and isfinite(assessment.score)):
             members[assessment.basis_id].append(row)
     groups = []
     for basis, rows in members.items():
@@ -83,14 +115,10 @@ def list_facility_zones(*, snapshot, zones, period, weekday, basis_id=None, comp
     if basis_id is not None and basis_id not in members:
         raise ComparisonBasisChanged(groups)
     selected = basis_id or (groups[0].basis_id if groups else None)
-    ranked = sorted(members.get(selected, []), key=lambda row: (-floor(row.assessment.score + .5), row.dong_code))
-    previous, rank = None, None
-    for index, row in enumerate(ranked, 1):
-        rounded = floor(row.assessment.score + .5)
-        if previous != rounded:
-            previous, rank = rounded, index
-        row.rank = rank
+    selected_group = next((group for group in groups if group.basis_id == selected), None)
+    ranked = _rank_group(members[selected_group.basis_id], selected_group) if selected_group else []
     remaining = sorted((row for row in by_code.values() if row.rank is None), key=lambda row: (row.dong_name, row.dong_code))
     return FacilityZoneResponse(status="available" if summaries else "pending", period=period, weekday=weekday,
         reference_hour=12 if period == "day" else 23, basis_id=selected, artifact_version=artifact.version if artifact else None,
+        relative_method="midrank-percentile-v1" if selected_group else None,
         groups=groups, zones=ranked + remaining, comparison=_compare(by_code, compare_codes) if len(compare_codes) >= 2 else None)

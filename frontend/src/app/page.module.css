@@ -247,6 +247,10 @@
   font-weight: 800;
 }
 
+.scoreRelative {
+  color: var(--text);
+}
+
 .scoreSafe {
   background: var(--safe-light);
   color: var(--safe);
@@ -302,6 +306,52 @@
 
 .mobileSelectedDetail {
   display: none;
+}
+
+.mobileSelectedDetail.facilitySelectedDetail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 10px 8px 0;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.facilitySelectedDetail > div:first-child,
+.facilitySelectedDetail .selectedDetailStats {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.facilitySelectedDetail > div:first-child span,
+.facilitySelectedDetail .selectedDetailStats,
+.facilityEvidence {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.facilitySelectedDetail .selectedDetailStats {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.facilityEvidence,
+.facilitySelectedDetail > a {
+  grid-column: 1 / -1;
+}
+
+.facilityEvidence p + p,
+.facilityEvidence details {
+  margin-top: 4px;
+}
+
+.facilityEvidence summary {
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .sheetSummary {
