@@ -4,7 +4,7 @@ ingest_public_data.py(동별 상점 수)와 facility_density.py(도로 구간 �
 OSM 상점은 사람이 지도에 직접 입력한 것이라 빠진 곳이 많아, 영업 중 상가 전수 데이터로 바꾼다.
 
 데이터 출처: 공공데이터포털 '소상공인시장진흥공단_상가(상권)정보'(분기 갱신, 전국 zip).
-받은 zip을 프로젝트 루트에 그대로 둔다 — 여러 개면 파일 이름순으로 마지막(최신) 것을 쓴다.
+받은 zip을 backend/data/raw/csv_files/에 그대로 둔다 — 여러 개면 파일 이름순으로 마지막(최신) 것을 쓴다.
 
 사용법 (backend 폴더에서):
     python scripts/extract_store_points.py
@@ -24,7 +24,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BACKEND_DIR = HERE.parent
-PROJECT_ROOT = BACKEND_DIR.parent
+# 내려받은 공공데이터 원본. backend/data/ 전체가 Git 제외 대상이며 외부로 유출하면 안 된다.
+RAW_DATA_DIR = BACKEND_DIR / "data" / "raw" / "csv_files"
 ZIP_GLOB = "소상공인시장진흥공단_상가(상권)정보_*.zip"
 OUTPUT_JSON = BACKEND_DIR / "data" / "osm" / "store_points.json"
 SIDOS = ("경기",)
@@ -64,9 +65,9 @@ def extract(rows) -> dict:
 
 
 def main() -> None:
-    zips = sorted(PROJECT_ROOT.glob(ZIP_GLOB))
+    zips = sorted(RAW_DATA_DIR.glob(ZIP_GLOB))
     if not zips:
-        raise SystemExit(f"프로젝트 루트에 {ZIP_GLOB} 파일이 없어요")
+        raise SystemExit(f"{RAW_DATA_DIR}에 {ZIP_GLOB} 파일이 없어요")
     source = zips[-1]
     points = {"stores": [], "convenience": [], "places": []}
     with zipfile.ZipFile(source, metadata_encoding="cp949") as archive:
