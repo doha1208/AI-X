@@ -19,7 +19,7 @@ def test_store_extraction_reads_only_gyeonggi_from_archive(tmp_path, monkeypatch
             writer.writerow({"상권업종대분류명": "소매", "상권업종소분류명": "편의점", "층정보": "1", "위도": lat, "경도": "127.0"})
             archive.writestr(f"상가_{region}_202606.csv", content.getvalue())
     output = tmp_path / "store_points.json"
-    monkeypatch.setattr(extract_store_points, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(extract_store_points, "RAW_DATA_DIR", tmp_path)
     monkeypatch.setattr(extract_store_points, "OUTPUT_JSON", output)
 
     extract_store_points.main()

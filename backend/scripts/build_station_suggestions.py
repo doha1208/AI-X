@@ -45,7 +45,8 @@ class _StationCollector(osmium.SimpleHandler):
 def collect_stations(source: Path, *, in_scope: Callable[[float, float], bool] | None = None) -> list[dict]:
     scope = in_scope or (lambda lat, lng: is_in_service_area(lat, lng, region_scope_prefix="41"))
     collector = _StationCollector(scope)
-    osmium.apply(os.path.relpath(source, start=os.getcwd()), collector)
+    # osmium.apply()는 Windows에서 프로세스 종료를 막는다 — handler.apply_file()은 정상 종료된다.
+    collector.apply_file(os.path.relpath(source, start=os.getcwd()))
     return sorted(collector.stations, key=lambda station: (station["name"], station["lat"], station["lng"]))
 
 

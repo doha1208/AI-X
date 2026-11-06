@@ -1,14 +1,14 @@
 """공공데이터(CCTV·보안등·구 단위 범죄통계)를 동 단위 안전 지수로 변환해 DB에 적재.
 
 데이터 출처:
-- CCTV: data.go.kr 전국CCTV표준데이터 (프로젝트 루트 CCTV정보.csv, "생활방범" 목적만 사용)
+- CCTV: data.go.kr 전국CCTV표준데이터 (backend/data/raw/csv_files/CCTV정보.csv, "생활방범" 목적만 사용)
 - 보안등: data.go.kr 전국보안등정보표준데이터 OpenAPI (SECURITY_LIGHT_API_KEY)
-- 범죄: data.go.kr 경찰청_범죄 발생 지역별 통계 (구 단위 5대 범죄 합계, 프로젝트 루트 CSV)
+- 범죄: data.go.kr 경찰청_범죄 발생 지역별 통계 (구 단위 5대 범죄 합계, backend/data/raw/csv_files/ CSV)
 - 경찰서·상점: OSM에서 extract_safety_pois.py로 미리 뽑은 data/osm/safety_pois.json
-- 안전비상벨: data.go.kr 전국안전비상벨위치표준데이터 (프로젝트 루트 안전비상벨위치정보.csv)
-- 교통사고 다발지역: data.go.kr 전국교통사고다발지역표준데이터 (프로젝트 루트 전국교통사고다발지역표준데이터.csv)
+- 안전비상벨: data.go.kr 전국안전비상벨위치표준데이터 (backend/data/raw/csv_files/안전비상벨위치정보.csv)
+- 교통사고 다발지역: data.go.kr 전국교통사고다발지역표준데이터 (backend/data/raw/csv_files/전국교통사고다발지역표준데이터.csv)
 - 인구: jumin.mois.go.kr 주민등록 인구 및 세대현황(월간, 범죄 통계와 같은 연도의 서울·경기
-  시군구; 프로젝트 루트 *주민등록인구및세대현황*.csv) — 범죄 건수를 1만 명당 범죄율로 보정
+  시군구; backend/data/raw/csv_files/*주민등록인구및세대현황*.csv) — 범죄 건수를 1만 명당 범죄율로 보정
 - 좌표→행정동 변환: build_dong_grid.py로 미리 만든 격자 캐시(app/data/dong_grid.json)
 
 ponytail: 범죄 통계는 구 단위가 공개 최소 단위라 같은 구의 모든 동이 범죄
@@ -55,17 +55,18 @@ from app.services.dong_area import estimate_dong_areas_km2
 
 HERE = Path(__file__).resolve().parent
 BACKEND_DIR = HERE.parent
-PROJECT_ROOT = BACKEND_DIR.parent
+# 내려받은 공공데이터 원본. backend/data/ 전체가 Git 제외 대상이며 외부로 유출하면 안 된다.
+RAW_DATA_DIR = BACKEND_DIR / "data" / "raw" / "csv_files"
 
-CCTV_CSV = PROJECT_ROOT / "CCTV정보.csv"
-BELL_CSV = PROJECT_ROOT / "안전비상벨위치정보.csv"
-ACCIDENT_CSV = PROJECT_ROOT / "전국교통사고다발지역표준데이터.csv"
+CCTV_CSV = RAW_DATA_DIR / "CCTV정보.csv"
+BELL_CSV = RAW_DATA_DIR / "안전비상벨위치정보.csv"
+ACCIDENT_CSV = RAW_DATA_DIR / "전국교통사고다발지역표준데이터.csv"
 ACCIDENT_RECENT_YEARS = 3  # 최신 사고연도 포함 최근 몇 년치 다발지역만 쓸지
-# 경기데이터드림 '유동인구_행정동 단위 집계' File 탭의 월별 zip(KT 통신 데이터). 프로젝트 루트에 둔다.
+# 경기데이터드림 '유동인구_행정동 단위 집계' File 탭의 월별 zip(KT 통신 데이터). RAW_DATA_DIR에 둔다.
 # 참여한 시·군(2026년 기준 16곳)만 들어 있다 — 나머지 동은 이 요소 없이 점수를 계산한다.
 FLOWPOP_ZIP_GLOB = "유동인구_행정동 단위 집계_*.zip"
 NIGHT_HOURS = {22, 23, 0, 1, 2, 3, 4, 5}
-CRIME_CSV = PROJECT_ROOT / "경찰청_범죄 발생 지역별 통계_20241231.csv"
+CRIME_CSV = RAW_DATA_DIR / "경찰청_범죄 발생 지역별 통계_20241231.csv"
 # 경기데이터드림 행정동 단위 시간대별 유동인구(구 단위로 합쳐 등록인구 대신/대체로 쓴다).
 GRID_PATH = BACKEND_DIR / "app" / "data" / "dong_grid.json"
 ENV_PATH = BACKEND_DIR / ".env"
@@ -389,16 +390,16 @@ def add_poi_factors(records: list[dict], step: float, cells: dict, bbox) -> None
 
 
 def load_population() -> dict[str, float]:
-    """프로젝트 루트의 주민등록 인구 및 세대현황 CSV(jumin.mois.go.kr, 월간, 시군구)를 모두 합친다.
+    """RAW_DATA_DIR의 주민등록 인구 및 세대현황 CSV(jumin.mois.go.kr, 월간, 시군구)를 모두 합친다.
 
     서울과 경기를 따로 내려받아도, 전국을 한 번에 받아도 된다. 같은 지역이 여러 파일에 있으면
     파일 이름 순으로 나중 것이 이긴다.
     """
-    files = sorted(PROJECT_ROOT.glob("*주민등록인구및세대현황*.csv"))
+    files = sorted(RAW_DATA_DIR.glob("*주민등록인구및세대현황*.csv"))
     if not files:
         raise RuntimeError(
             "주민등록 인구 CSV 없음 — jumin.mois.go.kr에서 서울·경기 시군구 인구(범죄 통계와 같은 연도)를 "
-            f"받아 {PROJECT_ROOT}에 두세요."
+            f"받아 {RAW_DATA_DIR}에 두세요."
         )
     population: dict[str, float] = {}
     for path in files:
@@ -434,7 +435,7 @@ def parse_night_floating_population(zip_paths: list[Path]) -> dict[str, float]:
 
 
 def add_night_floating_pop(records: list[dict]) -> None:
-    zips = sorted(PROJECT_ROOT.glob(FLOWPOP_ZIP_GLOB))
+    zips = sorted(RAW_DATA_DIR.glob(FLOWPOP_ZIP_GLOB))
     by_dong = parse_night_floating_population(zips) if zips else {}
     for record in records:
         record["night_floating_pop"] = by_dong.get(record["dong_code"])  # 없는 시·군은 None(계산에서 제외)
