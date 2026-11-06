@@ -26,7 +26,7 @@ import { AdaptiveBottomSheet } from "@/components/AdaptiveBottomSheet";
 import { SafetyMap, type SafetyMapHandle } from "@/components/SafetyMap";
 import { FacilityBasisPicker } from "@/components/FacilityBasisPicker";
 import { useFacilityZones } from "@/lib/useFacilityZones";
-import { zoneDisplay, type DisplayZone } from "@/lib/zoneDisplay";
+import { FACILITY_PERCENTILE_CUTOFFS, facilityAccessScore, facilityRankLabel, factorNames, residenceZoneDisplay, restoreLegacyFacilityPercentiles, zoneDisplayColor, type DisplayZone, type ZoneDisplayValue } from "@/lib/zoneDisplay";
 import { MapContextMenu, MapControls, MapLegend, useMapContextMenu } from "@/components/MapOverlays";
 import { withSearch } from "@/components/WithSearch";
 import { AlertIcon, CloseIcon, LocateIcon, MapPinIcon, SearchIcon } from "@/components/icons";
@@ -45,11 +45,16 @@ const SAFETY_LEGEND = [
   { label: "참고 점수 낮음 (0~39)", swatch: "dot" as const, color: "var(--warning)" },
 ];
 
+const FACILITY_DATA_LEGEND = [
+  { label: "종합 자료 있음 · 상대 비교 제외", swatch: "dot" as const, color: zoneDisplayColor(null, "facility_access", true) },
+  { label: "단일 지표 · 부분자료 · 미확인", swatch: "dot" as const, color: zoneDisplayColor(null) },
+];
+
 const FACILITY_LEGEND = [
-  { label: "시설 접근성 높음 (70~100)", swatch: "dot" as const, color: "var(--safe)" },
-  { label: "시설 접근성 중간 (40~69)", swatch: "dot" as const, color: "var(--caution)" },
-  { label: "시설 접근성 낮음 (0~39)", swatch: "dot" as const, color: "var(--warning)" },
-  { label: "단일 참고 · 부분자료 · 미확인", swatch: "dot" as const, color: "#64748b" },
+  { label: `상위권 (백분위 ${FACILITY_PERCENTILE_CUTOFFS.high} 이상)`, swatch: "dot" as const, color: zoneDisplayColor(FACILITY_PERCENTILE_CUTOFFS.high, "facility_access") },
+  { label: `중간권 (백분위 ${FACILITY_PERCENTILE_CUTOFFS.middle} 이상 ${FACILITY_PERCENTILE_CUTOFFS.high} 미만)`, swatch: "dot" as const, color: zoneDisplayColor(FACILITY_PERCENTILE_CUTOFFS.middle, "facility_access") },
+  { label: `하위권 (백분위 ${FACILITY_PERCENTILE_CUTOFFS.middle} 미만)`, swatch: "dot" as const, color: zoneDisplayColor(0, "facility_access") },
+  ...FACILITY_DATA_LEGEND,
 ];
 
 function scoreTone(score: number | null): string {
@@ -59,8 +64,19 @@ function scoreTone(score: number | null): string {
   return styles.scoreWarning;
 }
 
+function ScoreBadge({ display, metric }: { display: ZoneDisplayValue; metric: DisplayMetric }) {
+  const facilityColor = metric === "facility_access" && (display.value != null || display.hasFacilityScore)
+    ? zoneDisplayColor(display.value, metric, display.hasFacilityScore) : null;
+  return (
+    <span className={`${styles.scoreBadge} ${facilityColor ? styles.scoreRelative : scoreTone(display.value)}`}
+      style={facilityColor ? { backgroundColor: `color-mix(in srgb, ${facilityColor} 19%, white)` } : undefined}>
+      {display.text}
+    </span>
+  );
+}
+
 type Nearby = { place: Place; zones: SafetyZone[] };
-type ResidenceZone = DisplayZone & { period?: RoutePeriod; rank?: number | null };
+type ResidenceZone = DisplayZone & { period?: RoutePeriod };
 
 export default withSearch(ResidencePage);
 
@@ -86,7 +102,8 @@ function ResidencePage({ search }: { search: string }) {
   const [facilityBasis, setFacilityBasis] = useState<string | undefined>();
   const facilityMode = metric === "facility_access";
   const facilityQuery = useFacilityZones(facilityMode, facilityPeriod, facilityBasis);
-  const facilityReport = facilityQuery?.report;
+  const rawFacilityReport = facilityQuery?.report;
+  const facilityReport = useMemo(() => rawFacilityReport && restoreLegacyFacilityPercentiles(rawFacilityReport), [rawFacilityReport]);
   const [watched, setWatched] = useState<WatchedZone[]>(loadWatchedZones);
   // 관심 동네 점수가 바뀌었을 때 바로 보여주는 배너 문구(닫으면 사라진다).
   const [scoreAlerts, setScoreAlerts] = useState<{ metric: DisplayMetric; text: string }[]>([]);
@@ -206,21 +223,35 @@ function ResidencePage({ search }: { search: string }) {
         : (allRanking ?? []),
     [facilityMode, facilityReport, showingNearby, nearby, allRanking]
   );
-  const markers = useMemo(() => facilityMode ? ranking.filter(zone => zone.rank != null).slice(0, TOP_ALL) : ranking, [facilityMode, ranking]);
+  const selectedGroup = facilityReport?.groups.find(group => group.basis_id === facilityReport.basis_id);
+  const markers = useMemo(() => facilityMode
+    ? ranking.filter(zone => facilityRankLabel(zone, selectedGroup) != null).slice(0, TOP_ALL)
+    : ranking, [facilityMode, ranking, selectedGroup]);
   const mapZones: ResidenceZone[] = facilityMode ? facilityReport?.zones ?? ranking : showingNearby ? nearby.zones : ranking;
   const selectedZone = mapZones.find(zone => zone.dong_code === selectedCode) ?? null;
   const firstZone = selectedZone ?? ranking[0];
   const shownAlerts = scoreAlerts.filter(alert => alert.metric === metric);
-  const selectedGroup = facilityReport?.groups.find(group => group.basis_id === facilityReport.basis_id);
-  const legend = facilityMode ? FACILITY_LEGEND : SAFETY_LEGEND;
-  const legendTitle = facilityMode ? "시설 접근성" : "지역 통계 지수";
+  const relativeStatus = selectedGroup?.relative_status;
+  const relativeUnavailable = relativeStatus === "insufficient_group" ? "상대 비교 표본 부족"
+    : relativeStatus === "no_variation" ? "집단 내 점수 차이 없음" : null;
 
   if (!user) return null;
   const loadingList = facilityMode ? facilityQuery === null : showingNearby ? searching : allRanking === null;
-  const selectedRank = facilityMode ? selectedZone?.rank ?? 0 : selectedZone ? ranking.findIndex(zone => zone.dong_code === selectedZone.dong_code) + 1 : 0;
+  const regionalRank = selectedZone ? ranking.findIndex(zone => zone.dong_code === selectedZone.dong_code) + 1 : 0;
   const currentPeriod = firstZone?.period;
-  const firstDisplay = firstZone && zoneDisplay(firstZone, metric);
-  const selectedDisplay = selectedZone && zoneDisplay(selectedZone, metric);
+  const firstDisplay = firstZone && residenceZoneDisplay(firstZone, metric, selectedGroup);
+  const selectedDisplay = selectedZone && residenceZoneDisplay(selectedZone, metric, selectedGroup);
+  const selectedRankLabel = facilityMode && selectedZone ? facilityRankLabel(selectedZone, selectedGroup)
+    : regionalRank > 0 ? `${showingNearby ? "주변" : "전체"} ${regionalRank}위` : null;
+  const selectedAssessment = facilityMode ? selectedZone?.assessment : undefined;
+  const selectedScore = facilityMode && selectedZone ? facilityAccessScore(selectedZone) : null;
+  const accessEvidence = selectedAssessment && selectedScore != null && (
+    <>
+      <p>지표별 시설 인접 비율 평균 {selectedScore.toFixed(0)}%</p>
+      <p>{selectedAssessment.used_factors.filter(factor => factor in selectedAssessment.factor_coverage)
+        .map(factor => `${factorNames([factor])} ${(selectedAssessment.factor_coverage[factor] * 100).toFixed(0)}%`).join(" · ")}</p>
+    </>
+  );
   const compareQuery = new URLSearchParams({ metric });
   if (facilityMode && facilityReport) compareQuery.set("period", facilityReport.period);
   if (facilityMode && facilityReport?.basis_id) compareQuery.set("basis", facilityReport.basis_id);
@@ -233,6 +264,7 @@ function ResidencePage({ search }: { search: string }) {
           zones={mapZones}
           rankedZones={markers}
           displayMetric={metric}
+          facilityGroup={selectedGroup}
           bells={settings.showBells ? bells : undefined}
           center={location ?? undefined}
           myLocation={location ?? undefined}
@@ -319,11 +351,7 @@ function ResidencePage({ search }: { search: string }) {
                 <span>{facilityMode ? "보행 시설 접근성" : showingNearby ? "내 주변 지역 통계" : "전체 지역 통계"}</span>
                 <strong>{firstZone?.dong_name ?? "동네 정보"}</strong>
               </div>
-              {firstDisplay && (
-                <span className={`${styles.scoreBadge} ${scoreTone(firstDisplay.value)}`}>
-                  {firstDisplay.text}
-                </span>
-              )}
+              {firstDisplay && <ScoreBadge display={firstDisplay} metric={metric} />}
             </div>
           }
         >
@@ -337,7 +365,9 @@ function ResidencePage({ search }: { search: string }) {
             </label>
             <p className={styles.panelSub}>
               {facilityMode
-                ? selectedGroup ? `동일 지표 비교 ${selectedGroup.zone_count}개 동에만 순위를 표시해요.` : "같은 지표로 평가된 동네에만 순위를 표시해요."
+                ? relativeStatus === "available"
+                  ? "백분위는 같은 지표로 평가한 동네 사이에서의 위치예요. 시설 인접 비율은 평가 상세에서 볼 수 있어요."
+                  : "같은 지표로 평가된 동네끼리 비교해요."
                 : showingNearby
                 ? `${nearby.place.label} 반경 ${NEARBY_RADIUS_KM}km의 공개 데이터 상대 점수`
                 : `공개 데이터 상대 점수 상위 ${TOP_ALL}곳`}
@@ -348,21 +378,29 @@ function ResidencePage({ search }: { search: string }) {
             {facilityMode && <FacilityBasisPicker period={facilityPeriod} basisId={facilityBasis}
               report={facilityReport} changedGroups={facilityQuery?.groups}
               onPeriod={value => { setFacilityPeriod(value); setFacilityBasis(undefined); }} onBasis={setFacilityBasis} />}
+            {relativeUnavailable && <p className={styles.panelSub}>{relativeUnavailable}</p>}
             {facilityMode && facilityReport?.status === "pending" && <p className={styles.panelSub}>동네 시설 평가 자료를 준비 중이에요.</p>}
           </header>
 
-          {selectedZone && (
-            <section className={styles.mobileSelectedDetail} aria-label="선택 안전구역 상세">
+          {selectedZone && selectedDisplay && (
+            <section className={`${styles.mobileSelectedDetail} ${facilityMode ? styles.facilitySelectedDetail : ""}`} aria-label="선택 안전구역 상세">
               <div>
                 <span>선택 안전구역</span>
                 <strong>{selectedZone.dong_name}</strong>
               </div>
               <div className={styles.selectedDetailStats}>
-                <span className={`${styles.scoreBadge} ${scoreTone(selectedDisplay?.value ?? null)}`}>
-                  {selectedDisplay?.text}
-                </span>
-                {selectedRank > 0 && <span>{facilityMode ? `동일 지표 비교 ${selectedGroup?.zone_count}개 동 중` : showingNearby ? "주변" : "전체"} {selectedRank}위</span>}
+                <ScoreBadge display={selectedDisplay} metric={metric} />
+                {selectedRankLabel && <span>{selectedRankLabel}</span>}
               </div>
+              {selectedAssessment && facilityReport && (
+                <div className={styles.facilityEvidence}>
+                  <p>{[factorNames(selectedAssessment.used_factors), `${facilityReport.reference_hour}:00 기준`].filter(Boolean).join(" · ")}</p>
+                  {relativeUnavailable && selectedAssessment.basis_id === selectedGroup?.basis_id && <p>{relativeUnavailable}</p>}
+                  {accessEvidence && (selectedDisplay.value != null
+                    ? <details><summary>평가 상세</summary>{accessEvidence}</details>
+                    : accessEvidence)}
+                </div>
+              )}
               <Link
                 className={styles.footerButton}
                 href={`/report?${placeQuery("at", { lat: selectedZone.lat, lng: selectedZone.lng, label: selectedZone.dong_name })}`}
@@ -383,8 +421,9 @@ function ResidencePage({ search }: { search: string }) {
               {ranking.map((zone, i) => {
                 const saved = watched.find(w => w.dong_code === zone.dong_code);
                 const isWatched = saved !== undefined;
-                const rank = facilityMode ? zone.rank : i + 1;
-                const display = zoneDisplay(zone, metric);
+                const rankLabel = facilityMode ? facilityRankLabel(zone, selectedGroup) : `${i + 1}위`;
+                const rank = facilityMode ? rankLabel ? zone.rank : null : i + 1;
+                const display = residenceZoneDisplay(zone, metric, selectedGroup);
                 return (
                   <li key={zone.dong_code} className={styles.rankRow}>
                     <button
@@ -396,11 +435,9 @@ function ResidencePage({ search }: { search: string }) {
                       }}
                     >
                       <span className={`${styles.rankNumber} ${rank === 1 ? styles.rankFirst : ""}`}
-                        aria-label={rank == null ? "순위 없음" : facilityMode ? `동일 지표 비교 ${selectedGroup?.zone_count}개 동 중 ${rank}위` : `${rank}위`}>{rank ?? "–"}</span>
+                        aria-label={rankLabel ?? "순위 없음"} title={facilityMode ? rankLabel ?? undefined : undefined}>{rank ?? "–"}</span>
                       <span className={styles.rankName}>{zone.dong_name}</span>
-                      <span className={`${styles.scoreBadge} ${scoreTone(display.value)}`}>
-                        {display.text}
-                      </span>
+                      <ScoreBadge display={display} metric={metric} />
                     </button>
                     <button
                       type="button"
@@ -444,7 +481,11 @@ function ResidencePage({ search }: { search: string }) {
               </button>
             )}
           </footer>
-          <MapLegend className={styles.mobileLegend} title={legendTitle} items={legend} />
+          {facilityMode ? (
+            facilityReport && <MapLegend className={styles.mobileLegend}
+              title={relativeStatus === "available" ? "집단 내 상대 위치" : "시설 자료 표시"}
+              items={relativeStatus === "available" ? FACILITY_LEGEND : FACILITY_DATA_LEGEND} />
+          ) : <MapLegend className={styles.mobileLegend} title="지역 통계 지수" items={SAFETY_LEGEND} />}
         </AdaptiveBottomSheet>
         </div>
 

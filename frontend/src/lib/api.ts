@@ -137,9 +137,17 @@ export type FacilityZoneAssessment = {
 export type FacilityZone = ZoneLocation & {
   assessment: FacilityZoneAssessment;
   rank: number | null;
+  rank_tied?: boolean;
+  relative_percentile?: number | null;
   result_group_id: string | null;
 };
-export type FacilityBasisGroup = { basis_id: string; result_group_id: string; used_factors: string[]; zone_count: number };
+export type FacilityBasisGroup = {
+  basis_id: string;
+  result_group_id: string;
+  used_factors: string[];
+  zone_count: number;
+  relative_status?: "available" | "insufficient_group" | "no_variation" | null;
+};
 export type FacilityZoneComparison = {
   dong_codes: string[];
   used_factors: string[];
@@ -153,6 +161,7 @@ export type FacilityZoneResponse = {
   reference_hour: number;
   basis_id: string | null;
   artifact_version: string | null;
+  relative_method?: "midrank-percentile-v1" | null;
   groups: FacilityBasisGroup[];
   zones: FacilityZone[];
   comparison: FacilityZoneComparison | null;
